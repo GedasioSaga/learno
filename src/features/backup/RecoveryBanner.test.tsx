@@ -72,6 +72,25 @@ describe("RecoveryBanner", () => {
     expect(clearMock).toHaveBeenCalledWith("page-1");
   });
 
+  it("quando onRestore rejeita, o rascunho continua no diário em vez de ser descartado", async () => {
+    const user = userEvent.setup();
+    listMock.mockResolvedValue([entry]);
+    mergeMock.mockResolvedValue(entry);
+    const onRestore = vi.fn().mockRejectedValue(new Error("falha ao restaurar"));
+
+    render(<RecoveryBanner onRestore={onRestore} />);
+    await screen.findByText("Notas de Aula");
+
+    await user.click(screen.getByRole("button", { name: "Recuperar" }));
+
+    expect(onRestore).toHaveBeenCalledWith(entry);
+    // A falha em `onRestore` (ex.: `rename` rejeitando) não pode apagar a
+    // única cópia do rascunho não salvo — `dismiss`/`autosaveClearPending`
+    // só roda depois que `onRestore` de fato resolve.
+    expect(clearMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Notas de Aula")).toBeInTheDocument();
+  });
+
   it("clicar em Descartar remove o aviso sem chamar onRestore", async () => {
     const user = userEvent.setup();
     listMock.mockResolvedValue([entry]);

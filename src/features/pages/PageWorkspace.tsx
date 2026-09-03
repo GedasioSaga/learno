@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { EmptyState } from "../../components/EmptyState";
 import { createPageVersionSnapshot } from "../../lib/ipc";
-import { ExportMarkdownButton } from "../backup";
+import { ExportMarkdownButton, useAutosaveDraft } from "../backup";
 import { VersionHistoryDialog } from "../history";
 import { Breadcrumb } from "./Breadcrumb";
 import { EmojiIconPicker } from "./EmojiIconPicker";
@@ -66,6 +66,11 @@ export function PageWorkspace({ pageId }: PageWorkspaceProps) {
   const setFavorite = usePageTreeStore((state) => state.setFavorite);
   const rename = usePageTreeStore((state) => state.rename);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // PLT-005: the title is the only editable surface Phase 1 has (the block
+  // editor is Phase 2) — `saveDraft` writes a draft to disk on every
+  // keystroke, `clearDraft` only erases it once `rename` confirms the title
+  // actually reached Postgres.
+  const { saveDraft, clearDraft } = useAutosaveDraft(pageId);
 
   usePeriodicVersionSnapshot(pageId, page?.title);
 
@@ -90,8 +95,26 @@ export function PageWorkspace({ pageId }: PageWorkspaceProps) {
           />
           <TitleField
             title={page.title}
+            onDraftChange={(title) => saveDraft(title, { title })}
             onCommit={(title) => {
-              if (title !== page.title) void rename(page.id, title);
+              if (title !== page.title) {
+                void rename(page.id, title).then(
+                  () => {
+                    // Only erase the draft once the title is actually
+                    // confirmed in Postgres — if `rename` fails, the draft
+                    // stays on disk as the safety net for the next recovery
+                    // (see `RecoveryBanner`).
+                    void clearDraft().catch(() => undefined);
+                  },
+                  () => undefined,
+                );
+              } else {
+                // Nothing changed (e.g. the user typed something then
+                // undid it before leaving the field) — any pending draft
+                // already matches what's saved, so there's no reason to
+                // keep it around until the next crash.
+                void clearDraft().catch(() => undefined);
+              }
             }}
           />
           <button
@@ -133,7 +156,21 @@ export function PageWorkspace({ pageId }: PageWorkspaceProps) {
   );
 }
 
-function TitleField({ title, onCommit }: { title: string; onCommit: (title: string) => void }) {
+/**
+ * `onDraftChange` fires on every keystroke (PLT-005 debounces internally in
+ * `useAutosaveDraft`); `onCommit` only fires when the field is left — two
+ * deliberately different paths: one guards against a crash while the user
+ * is still editing, the other is what actually persists to Postgres.
+ */
+function TitleField({
+  title,
+  onDraftChange,
+  onCommit,
+}: {
+  title: string;
+  onDraftChange: (title: string) => void;
+  onCommit: (title: string) => void;
+}) {
   const [draft, setDraft] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -152,7 +189,11 @@ function TitleField({ title, onCommit }: { title: string; onCommit: (title: stri
     <input
       ref={inputRef}
       value={draft}
-      onChange={(event) => setDraft(event.currentTarget.value)}
+      onChange={(event) => {
+        const value = event.currentTarget.value;
+        setDraft(value);
+        onDraftChange(value);
+      }}
       onBlur={() => onCommit(draft)}
       onKeyDown={handleKeyDown}
       placeholder="Sem título"

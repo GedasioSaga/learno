@@ -402,9 +402,47 @@ export interface IntegrityReport {
  * achar nada: `total_repaired: 0` é um resultado válido, não um erro — a
  * mesma distinção que `checkStatus`/`summarize` em `CheckDatabaseSection`
  * fazem visível ao usuário.
+ *
+ * PLT-013: "Check Database" é um dos dois gatilhos de operação de risco que
+ * já têm código real por trás (o reparo apaga linha) — `password` existe só
+ * para que o backend consiga fazer uma cópia de segurança antes de reparar,
+ * nunca persistida, igual a `createBackup`/`restoreBackup` acima. Se o
+ * backup em si falhar (pg_dump ausente, disco cheio), o reparo nem chega a
+ * rodar — o erro que volta aqui já descreve o motivo.
  */
-export function checkDatabase(): Promise<IntegrityReport> {
-  return call<IntegrityReport>("check_database");
+export function checkDatabase(password: string): Promise<IntegrityReport> {
+  return call<IntegrityReport>("check_database", { password });
+}
+
+/**
+ * Espelha `ApkgImportResult` em `src-tauri/src/ipc/commands.rs`. Nesta fase
+ * (PLT-004) o sidecar Python só valida o `.apkg` como zip e responde — ler
+ * as notas de dentro dele de verdade é Fase 4 — por isso `notes_imported`
+ * sempre chega `0` por enquanto. O tipo já espelha o formato final para não
+ * precisar mudar nada aqui quando a leitura real for implementada.
+ */
+export interface ApkgImportResult {
+  notes_imported: number;
+}
+
+/**
+ * PLT-004: envia `path` (de um `.apkg` já escolhido pelo usuário via
+ * `@tauri-apps/plugin-dialog`) ao sidecar Python e espera o resultado.
+ * Rejeita com `AppError` de `kind: "invalid"` (caminho vazio) ou
+ * `kind: "sidecar"` (sidecar não encontrado, não respondeu a tempo, ou
+ * morreu no meio) — nunca uma exceção não tratada, conforme o critério de
+ * aceite de PLT-004.
+ *
+ * PLT-013: import de baralho é o outro gatilho de operação de risco com
+ * código real por trás — um import pode sobrescrever cartões existentes.
+ * `password` segue a mesma regra de `checkDatabase`/`createBackup`: nunca
+ * persistida, só usada para o backup automático que roda antes do sidecar
+ * ser chamado. Um backup que falhar aborta o import inteiro — o `kind` do
+ * erro (`"config"` para `pg_dump` ausente, `"invalid"` para disco cheio ou
+ * timeout) chega aqui igual a qualquer outro erro deste módulo.
+ */
+export function importApkg(path: string, password: string): Promise<ApkgImportResult> {
+  return call<ApkgImportResult>("import_apkg", { path, password });
 }
 
 /**

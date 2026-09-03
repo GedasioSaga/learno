@@ -4,6 +4,7 @@ import { AppShell } from "./components/AppShell";
 import { EmptyState } from "./components/EmptyState";
 import { FirstRunWizard } from "./components/FirstRunWizard";
 import { BackupSettings, RecoveryBanner } from "./features/backup";
+import { ImportApkgSection } from "./features/import";
 import { CheckDatabaseSection } from "./features/integrity";
 import { SearchPalette } from "./features/search";
 import { PageTree } from "./features/pages/PageTree";
@@ -117,6 +118,7 @@ function App() {
 function Workspace() {
   const selectedPageId = usePageTreeStore((state) => state.selectedPageId);
   const selectPage = usePageTreeStore((state) => state.selectPage);
+  const rename = usePageTreeStore((state) => state.rename);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const settingsDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -134,13 +136,23 @@ function Workspace() {
 
   return (
     <>
-      {/* PLT-005: único lugar do app que efetivamente mostra um rascunho
-          recuperado ao usuário — sem isto, `useAutosaveRecovery` nunca é
-          chamado e o recurso, embora funcional em `backup::autosave`, é
-          inalcançável pela UI. Restaurar aqui só navega até a página: o
-          editor de blocos que reaplicaria `entry.content` de fato é de outra
-          parte do Learno (ver o placeholder em `PageWorkspace`). */}
-      <RecoveryBanner onRestore={(entry) => selectPage(entry.page_id)} />
+      {/* PLT-005: the only place in the app that actually shows a recovered
+          draft to the user — without this, `useAutosaveRecovery` is never
+          called and the feature, though functional in `backup::autosave`,
+          is unreachable from the UI. Restoring navigates to the page AND
+          writes `entry.title` back via `rename`: in Phase 1 the title is
+          the only editable surface that exists (see the placeholder in
+          `PageWorkspace`), so it — not a block editor that doesn't exist
+          yet — is what needs to come back on reopening after a crash.
+          `rename` rejecting propagates from here into `RecoveryBanner`'s
+          `onClick`, which is why it keeps the draft on disk instead of
+          discarding it. */}
+      <RecoveryBanner
+        onRestore={(entry) => {
+          selectPage(entry.page_id);
+          return rename(entry.page_id, entry.title);
+        }}
+      />
       <AppShell sidebar={<PageTree />}>
         {selectedPageId ? (
           <PageWorkspace pageId={selectedPageId} />
@@ -199,6 +211,18 @@ function Workspace() {
           <h2 className="font-display text-lg text-ink">Verificar banco de dados</h2>
           <div className="mt-4">
             <CheckDatabaseSection />
+          </div>
+        </div>
+
+        {/* PLT-004: único ponto de entrada real do import de `.apkg` — sem
+            isto, `import_apkg` (comprovadamente funcional contra o sidecar
+            Python empacotado) não tinha seletor de arquivo nem botão que o
+            alcançasse a partir da UI; um grep por "apkg" em `src/` não
+            achava nada além deste comentário. */}
+        <div className="mt-6 border-t border-border pt-6">
+          <h2 className="font-display text-lg text-ink">Importar do Anki</h2>
+          <div className="mt-4">
+            <ImportApkgSection />
           </div>
         </div>
       </dialog>

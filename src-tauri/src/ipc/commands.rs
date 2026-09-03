@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
+use crate::backup::{trigger_risky_operation_backup, ScheduleConfig};
 use crate::config::{self, AppConfig, ConnectionTestInput};
 use crate::db::{
     IntegrityReport, IntegrityRepository, PageRepository, PageRow, PageVersionRepository,
@@ -17,6 +18,7 @@ use crate::db::{
     DEFAULT_RESULT_LIMIT,
 };
 use crate::error::{Error, Result};
+use crate::ipc::backup_commands;
 use crate::ipc::state::AppState;
 
 /// O que a UI recebe quando um import de `.apkg` termina com sucesso.
@@ -28,7 +30,7 @@ use crate::ipc::state::AppState;
 /// (`sidecar/learno_sidecar/handlers/apkg.py`) só prova a ponte: sempre
 /// devolve `notes_imported: 0`. Ler o `.apkg` de verdade e contar as notas é
 /// Fase 4.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ApkgImportResult {
     pub notes_imported: u32,
 }
@@ -225,15 +227,58 @@ fn connection_failure_is_credential_related(error: &sqlx::Error) -> bool {
 /// `SidecarProcess::call`/`await_response` — este comando só valida a entrada
 /// e propaga o que a ponte devolver, exatamente como `search_pages_inner`
 /// propaga o que `SearchRepository` devolve.
+///
+/// PLT-013: import de baralho é um dos dois gatilhos de operação de risco
+/// que já têm código real por trás (o outro é `check_database` abaixo) — um
+/// `.apkg` malformado ou um import repetido pode sobrescrever cartões que já
+/// existiam. `password` só existe para isso: resolve `backup_dir`/
+/// `manifest_path`/`schedule_config` aqui (a única camada com um `AppHandle`
+/// de verdade) e entrega prontos a `import_apkg_inner`, que fica testável
+/// sem `AppHandle` — mesmo desenho de `connect_database`/
+/// `connect_database_and_wire_state` acima.
 #[tauri::command]
-pub async fn import_apkg(state: State<'_, AppState>, path: String) -> Result<ApkgImportResult> {
-    import_apkg_inner(&state, path).await
+pub async fn import_apkg(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    password: String,
+) -> Result<ApkgImportResult> {
+    let schedule_config = backup_commands::get_backup_schedule_config(app.clone()).await?;
+    let backup_dir = backup_commands::backup_root_dir(&app)?;
+    let manifest_path = backup_commands::schedule_manifest_path(&app)?;
+    import_apkg_inner(&state, path, &password, &backup_dir, &manifest_path, &schedule_config).await
 }
 
-async fn import_apkg_inner(state: &AppState, path: String) -> Result<ApkgImportResult> {
+/// The testable core of [`import_apkg`]. `backup_dir`/`manifest_path`/
+/// `schedule_config` arrive already resolved (never an `AppHandle`) for the
+/// same reason `connect_database_and_wire_state` takes `backup_dir` instead
+/// of resolving it itself — see that function's doc comment.
+///
+/// Order matters: the empty-path check runs first (so a call with nothing to
+/// import never touches Postgres or the filesystem at all, same as before
+/// this change), but everything past it — including the backup — now runs
+/// *before* the sidecar call, never after. A backup that failed silently
+/// would be worse than no backup (the user would act believing a safety net
+/// exists), so `?` here means a failed backup aborts the import outright;
+/// [`dump::run_backup`](crate::backup::dump::run_backup)'s own error
+/// messages already say why (`pg_dump` missing from PATH, disk full, the
+/// process timing out) and reach the user unchanged through `Result`'s
+/// normal IPC path — nothing here needs to invent a second explanation.
+async fn import_apkg_inner(
+    state: &AppState,
+    path: String,
+    password: &str,
+    backup_dir: &Path,
+    manifest_path: &Path,
+    schedule_config: &ScheduleConfig,
+) -> Result<ApkgImportResult> {
     if path.trim().is_empty() {
         return Err(Error::Invalid("caminho do arquivo .apkg está vazio".into()));
     }
+
+    let config = backup_commands::require_config(state)?;
+    trigger_risky_operation_backup(&config, password, backup_dir, manifest_path, schedule_config, "import_apkg")
+        .await?;
 
     state
         .sidecar()?
@@ -527,12 +572,46 @@ async fn search_pages_inner(state: &AppState, query: &str) -> Result<Vec<SearchR
 /// `generate_handler!` list for any button to call, so no user action could
 /// ever reach it. This is that missing wire, mirroring every other
 /// repository command's `state.pool()` → repository → delegate shape.
+///
+/// PLT-013: the repair half of `check_and_repair` deletes rows (orphaned
+/// cards) — exactly the kind of change PLT-013's risky-operation trigger
+/// exists for, so `password` is new here purely to make that backup
+/// possible (the app never persists one — see `AppState`'s doc comment).
+/// Same split as `import_apkg` right above: this wrapper is the only place
+/// with a real `AppHandle`, so it resolves `backup_dir`/`manifest_path`/
+/// `schedule_config` and hands them to `check_database_inner` already built.
 #[tauri::command]
-pub async fn check_database(state: State<'_, AppState>) -> Result<IntegrityReport> {
-    check_database_inner(&state).await
+pub async fn check_database(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<IntegrityReport> {
+    let schedule_config = backup_commands::get_backup_schedule_config(app.clone()).await?;
+    let backup_dir = backup_commands::backup_root_dir(&app)?;
+    let manifest_path = backup_commands::schedule_manifest_path(&app)?;
+    check_database_inner(&state, &password, &backup_dir, &manifest_path, &schedule_config).await
 }
 
-async fn check_database_inner(state: &AppState) -> Result<IntegrityReport> {
+/// The testable core of [`check_database`]. Backs up first, through the same
+/// choke point ([`trigger_risky_operation_backup`]) every risky-operation
+/// caller uses, and only calls `check_and_repair` — the part that can
+/// actually delete a row — once that backup has actually landed on disk.
+/// `?` on the backup call is deliberate: a backup that silently failed
+/// (`pg_dump` missing, disk full, `pg_dump` timing out) would leave the user
+/// believing a safety net exists when it doesn't, which is worse than no
+/// backup at all, so the repair simply never runs in that case and the
+/// error surfaces to the UI unchanged.
+async fn check_database_inner(
+    state: &AppState,
+    password: &str,
+    backup_dir: &Path,
+    manifest_path: &Path,
+    schedule_config: &ScheduleConfig,
+) -> Result<IntegrityReport> {
+    let config = backup_commands::require_config(state)?;
+    trigger_risky_operation_backup(&config, password, backup_dir, manifest_path, schedule_config, "check_database")
+        .await?;
+
     IntegrityRepository::new(state.pool()?).check_and_repair().await
 }
 
@@ -544,18 +623,54 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn import_apkg_rejects_an_empty_path_without_touching_the_sidecar() {
-        let state = AppState::new();
-        let result = import_apkg_inner(&state, String::new()).await;
-        assert!(matches!(result, Err(Error::Invalid(_))));
+    /// Neither of `import_apkg_inner`'s early-return branches below ever
+    /// looks at `backup_dir`/`manifest_path`/`schedule_config`, so a plain
+    /// temp path stands in for all three — these tests are about the
+    /// ordering of the two checks in front of the sidecar, not about backup
+    /// mechanics (that's `schedule.rs`'s own tests, and the `live_database`
+    /// module further down for the reachability proof PLT-013 actually
+    /// asks for).
+    fn unused_backup_args() -> (PathBuf, PathBuf, ScheduleConfig) {
+        let dir = std::env::temp_dir();
+        let manifest = dir.join("learno-test-unused-manifest.json");
+        (dir, manifest, ScheduleConfig::default())
     }
 
     #[tokio::test]
-    async fn import_apkg_reports_the_sidecar_is_not_ready_yet() {
+    async fn import_apkg_rejects_an_empty_path_without_touching_the_sidecar() {
         let state = AppState::new();
-        let result = import_apkg_inner(&state, "baralho.apkg".into()).await;
-        assert!(matches!(result, Err(Error::Sidecar(_))));
+        let (backup_dir, manifest_path, schedule_config) = unused_backup_args();
+        let result =
+            import_apkg_inner(&state, String::new(), "unused", &backup_dir, &manifest_path, &schedule_config).await;
+        assert!(matches!(result, Err(Error::Invalid(_))));
+    }
+
+    // PLT-013 changed this test's own expectation: before the backup gate
+    // existed, a session with no connection at all still reached the
+    // sidecar check first and failed there. Now the backup has to be
+    // *attempted* before the sidecar is ever touched, and a backup needs a
+    // known connection — so a session that never finished the first-run
+    // wizard now fails on `require_config` (`Error::Config`), never
+    // `Error::Sidecar`, even though this same `AppState` also has no
+    // sidecar wired. The sidecar-not-ready path this test used to cover now
+    // needs a connection that can actually back itself up, which needs a
+    // live database — see
+    // `live_database::import_apkg_backs_up_before_reporting_the_sidecar_is_not_ready`
+    // below for that proof.
+    #[tokio::test]
+    async fn import_apkg_reports_no_connection_configured_before_touching_the_sidecar() {
+        let state = AppState::new();
+        let (backup_dir, manifest_path, schedule_config) = unused_backup_args();
+        let result = import_apkg_inner(
+            &state,
+            "baralho.apkg".into(),
+            "unused",
+            &backup_dir,
+            &manifest_path,
+            &schedule_config,
+        )
+        .await;
+        assert!(matches!(result, Err(Error::Config(_))));
     }
 
     #[test]
@@ -699,7 +814,8 @@ mod tests {
         #[tokio::test]
         async fn check_database_reports_not_connected() {
             let state = AppState::new();
-            let result = check_database_inner(&state).await;
+            let (backup_dir, manifest_path, schedule_config) = unused_backup_args();
+            let result = check_database_inner(&state, "unused", &backup_dir, &manifest_path, &schedule_config).await;
             assert!(matches!(result, Err(Error::Config(_))));
         }
 
@@ -732,6 +848,7 @@ mod tests {
         #![allow(clippy::unwrap_used, clippy::expect_used)]
 
         use super::*;
+        use crate::backup::{BackupTrigger, ScheduleManifest};
 
         /// Same host/port/user extraction `db::pool`'s own PLT-020 tests use
         /// to turn `LEARNO_TEST_DATABASE_URL` into a `ConnectionTestInput` —
@@ -792,14 +909,24 @@ mod tests {
         /// `connect_database_and_wire_state` the same way the wizard does,
         /// plant an orphan the same way `db::integrity`'s tests do, then call
         /// the command function and check the repair actually landed.
+        ///
+        /// PLT-013's finding this test now also closes: `schedule.rs`'s own
+        /// tests already proved `trigger_risky_operation_backup` works in
+        /// isolation, and that was never the gap — the gap was that nothing
+        /// reachable from a real user action called it. So this asserts on
+        /// the manifest and the `.dump` file on disk *after calling
+        /// `check_database_inner`*, the command function itself, not after
+        /// calling the backup trigger directly — the same distinction the
+        /// task's own instructions draw between "a função de backup
+        /// funciona" and "a operação de risco produz o arquivo".
         #[tokio::test]
         #[ignore = "requires LEARNO_TEST_DATABASE_URL"]
-        async fn check_database_reaches_the_repository_and_repairs_an_orphaned_card() {
+        async fn check_database_backs_up_before_repairing_an_orphaned_card() {
             let state = AppState::new();
             let input = test_connection_input();
-            let backup_dir =
-                std::env::temp_dir().join(format!("learno-check-database-test-{}", Uuid::new_v4()));
-            connect_database_and_wire_state(&state, &input, &backup_dir).await.unwrap();
+            let connect_backup_dir =
+                std::env::temp_dir().join(format!("learno-check-database-connect-{}", Uuid::new_v4()));
+            connect_database_and_wire_state(&state, &input, &connect_backup_dir).await.unwrap();
 
             let pool = state.pool().unwrap();
 
@@ -822,10 +949,38 @@ mod tests {
             sqlx::query("SET session_replication_role = origin").execute(&mut *conn).await.unwrap();
             drop(conn);
 
-            let report = check_database_inner(&state).await.unwrap();
+            // A directory of its own, distinct from `connect_backup_dir`
+            // above (that one holds `connect_migrate_with_rollback`'s own
+            // pre-migration safety net, a separate concern — see that
+            // function's doc comment in `db::pool`) and from PLT-013's
+            // manifest naming (`schedule-manifest.json` inside it), the same
+            // convention `ipc::backup_commands::backup_root_dir` uses.
+            let risky_backup_dir =
+                std::env::temp_dir().join(format!("learno-check-database-risky-{}", Uuid::new_v4()));
+            let manifest_path = risky_backup_dir.join("schedule-manifest.json");
+            let schedule_config = ScheduleConfig::default();
+
+            let report = check_database_inner(&state, &input.password, &risky_backup_dir, &manifest_path, &schedule_config)
+                .await
+                .unwrap();
 
             assert!(report.orphaned_card_ids.contains(&orphan_id));
             assert!(report.total_repaired >= 1);
+
+            // The point of this test: the command that a "Verificar banco de
+            // dados" click actually invokes is what produced the backup —
+            // not `trigger_risky_operation_backup` called by hand.
+            let manifest = ScheduleManifest::new(&manifest_path);
+            let records = manifest.load().unwrap();
+            assert_eq!(records.len(), 1, "check_database_inner must record exactly one risky-operation backup");
+            assert!(
+                records[0].path.is_file(),
+                "the manifest's own record must point at a .dump file that actually exists on disk"
+            );
+            assert!(matches!(
+                &records[0].trigger,
+                BackupTrigger::RiskyOperation { operation } if operation == "check_database"
+            ));
 
             let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE id = $1")
                 .bind(orphan_id)
@@ -833,6 +988,63 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(remaining, 0);
+
+            let _ = std::fs::remove_dir_all(&connect_backup_dir);
+            let _ = std::fs::remove_dir_all(&risky_backup_dir);
+        }
+
+        /// PLT-013's other real risky-operation trigger. No sidecar is wired
+        /// in this test process (`AppState::new()` never calls
+        /// `set_sidecar`), which is exactly what this test needs: it proves
+        /// the backup runs *before* — and regardless of — the sidecar step,
+        /// not only on a path where the import happens to succeed. If the
+        /// ordering in `import_apkg_inner` were ever reversed (sidecar call
+        /// first, backup after), this would still see `Error::Sidecar` but
+        /// the manifest assertions below would fail, since no backup would
+        /// have run yet.
+        #[tokio::test]
+        #[ignore = "requires LEARNO_TEST_DATABASE_URL"]
+        async fn import_apkg_backs_up_before_reporting_the_sidecar_is_not_ready() {
+            let state = AppState::new();
+            let input = test_connection_input();
+            let connect_backup_dir =
+                std::env::temp_dir().join(format!("learno-import-apkg-connect-{}", Uuid::new_v4()));
+            connect_database_and_wire_state(&state, &input, &connect_backup_dir).await.unwrap();
+
+            let risky_backup_dir =
+                std::env::temp_dir().join(format!("learno-import-apkg-risky-{}", Uuid::new_v4()));
+            let manifest_path = risky_backup_dir.join("schedule-manifest.json");
+            let schedule_config = ScheduleConfig::default();
+
+            let result = import_apkg_inner(
+                &state,
+                "baralho.apkg".into(),
+                &input.password,
+                &risky_backup_dir,
+                &manifest_path,
+                &schedule_config,
+            )
+            .await;
+
+            assert!(
+                matches!(result, Err(Error::Sidecar(_))),
+                "expected the sidecar-not-ready error once the backup step already ran, got {result:?}"
+            );
+
+            let manifest = ScheduleManifest::new(&manifest_path);
+            let records = manifest.load().unwrap();
+            assert_eq!(records.len(), 1, "import_apkg_inner must record exactly one risky-operation backup");
+            assert!(
+                records[0].path.is_file(),
+                "the manifest's own record must point at a .dump file that actually exists on disk"
+            );
+            assert!(matches!(
+                &records[0].trigger,
+                BackupTrigger::RiskyOperation { operation } if operation == "import_apkg"
+            ));
+
+            let _ = std::fs::remove_dir_all(&connect_backup_dir);
+            let _ = std::fs::remove_dir_all(&risky_backup_dir);
         }
     }
 }

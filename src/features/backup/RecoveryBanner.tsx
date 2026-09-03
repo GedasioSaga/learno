@@ -2,8 +2,14 @@ import type { AutosaveJournalEntry } from "../../lib/ipc";
 import { useAutosaveRecovery } from "./useAutosaveRecovery";
 
 interface RecoveryBannerProps {
-  /** Called when the user chooses to bring a recovered draft back into the editor. */
-  onRestore: (entry: AutosaveJournalEntry) => void;
+  /**
+   * Called when the user chooses to bring a recovered draft back into the
+   * editor. May return a promise — `dismiss` (which erases this page's
+   * journal entry) only runs after it resolves, so a restore that fails
+   * (e.g. the caller's save rejecting) leaves the on-disk draft alone
+   * instead of silently discarding the only copy of the unsaved edit.
+   */
+  onRestore: (entry: AutosaveJournalEntry) => void | Promise<void>;
 }
 
 /**
@@ -36,9 +42,16 @@ export function RecoveryBanner({ onRestore }: RecoveryBannerProps) {
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
-              onClick={() => {
-                onRestore(entry);
-                void dismiss(entry.page_id);
+              onClick={async () => {
+                try {
+                  await onRestore(entry);
+                  await dismiss(entry.page_id);
+                } catch {
+                  // The failure to restore already surfaces via the
+                  // caller's own `errorMessage` (e.g. the pages store, on
+                  // rename) — here we only avoid erasing the journal when
+                  // the restore was never actually confirmed.
+                }
               }}
               className="rounded-sm bg-emerald px-3 py-1 text-xs font-medium text-on-emerald"
             >

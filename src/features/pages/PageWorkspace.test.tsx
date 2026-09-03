@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  autosaveClearPending,
+  autosaveWritePending,
   createPageVersionSnapshot,
   getPageBreadcrumb,
   listPageVersions,
@@ -26,6 +28,11 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     // que sempre a monta, então precisa de um retorno controlado aqui.
     listPageVersions: vi.fn(),
     createPageVersionSnapshot: vi.fn(),
+    // PLT-005: `PageWorkspace` now calls `useAutosaveDraft`, which writes
+    // and clears the title's draft — without mocking these, those calls
+    // would hit the real Tauri `invoke` (absent in jsdom) and reject.
+    autosaveWritePending: vi.fn(),
+    autosaveClearPending: vi.fn(),
   };
 });
 
@@ -35,6 +42,8 @@ const setPageIconMock = vi.mocked(setPageIcon);
 const renamePageMock = vi.mocked(renamePage);
 const listPageVersionsMock = vi.mocked(listPageVersions);
 const createPageVersionSnapshotMock = vi.mocked(createPageVersionSnapshot);
+const autosaveWritePendingMock = vi.mocked(autosaveWritePending);
+const autosaveClearPendingMock = vi.mocked(autosaveClearPending);
 
 function row(overrides: Partial<PageRow> & Pick<PageRow, "id">): PageRow {
   return {
@@ -55,6 +64,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   getPageBreadcrumbMock.mockResolvedValue([row({ id: "cronograma", title: "Cronograma" })]);
   listPageVersionsMock.mockResolvedValue([]);
+  autosaveWritePendingMock.mockResolvedValue(undefined);
+  autosaveClearPendingMock.mockResolvedValue(undefined);
   usePageTreeStore.setState({
     status: "ready",
     errorMessage: null,
@@ -212,5 +223,103 @@ describe("FUN-034: snapshot automático de versão", () => {
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
 
     expect(createPageVersionSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PLT-005: autosave do rascunho do título — grava enquanto edita", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("grava o rascunho em disco 3s depois que o usuário para de digitar, antes de qualquer confirmação", async () => {
+    render(<PageWorkspace pageId="cronograma" />);
+
+    // Synchronous `getByLabelText`, not `findBy` — with fake timers active,
+    // a `findBy`'s internal `waitFor` sits waiting on a polling `setTimeout`
+    // that never fires on its own (same pattern as the FUN-034 block above,
+    // which also never mixes `findBy` with fake timers).
+    const titleField = screen.getByLabelText("Título da página");
+    fireEvent.change(titleField, { target: { value: "Cronograma rascunho" } });
+
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(autosaveWritePendingMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(autosaveWritePendingMock).toHaveBeenCalledWith("cronograma", "Cronograma rascunho", {
+      title: "Cronograma rascunho",
+    });
+    // Still within the typing debounce — `renamePage` only runs on blur.
+    expect(renamePageMock).not.toHaveBeenCalled();
+  });
+
+  it("uma tecla nova reinicia o debounce em vez de acumular gravações", async () => {
+    render(<PageWorkspace pageId="cronograma" />);
+
+    const titleField = screen.getByLabelText("Título da página");
+    fireEvent.change(titleField, { target: { value: "Cronograma A" } });
+    await vi.advanceTimersByTimeAsync(1500);
+    fireEvent.change(titleField, { target: { value: "Cronograma AB" } });
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(autosaveWritePendingMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(autosaveWritePendingMock).toHaveBeenCalledTimes(1);
+    expect(autosaveWritePendingMock).toHaveBeenCalledWith("cronograma", "Cronograma AB", {
+      title: "Cronograma AB",
+    });
+  });
+});
+
+describe("PLT-005: autosave do rascunho do título — limpa só depois de confirmar", () => {
+  it("confirmar a mudança (blur) só limpa o rascunho depois que renamePage confirma o salvamento", async () => {
+    let resolveRename: (row: PageRow) => void = () => undefined;
+    renamePageMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRename = resolve;
+        }),
+    );
+    render(<PageWorkspace pageId="cronograma" />);
+
+    const titleField = await screen.findByLabelText("Título da página");
+    fireEvent.change(titleField, { target: { value: "Cronograma 2026" } });
+    fireEvent.blur(titleField);
+
+    expect(renamePageMock).toHaveBeenCalledWith("cronograma", "Cronograma 2026");
+    // `rename` hasn't resolved yet — the draft has to stay on disk.
+    expect(autosaveClearPendingMock).not.toHaveBeenCalled();
+
+    resolveRename(row({ id: "cronograma", title: "Cronograma 2026" }));
+    await waitFor(() => expect(autosaveClearPendingMock).toHaveBeenCalledWith("cronograma"));
+  });
+
+  it("uma falha ao renomear preserva o rascunho em vez de descartá-lo", async () => {
+    renamePageMock.mockRejectedValue(new Error("sem conexão"));
+    render(<PageWorkspace pageId="cronograma" />);
+
+    const titleField = await screen.findByLabelText("Título da página");
+    fireEvent.change(titleField, { target: { value: "Cronograma 2026" } });
+    fireEvent.blur(titleField);
+
+    await waitFor(() => expect(renamePageMock).toHaveBeenCalled());
+    // Gives the rejection's `.then` branch a chance to run without ever
+    // calling `clearDraft`.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(autosaveClearPendingMock).not.toHaveBeenCalled();
+  });
+
+  it("sair do campo sem mudar o título limpa qualquer rascunho pendente sem chamar renamePage", async () => {
+    render(<PageWorkspace pageId="cronograma" />);
+
+    const titleField = await screen.findByLabelText("Título da página");
+    fireEvent.change(titleField, { target: { value: "Cronograma" } });
+    fireEvent.blur(titleField);
+
+    expect(renamePageMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(autosaveClearPendingMock).toHaveBeenCalledWith("cronograma"));
   });
 });

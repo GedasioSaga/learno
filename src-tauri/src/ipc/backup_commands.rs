@@ -15,13 +15,26 @@
 //! Todos os comandos deste arquivo estão em `tauri::generate_handler!` em
 //! `lib.rs` — o TODO que dizia o contrário foi fechado junto com FUN-023.
 //!
-//! PLT-013's dois gatilhos por operação de risco do checklist (import de
-//! `.colpkg`, "Check Database", sync one-way) não têm nenhum ponto de
-//! chamada nesta árvore ainda — confirmado por
-//! `grep -rn "colpkg|check_database|sync_one_way" src-tauri/src src`, sem
-//! resultado. `trigger_backup_for_risky_operation` abaixo é o comando que
-//! essas features devem chamar assim que existirem; não há nada, fora deste
-//! módulo, para este builder fiar a esse gatilho hoje.
+//! PLT-013's dois gatilhos por operação de risco do checklist que já têm
+//! código real por trás — `check_database` (PLT-014, apaga linha ao
+//! reparar) e `import_apkg` (PLT-004, sobrescreve dados via sidecar) — agora
+//! chamam [`trigger_risky_operation_backup`] direto de dentro de
+//! `ipc::commands`, através de [`backup_root_dir`], [`schedule_manifest_path`]
+//! e [`require_config`] (as três peças que este módulo expõe `pub(crate)`
+//! só para isso) — nunca chamando `dump::run_backup` cru, que puxaria o
+//! rastreamento/poda de PLT-013 inteiro pra fora do caminho. `sync one-way`
+//! continua sem ponto de chamada porque a feature em si ainda não existe
+//! neste código — nada a proteger ainda.
+//!
+//! `trigger_backup_for_risky_operation` abaixo continua existindo como o
+//! comando que a tela de Configurações usa para o botão manual "disparar
+//! agora" — as duas rotas (esta e a de `ipc::commands`) levam ao mesmo
+//! [`trigger_risky_operation_backup`], só que uma resolve `backup_dir`/
+//! `manifest_path`/`schedule_config` a partir de um `AppHandle` que ela
+//! mesma recebe, e a outra recebe os três já prontos porque
+//! `check_database_inner`/`import_apkg_inner` continuam testáveis sem
+//! `AppHandle` (mesmo motivo do comentário em
+//! `ipc::commands::connect_database_and_wire_state`).
 
 use std::path::{Path, PathBuf};
 
@@ -53,7 +66,13 @@ fn journal(app: &AppHandle) -> Result<autosave::AutosaveJournal> {
 /// Onde os backups criados por este app (manuais e agendados) vivem por
 /// padrão, dentro dos dados do app — o scheduler (PLT-013) sempre grava
 /// aqui, nunca num caminho escolhido em tempo de chamada.
-fn backup_root_dir(app: &AppHandle) -> Result<PathBuf> {
+///
+/// `pub(crate)`: `ipc::commands::check_database`/`import_apkg` resolvem o
+/// mesmo diretório a partir do `AppHandle` que só a camada de comando (não o
+/// `_inner` testável) recebe, para que o backup de uma operação de risco
+/// pouse no mesmo lugar que todo outro backup deste app, nunca num diretório
+/// próprio e esquecido.
+pub(crate) fn backup_root_dir(app: &AppHandle) -> Result<PathBuf> {
     let base = app
         .path()
         .app_data_dir()
@@ -61,10 +80,20 @@ fn backup_root_dir(app: &AppHandle) -> Result<PathBuf> {
     Ok(base.join("backups"))
 }
 
+/// O caminho do manifesto de backups agendados (PLT-013), sem abrir/carregar
+/// nada ainda — separado de [`schedule_manifest`] (que devolve o
+/// `ScheduleManifest` já construído em cima dele) porque
+/// `trigger_risky_operation_backup` pede um `&Path` cru, não um
+/// `ScheduleManifest`, e `ipc::commands`'s `_inner` functions (sem
+/// `AppHandle`) recebem esse `&Path` já resolvido pelo comando.
+pub(crate) fn schedule_manifest_path(app: &AppHandle) -> Result<PathBuf> {
+    Ok(backup_root_dir(app)?.join("schedule-manifest.json"))
+}
+
 /// Arquivo onde o histórico de backups agendados (PLT-013) vive — separado
 /// do diário de autosave e de qualquer backup manual avulso.
 fn schedule_manifest(app: &AppHandle) -> Result<schedule::ScheduleManifest> {
-    Ok(schedule::ScheduleManifest::new(backup_root_dir(app)?.join("schedule-manifest.json")))
+    Ok(schedule::ScheduleManifest::new(schedule_manifest_path(app)?))
 }
 
 /// `create_backup`/`restore_backup` shellam para fora do pool sqlx, então
@@ -74,7 +103,13 @@ fn schedule_manifest(app: &AppHandle) -> Result<schedule::ScheduleManifest> {
 /// construtor público fora de um `App`/`AppHandle` real, mantê-lo aqui
 /// obrigaria todo teste a passar por `tauri::test::mock_builder`. Ver o
 /// comentário nos `_inner` abaixo para por que isso importa nesta versão.
-fn require_config(state: &AppState) -> Result<AppConfig> {
+///
+/// `pub(crate)`: `ipc::commands::check_database_inner`/`import_apkg_inner`
+/// precisam do mesmo `AppConfig` para poder chamar
+/// `trigger_risky_operation_backup` antes de fazer a parte arriscada de
+/// cada um — sem isso, cada um reimplementaria esta checagem por conta
+/// própria.
+pub(crate) fn require_config(state: &AppState) -> Result<AppConfig> {
     state
         .cached_config()
         .ok_or_else(|| Error::Config("nenhuma conexão configurada".into()))

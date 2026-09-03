@@ -169,16 +169,18 @@ fn prune_bucket(mut records: Vec<ScheduledBackupRecord>, keep: u32) -> Vec<Sched
 /// `manifest_path` under its own `keep_risky_operation` retention bucket —
 /// the single choke point every risky-operation caller should go through
 /// instead of calling `dump::run_backup` directly and losing PLT-013's
-/// tracking/pruning entirely (which is exactly the gap PLT-013 named: the
-/// cadence half of this module was reachable and tested, this half was not
-/// reachable from anything).
+/// tracking/pruning entirely (this used to be the gap PLT-013 named: the
+/// cadence half of this module was reachable and tested, this half was
+/// callable from nowhere real — `db::pool` and `ipc::commands` below are
+/// what closed that).
 ///
-/// `db::pool::connect_migrate_with_rollback` is the first real caller (a
-/// schema migration about to run over established data); whichever IPC
-/// command wires up `.apkg` import or a "Check Database" repair next should
-/// call this too, each with its own `operation` label — this function
-/// doesn't validate that string against a fixed list, same as
-/// [`BackupTrigger::RiskyOperation`] above.
+/// `db::pool::connect_migrate_with_rollback` was the first real caller (a
+/// schema migration about to run over established data); `ipc::commands`'s
+/// `check_database_inner` (PLT-014's repair, which deletes rows) and
+/// `import_apkg_inner` (PLT-004's sidecar import) now call this too, each
+/// with its own `operation` label — this function doesn't validate that
+/// string against a fixed list, same as [`BackupTrigger::RiskyOperation`]
+/// above.
 ///
 /// Returns `Err` — never a soft warning — when the backup itself fails, so
 /// a caller that just propagates the error (as every current caller does)

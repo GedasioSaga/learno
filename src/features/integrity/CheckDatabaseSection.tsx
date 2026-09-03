@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AppError, checkDatabase, type IntegrityReport } from "../../lib/ipc";
 
 type CheckDatabaseStatus =
@@ -38,19 +38,29 @@ function summarize(report: IntegrityReport): string {
  * nenhum para chamá-lo — o usuário não tinha como disparar a checagem em
  * nenhuma tela do app. É este arquivo, montado em `App.tsx` ao lado de
  * `BackupSettings`, que fecha esse caminho.
+ *
+ * PLT-013: o reparo apaga linha (cartão órfão), então é um dos dois
+ * gatilhos de operação de risco do checklist com código real por trás — o
+ * campo de senha existe só para isso: o backend faz uma cópia de segurança
+ * antes de reparar, e a senha nunca fica salva em lugar nenhum (mesma regra
+ * de `BackupSettings`).
  */
 export function CheckDatabaseSection() {
+  const passwordId = useId();
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<CheckDatabaseStatus>({ kind: "idle" });
 
   async function handleCheck() {
     setStatus({ kind: "running" });
     try {
-      const report = await checkDatabase();
+      const report = await checkDatabase(password);
       setStatus({ kind: "done", report });
     } catch (error) {
       setStatus({ kind: "error", message: errorMessage(error, "Não foi possível verificar o banco de dados.") });
     }
   }
+
+  const canCheck = password.length > 0 && status.kind !== "running";
 
   return (
     <div className="flex flex-col gap-4">
@@ -60,9 +70,26 @@ export function CheckDatabaseSection() {
       </p>
 
       <div>
+        <label htmlFor={passwordId} className="block text-sm font-medium text-ink">
+          Senha do Postgres
+        </label>
+        <input
+          id={passwordId}
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.currentTarget.value)}
+          className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-sm text-ink"
+        />
+        <p className="mt-1 text-xs text-ink-muted">
+          Necessária para que o app faça uma cópia de segurança antes de consertar qualquer coisa — nunca é
+          salva.
+        </p>
+      </div>
+
+      <div>
         <button
           type="button"
-          disabled={status.kind === "running"}
+          disabled={!canCheck}
           onClick={() => void handleCheck()}
           className="rounded-sm border border-border bg-surface px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
         >
