@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Python sidecar
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+sidecar/build/
+sidecar/dist/
+
+# Local machine config: Postgres connection details are entered in the app's
+# first-run wizard and stored by tauri-plugin-store, never committed.
+.env
+.env.*
+!.env.example
+
+# Session scratch
+.claude-trail.md
