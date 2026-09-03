@@ -47,6 +47,16 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+fractional_index = "2.0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+# Só a feature "test" do Tauri (mock_builder/mock_context), pra testar
+# ipc::commands::page_* sem um AppHandle real — nenhuma dependência nova,
+# a mesma já usada em [dependencies] com mais uma feature para os testes.
+tauri = { version = "2", features = ["test"] }
+# Only used by tests/backup_dump.rs to pull host/port/db/user apart from a
+# postgres:// URL for the two-database dump/restore round trip — already
+# resolved in Cargo.lock as sqlx's own transitive dependency, so this adds
+# no new supply-chain surface, just a direct name for an existing crate.
+url = "2.5.8"

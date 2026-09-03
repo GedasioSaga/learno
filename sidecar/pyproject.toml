@@ -1,0 +1,22 @@
+[project]
+name = "learno-sidecar"
+version = "0.1.0"
+description = "Processo Python empacotado que o núcleo Rust do Learno chama por stdio"
+requires-python = ">=3.12"
+# Fase 1 (protocolo + health-check) não precisa de nada além da biblioteca
+# padrão. .apkg (zipfile/sqlite3), FSRS e leitura de PDF entram como
+# dependências quando a fase que os usa chegar — não antes.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6.10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["learno_sidecar*"]

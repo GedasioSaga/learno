@@ -1,0 +1,138 @@
+/*
+ * Tema do Learno — "cozy-produtivo".
+ *
+ * A paleta vem do ícone do app (pilha de livros em pixel art): âmbar, menta,
+ * esmeralda escuro, terracota, marrom e um quase-preto puxado pro marrom.
+ * A tipografia e a densidade seguem uma ferramenta séria — pensada pra ficar
+ * na tela por horas — não uma landing page.
+ *
+ * Cada cor "-ink" é uma variante mais escura (ou, no escuro, mais clara) da
+ * mesma cor de marca, pensada especificamente para texto: as cores puras do
+ * ícone (âmbar, terracota) não têm contraste AA suficiente como texto sobre
+ * o papel de fundo, mas continuam corretas para ícone, borda ou fundo de
+ * selo — onde a regra de contraste é outra (3:1, não 4.5:1).
+ */
+
+@import "tailwindcss";
+
+:root {
+  --paper: #f6efdf;
+  --surface: #fffbf2;
+  --surface-sunken: #ece0c5;
+  --border: #c9a877;
+  --ink: #1c0f08;
+  --ink-muted: #5b4630;
+
+  --amber: #d69436;
+  --amber-ink: #8a5a1c;
+  --mint: #59d68a;
+  --mint-ink: #1f6b45;
+  --emerald: #0d564d;
+  --terracotta: #9f582e;
+  --terracotta-ink: #7a3f1f;
+  --brown: #7d3912;
+  --on-emerald: #fbf4e4;
+
+  --shadow-ink: rgb(18 0 0 / 35%);
+}
+
+/* Escolha explícita do usuário via alternador de tema (data-theme="dark" na
+   raiz) sempre vence a preferência do sistema. */
+:root[data-theme="dark"] {
+  --paper: #16100a;
+  --surface: #201811;
+  --surface-sunken: #0f0b07;
+  --border: #4a3a26;
+  --ink: #f2e8d5;
+  --ink-muted: #b8a583;
+
+  --amber: #e9ac53;
+  --amber-ink: #e9ac53;
+  --mint: #7bdba0;
+  --mint-ink: #7bdba0;
+  --emerald: #14705f;
+  --terracotta: #c97b4a;
+  --terracotta-ink: #e2a67c;
+  --brown: #a9713f;
+  --on-emerald: #fbf4e4;
+
+  --shadow-ink: rgb(0 0 0 / 60%);
+}
+
+/* Sem escolha explícita (sem `data-theme`), segue o sistema operacional. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --paper: #16100a;
+    --surface: #201811;
+    --surface-sunken: #0f0b07;
+    --border: #4a3a26;
+    --ink: #f2e8d5;
+    --ink-muted: #b8a583;
+
+    --amber: #e9ac53;
+    --amber-ink: #e9ac53;
+    --mint: #7bdba0;
+    --mint-ink: #7bdba0;
+    --emerald: #14705f;
+    --terracotta: #c97b4a;
+    --terracotta-ink: #e2a67c;
+    --brown: #a9713f;
+    --on-emerald: #fbf4e4;
+
+    --shadow-ink: rgb(0 0 0 / 60%);
+  }
+}
+
+@theme {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-amber: var(--amber);
+  --color-amber-ink: var(--amber-ink);
+  --color-mint: var(--mint);
+  --color-mint-ink: var(--mint-ink);
+  --color-emerald: var(--emerald);
+  --color-terracotta: var(--terracotta);
+  --color-terracotta-ink: var(--terracotta-ink);
+  --color-brown: var(--brown);
+  --color-on-emerald: var(--on-emerald);
+
+  /* Sombra sólida (sem blur) no lugar do soft-shadow padrão — o mesmo jeito
+     de sombrear sem gradiente que a pixel art do ícone usa. */
+  --shadow-hard-sm: 2px 2px 0 0 var(--shadow-ink);
+  --shadow-hard: 4px 4px 0 0 var(--shadow-ink);
+
+  /* Serifada pros títulos — o lado "livro" do ícone; a fonte nativa do SO
+     pra interface — o lado "ferramenta densa" que se lê por horas, sem
+     depender de baixar fonte nenhuma num app desktop offline-first. */
+  --font-display:
+    ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    font-family: var(--font-sans);
+    font-size: 15px;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    line-height: 1.55;
+  }
+
+  /* Foco visível em qualquer controle nativo, sem depender de cada
+     componente lembrar de estilizar `:focus` — teclado precisa sempre
+     enxergar onde está. */
+  :focus-visible {
+    outline: 2px solid var(--color-emerald);
+    outline-offset: 2px;
+  }
+}

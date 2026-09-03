@@ -1168,6 +1168,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fractional_index"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce01fad85c73f947e62a39152c7b0f785af7f44859da36e421c42a3023bcbe3a"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2115,6 +2124,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "fractional_index",
  "serde",
  "serde_json",
  "sqlx",
@@ -2129,6 +2139,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
