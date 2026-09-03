@@ -82,6 +82,42 @@ describe("FirstRunWizard", () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
+  it("aceita senha em branco e testa a conexão mesmo assim — trust/peer/ident não têm senha para digitar", async () => {
+    const user = userEvent.setup();
+    testDatabaseConnectionMock.mockResolvedValue(undefined);
+
+    render(<FirstRunWizard onComplete={vi.fn()} />);
+
+    // Não digitamos nada em Senha — ela nasce vazia. É o caso real do
+    // cluster de dev (autenticação `trust`, sem senha nenhuma) e o
+    // bloqueante desta tarefa: antes da correção, o <input> nascia
+    // `required` e a validação nativa do HTML5 travava o submit ANTES do
+    // `onSubmit`, sem alerta nem estado de erro — o clique não disparava
+    // nada. Este teste prova o SUBMIT acontecendo (o mock foi chamado) e
+    // não apenas a ausência do atributo `required` no DOM.
+    await user.click(screen.getByRole("button", { name: "Testar conexão" }));
+
+    expect(testDatabaseConnectionMock).toHaveBeenCalledWith({
+      host: "localhost",
+      port: 5432,
+      database: "learno",
+      user: "postgres",
+      password: "",
+    });
+    expect(await screen.findByText("Conexão bem-sucedida.")).toBeInTheDocument();
+  });
+
+  it("recusa Host em branco com mensagem, sem chamar o backend — mesmo padrão de campo mudo, mas Host não tem caso legítimo de ficar vazio como Senha tem", async () => {
+    const user = userEvent.setup();
+    render(<FirstRunWizard onComplete={vi.fn()} />);
+
+    await user.clear(screen.getByLabelText("Host"));
+    await user.click(screen.getByRole("button", { name: "Testar conexão" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Host não pode ficar em branco.");
+    expect(testDatabaseConnectionMock).not.toHaveBeenCalled();
+  });
+
   it("PLT-016: informa a pasta de dados e persiste depois que a conexão é aberta", async () => {
     const user = userEvent.setup();
     testDatabaseConnectionMock.mockResolvedValue(undefined);
@@ -147,10 +183,9 @@ describe("FirstRunWizard", () => {
     const user = userEvent.setup();
     render(<FirstRunWizard onComplete={vi.fn()} />);
 
-    // Preenche a senha só para não travar na validação nativa de campo
-    // obrigatório do HTML antes mesmo do envio chegar no handler — o que este
-    // teste quer provar é a validação da porta, não a de campo vazio.
-    await user.type(screen.getByLabelText("Senha"), testFormPassword);
+    // Senha fica em branco de propósito (é um campo opcional, ver teste
+    // acima) — o que este teste quer provar é a validação da porta, isolada
+    // de qualquer outro campo.
 
     const portField = screen.getByLabelText("Porta");
     await user.clear(portField);

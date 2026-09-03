@@ -28,18 +28,11 @@ describe("PLT-016 — assistente de primeira execução", () => {
     await fieldFor("Porta").setValue(String(DEV_DB.port));
     await fieldFor("Banco de dados").setValue(DEV_DB.database);
     await fieldFor("Usuário").setValue(DEV_DB.user);
-    // O cluster de dev roda com autenticação trust (sem senha — ver a
-    // introdução da tarefa), então o CONTEÚDO deste campo é ignorado pelo
-    // Postgres. Mas o <input> de Senha em FirstRunWizard.tsx nasce com
-    // `required` (o default de `Field` que nada ali desliga), e deixá-lo
-    // vazio faz a validação nativa do HTML5 barrar o submit ANTES do
-    // `onSubmit` — o clique no botão não dispara nada, sem alerta nem
-    // estado de erro. É um achado à parte (ver ressalvas do relatório):
-    // um usuário real de Postgres local com trust auth não consegue
-    // preencher este assistente com o campo Senha em branco. Preenchemos
-    // aqui com um valor qualquer só para não travar neste segundo defeito
-    // e conseguir exercitar o alvo real deste teste, que é a conexão.
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
+    // Senha fica em branco de propósito: o cluster de dev roda com
+    // autenticação trust (`DEV_DB.password` é `""`), e um Postgres local
+    // trust não tem senha nenhuma para digitar. Este é o caso real que
+    // FirstRunWizard.tsx precisa aceitar sem travar o submit em silêncio.
+    await expect(fieldFor("Senha")).toHaveValue("");
 
     await $("button=Testar conexão").click();
 

@@ -32,6 +32,14 @@ interface FieldProps {
   type?: string;
   inputMode?: "numeric";
   autoFocus?: boolean;
+  /**
+   * Vira só `aria-required` — nunca o atributo nativo `required`. Um
+   * `<input required>` vazio bloqueia o `submit` do formulário ANTES do
+   * `onSubmit` rodar, sem alerta nem estado de erro (era exatamente o
+   * defeito do campo Senha, ver docs/ACHADOS-FASE-1.md #1). Cada campo
+   * obrigatório valida sua própria ausência dentro de `handleTest`, onde dá
+   * para mostrar uma mensagem de verdade em vez de deixar a tela muda.
+   */
   required?: boolean;
 }
 
@@ -55,7 +63,7 @@ function Field({
         type={type}
         inputMode={inputMode}
         autoFocus={autoFocus}
-        required={required}
+        aria-required={required}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
         className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-sm text-ink"
@@ -90,8 +98,30 @@ export function FirstRunWizard({ onComplete, mode = "setup", savedConfig }: Firs
   const parsedPort = Number(port);
   const portIsValid = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535;
 
+  /**
+   * Host, banco e usuário precisam de algum valor para o backend nem
+   * tentar conectar — mas, ao contrário de Senha, não têm um caso de
+   * domínio legítimo para ficarem em branco. Checados em ordem de
+   * preenchimento no formulário; retorna a mensagem do primeiro vazio,
+   * ou `null` se todos estão preenchidos.
+   */
+  function blankRequiredFieldMessage(): string | null {
+    if (!host.trim()) return "Host não pode ficar em branco.";
+    if (!database.trim()) return "Banco de dados não pode ficar em branco.";
+    if (!user.trim()) return "Usuário não pode ficar em branco.";
+    return null;
+  }
+
   async function handleTest(event: FormEvent) {
     event.preventDefault();
+
+    const blankFieldMessage = blankRequiredFieldMessage();
+    if (blankFieldMessage) {
+      setStatus("error");
+      setErrorMessage(blankFieldMessage);
+      setErrorKind(null);
+      return;
+    }
 
     if (!portIsValid) {
       setStatus("error");
@@ -157,13 +187,21 @@ export function FirstRunWizard({ onComplete, mode = "setup", savedConfig }: Firs
           <Field label="Porta" value={port} onChange={setPort} inputMode="numeric" />
           <Field label="Banco de dados" value={database} onChange={setDatabase} />
           <Field label="Usuário" value={user} onChange={setUser} />
-          <Field
-            label="Senha"
-            value={password}
-            onChange={setPassword}
-            type="password"
-            autoFocus={isReconnect}
-          />
+          <div>
+            <Field
+              label="Senha"
+              value={password}
+              onChange={setPassword}
+              type="password"
+              autoFocus={isReconnect}
+              required={false}
+            />
+            <p className="mt-1 text-xs text-ink-muted">
+              Deixe em branco se o seu Postgres usa autenticação trust, peer ou ident — nesses
+              casos não existe senha para digitar. Se a conexão falhar, revise a senha primeiro:
+              é a causa mais comum de erro de conexão.
+            </p>
+          </div>
           {isReconnect ? null : (
             <div>
               <Field

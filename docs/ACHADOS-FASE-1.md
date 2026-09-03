@@ -7,15 +7,24 @@ surpresa: o portão está verde e estes problemas passam por ele.
 
 ## Bloqueiam um usuário real
 
-### 1. O campo Senha barra o assistente em silêncio
+### 1. O campo Senha barra o assistente em silêncio — RESOLVIDO (ver Histórico de revisão)
 
-`src/components/FirstRunWizard.tsx` — o `<input>` de Senha nasce `required`.
+`src/components/FirstRunWizard.tsx` — o `<input>` de Senha nascia `required`.
 Quem roda Postgres local com autenticação `trust` não tem senha para digitar, e
-com o campo vazio a validação nativa do HTML5 bloqueia o envio **antes** do
-`onSubmit`: o clique em "Testar conexão" não dispara nada, sem alerta, sem
-mensagem, sem estado de erro. A tela simplesmente não reage.
+com o campo vazio a validação nativa do HTML5 bloqueava o envio **antes** do
+`onSubmit`: o clique em "Testar conexão" não disparava nada, sem alerta, sem
+mensagem, sem estado de erro. A tela simplesmente não reagia.
 
-Esse é o primeiro contato de qualquer pessoa com o Learno, e ele falha mudo.
+Esse era o primeiro contato de qualquer pessoa com o Learno, e ele falhava mudo.
+
+**Conferido na revisão pós-Fase-1 (abaixo): já corrigido.** O campo Senha hoje
+usa `required={false}` (só `aria-required`, nunca o atributo nativo) e
+`blankRequiredFieldMessage()` verifica explicitamente host/banco/usuário mas
+não Senha, com o comentário do próprio arquivo citando este achado como o
+motivo da mudança. `first-run-wizard.e2e.mjs` deixa o campo vazio de
+propósito e afirma `toHaveValue("")`, então o caso que mais importa neste
+projeto — Postgres local sem senha nenhuma — é exatamente o que a prova
+exercita. O critério de aceite de PLT-016 se sustenta para ele.
 
 ### 2. A senha do Postgres é pedida a cada operação
 
@@ -74,19 +83,62 @@ dependem do seletor de arquivo nativo (backup, restauração, import de `.apkg`)
 Funcionou nas provas e2e; se o ACL do Tauri passar a exigir a declaração, os
 três quebram juntos.
 
+### 9. FUN-004 e FUN-006 não têm o teste de mouse que seu próprio tipo declarado exige
+
+`src/features/pages/PageTree.test.tsx` (linha ~367) documenta a intenção
+original: *"FUN-004/005/006 via mouse (arrastar e soltar) ficam para o
+Playwright"* — isto é, os três (reordenar, aninhar, desaninhar por
+arrasto) usam a mesma lógica geométrica (`zoneFromPointerY` contra
+`getBoundingClientRect()`) que só um WebView real exercita de verdade (jsdom
+zera todo `rect`). Só o FUN-005 (aninhar) ganhou esse teste dedicado
+(`e2e/specs/page-tree-drag-and-drop.e2e.mjs`). FUN-004 (reordenar) e FUN-006
+(desaninhar) continuam com `e2e-webdriverio` declarado no checklist — correto,
+é o teste que o critério de aceite (que fala em arrastar com o mouse) exige —
+mas hoje só têm prova por teclado (`Alt+ArrowDown`/`Alt+ArrowLeft`,
+`vitest`) e pela lógica pura de reordenação (`tree-utils.test.ts`), não pelo
+próprio caminho de mouse que o critério descreve. Não é um erro do checklist
+(o tipo declarado está certo) nem falta de implementação (é o mesmo código de
+drag-and-drop já demonstrado funcionando em FUN-005) — é teste que falta
+escrever, mesma categoria dos dois specs que já existem.
+
 ## Itens do checklist mal posicionados
 
 Não são defeitos de código — são erros do próprio `docs/CHECKLIST.md`,
-encontrados só depois que a Fase 1 foi construída:
+encontrados só depois que a Fase 1 foi construída, e corrigidos na revisão
+registrada em `docs/CHECKLIST.md` ("Histórico de revisão" ao final daquele
+arquivo):
 
-- **PLT-017** pede medir desempenho com página de 3.000 blocos, view de 10.000
-  registros e mapa mental de 1.000 nós. Bloco é Fase 2, database é Fase 3, mapa
-  mental é Fase 5. Invarificável na Fase 1 por construção.
+- **PLT-017** pedia medir desempenho com página de 3.000 blocos, view de
+  10.000 registros e mapa mental de 1.000 nós. Bloco é Fase 2, database é Fase
+  3, mapa mental é Fase 5 — invarificável na Fase 1 por construção. Movido
+  para a Fase 5 (a última das três a nascer).
 - **PLT-015** (Check Media) depende de manuseio de mídia que nenhuma fase
-  anterior à 4 introduz.
-- **183 itens** declaram `e2e-playwright`. O runner que existe e funciona é
-  WebdriverIO com `tauri-driver` — o Playwright não dirige o WebView2 do Tauri
-  no Windows. O rótulo mente sobre a ferramenta; ver `docs/e2e.md`.
+  anterior à 4 introduz. Movido para a Fase 4.
+- **PLT-004** (ponte Tauri↔sidecar para import de `.apkg`) — achado novo,
+  encontrado ao varrer o documento inteiro atrás do mesmo erro, como o item
+  acima previa que não andaria sozinho. O critério de aceite exige processar
+  um `.apkg` real de 50MB; o código de hoje (`ipc::commands::import_apkg`) só
+  cobre os caminhos de rejeição, porque o import de fato é SRS-149 (Fase 4).
+  Movido para a Fase 4.
+- **PLT-013** foi conferido e **não** movido: o mecanismo central (backup por
+  cadência + gatilho por "Check Database", ambos Fase 1) já é código real e
+  testável hoje; só um dos três exemplos de gatilho citados no seu critério
+  (`.colpkg`) é Fase 4, e o terceiro ("sync one-way") não corresponde a
+  nenhum item deste documento em nenhuma fase. Registrado aqui em vez de
+  mover o ID — ver o raciocínio completo no Histórico de revisão do
+  checklist.
+- **180 itens** (não 183 — a contagem de 183 estava errada; ver Histórico de
+  revisão do checklist) declaravam `e2e-playwright`. O runner que existe e
+  funciona é WebdriverIO com `tauri-driver` — o Playwright não dirige o
+  WebView2 do Tauri no Windows. O rótulo mentia sobre a ferramenta; todas as
+  ocorrências foram renomeadas para `e2e-webdriverio` (ver `docs/e2e.md`).
+- Auditoria item a item da Fase 1 confirmou mais 7 casos, além de FUN-023 e
+  FUN-037, em que o tipo declarado não batia com o teste real do repositório
+  (FUN-002, FUN-008, FUN-009, FUN-011, FUN-019, FUN-022, FUN-035) — todos
+  corrigidos para `vitest`/`cargo-test`, o tipo que de fato prova cada
+  critério hoje. FUN-004 e FUN-006 foram conferidos e mantidos como
+  `e2e-webdriverio` (a lacuna é de teste que falta escrever, não de rótulo
+  errado — ver achado #9 acima).
 
-A revisão que corrigiria essas três coisas não chegou a rodar (limite de sessão
-no meio da rodada). É a primeira tarefa da Fase 2.
+A revisão que corrigiria essas coisas rodou nesta sessão — resultado completo
+em `docs/CHECKLIST.md`, seção "Histórico de revisão".
