@@ -1,0 +1,105 @@
+/**
+ * EDT-073's indicator badge, EDT-076/077/078's toolbar buttons and EDT-078's
+ * confirmation dialog. Reuses the theme's own custom properties
+ * (src/styles/theme.css) so it follows light/dark automatically, the same
+ * convention `core/editor.css` and `marks/basic/basic-marks.css` follow.
+ */
+
+.ed-synced-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+
+.ed-block.ed-synced {
+  border-left: 2px solid var(--amber);
+  padding-left: 0.4rem;
+}
+
+.ed-synced-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.ed-synced-controls__button {
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ed-synced-controls__button:hover {
+  background: var(--surface-sunken);
+}
+
+.ed-synced-controls__button--danger {
+  color: var(--terracotta);
+  border-color: var(--terracotta);
+}
+
+.ed-synced-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.35);
+  z-index: 50;
+}
+
+.ed-synced-dialog {
+  width: min(26rem, calc(100vw - 2rem));
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface-raised, var(--surface));
+  color: var(--ink);
+  padding: 1.25rem;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+}
+
+.ed-synced-dialog__title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.ed-synced-dialog__body {
+  margin: 0 0 1rem;
+  color: var(--ink-muted);
+}
+
+.ed-synced-dialog__error {
+  margin: 0 0 1rem;
+  color: var(--terracotta);
+}
+
+.ed-synced-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.ed-synced-dialog__button {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.ed-synced-dialog__button--danger {
+  background: var(--terracotta);
+  border-color: var(--terracotta);
+  color: var(--surface);
+}
+
+.ed-synced-dialog__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

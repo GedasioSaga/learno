@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   autosaveClearPending,
@@ -12,8 +12,14 @@ import {
   setPageIcon,
   type PageRow,
 } from "../../lib/ipc";
+import { listBacklinks } from "./backlinks/ipc";
 import { usePageTreeStore } from "./store";
 import { PageWorkspace } from "./PageWorkspace";
+
+vi.mock("./backlinks/ipc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./backlinks/ipc")>();
+  return { ...actual, listBacklinks: vi.fn() };
+});
 
 vi.mock("../../lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/ipc")>();
@@ -44,6 +50,7 @@ const listPageVersionsMock = vi.mocked(listPageVersions);
 const createPageVersionSnapshotMock = vi.mocked(createPageVersionSnapshot);
 const autosaveWritePendingMock = vi.mocked(autosaveWritePending);
 const autosaveClearPendingMock = vi.mocked(autosaveClearPending);
+const listBacklinksMock = vi.mocked(listBacklinks);
 
 function row(overrides: Partial<PageRow> & Pick<PageRow, "id">): PageRow {
   return {
@@ -66,6 +73,7 @@ beforeEach(() => {
   listPageVersionsMock.mockResolvedValue([]);
   autosaveWritePendingMock.mockResolvedValue(undefined);
   autosaveClearPendingMock.mockResolvedValue(undefined);
+  listBacklinksMock.mockResolvedValue([]);
   usePageTreeStore.setState({
     status: "ready",
     errorMessage: null,
@@ -158,10 +166,36 @@ describe("PageWorkspace", () => {
     expect(listPageVersionsMock).toHaveBeenCalledWith("cronograma");
   });
 
-  it("FUN-023: o botão de exportar Markdown da página aberta está presente", () => {
+  it("FUN-023: o botão de exportar Markdown da página aberta está presente", async () => {
     render(<PageWorkspace pageId="cronograma" />);
 
-    expect(screen.getByRole("button", { name: "Exportar como Markdown" })).toBeInTheDocument();
+    // `findBy` (not `getBy`) - no fake timers in this block, so it's free to
+    // flush `Editor`'s async initial load the normal way instead of an
+    // explicit `act()` dance.
+    expect(await screen.findByRole("button", { name: "Exportar como Markdown" })).toBeInTheDocument();
+  });
+
+  it("FUN-044: o rodapé de backlinks é montado para a página aberta e mostra o que veio do backend", async () => {
+    listBacklinksMock.mockResolvedValue([
+      {
+        sourceBlockId: "block-1",
+        sourcePageId: "aula4",
+        sourcePageTitle: "Aula 4",
+        sourceSnippet: "Ver o cronograma da disciplina",
+        targetPageId: "cronograma",
+      },
+    ]);
+    render(<PageWorkspace pageId="cronograma" />);
+
+    expect(await screen.findByRole("heading", { name: "Backlinks" })).toBeInTheDocument();
+    expect(listBacklinksMock).toHaveBeenCalledWith("cronograma");
+  });
+
+  it("sem backlinks, o rodapé não aparece (nunca uma seção 'Backlinks' vazia)", async () => {
+    render(<PageWorkspace pageId="cronograma" />);
+
+    await screen.findByRole("button", { name: "Exportar como Markdown" });
+    expect(screen.queryByRole("heading", { name: "Backlinks" })).not.toBeInTheDocument();
   });
 });
 
@@ -176,6 +210,15 @@ describe("FUN-034: snapshot automático de versão", () => {
 
   it("não cria snapshot antes do intervalo de 10 minutos", async () => {
     render(<PageWorkspace pageId="cronograma" />);
+    // `Editor` (Fase 2) resolves its initial `blocksApi.list_page_blocks`
+    // load a tick after mount, outside the act() boundary `render()` opened
+    // - flush it (still under fake timers, via `advanceTimersByTimeAsync(0)`
+    // rather than a raw `Promise.resolve()`, which wasn't enough to settle
+    // TipTap's own async `useEditor` initialization chain) before anything
+    // else touches the tree.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     await vi.advanceTimersByTimeAsync(9 * 60 * 1000);
 
@@ -184,17 +227,27 @@ describe("FUN-034: snapshot automático de versão", () => {
 
   it("cria um snapshot de autosave a cada 10 minutos de edição contínua, com conteúdo distinto a cada vez", async () => {
     render(<PageWorkspace pageId="cronograma" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     // "Edição contínua": o título muda entre um disparo do timer e outro —
     // sem isso o efeito propositalmente não teria nada novo pra congelar
-    // (ver o comentário de `usePeriodicVersionSnapshot`).
-    usePageTreeStore.setState({
-      pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Cronograma revisado" })]]),
+    // (ver o comentário de `usePeriodicVersionSnapshot`). Wrapped in `act`
+    // because zustand notifies subscribers (`TitleField`, `PageWorkspace`)
+    // synchronously inside `setState` - `Editor`'s own extra render cycle
+    // is what makes that update visible enough to warn on now.
+    act(() => {
+      usePageTreeStore.setState({
+        pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Cronograma revisado" })]]),
+      });
     });
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
 
-    usePageTreeStore.setState({
-      pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Cronograma revisado de novo" })]]),
+    act(() => {
+      usePageTreeStore.setState({
+        pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Cronograma revisado de novo" })]]),
+      });
     });
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
 
@@ -215,9 +268,14 @@ describe("FUN-034: snapshot automático de versão", () => {
 
   it("não repete o snapshot no intervalo seguinte se o título não mudou de novo", async () => {
     render(<PageWorkspace pageId="cronograma" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
-    usePageTreeStore.setState({
-      pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Mudou uma vez" })]]),
+    act(() => {
+      usePageTreeStore.setState({
+        pagesById: new Map([["cronograma", row({ id: "cronograma", title: "Mudou uma vez" })]]),
+      });
     });
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
@@ -237,6 +295,14 @@ describe("PLT-005: autosave do rascunho do título — grava enquanto edita", ()
 
   it("grava o rascunho em disco 3s depois que o usuário para de digitar, antes de qualquer confirmação", async () => {
     render(<PageWorkspace pageId="cronograma" />);
+    // `Editor` (Fase 2) loads its blocks via a real Promise (`blocksApi`,
+    // not mocked here) — one microtask tick after mount, outside any act()
+    // boundary `render()` itself opened. Flushing it here, still with fake
+    // timers, is what `findBy` would do under real timers (see the comment
+    // below on why `findBy` itself is off the table with fake timers active).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     // Synchronous `getByLabelText`, not `findBy` — with fake timers active,
     // a `findBy`'s internal `waitFor` sits waiting on a polling `setTimeout`
@@ -258,6 +324,9 @@ describe("PLT-005: autosave do rascunho do título — grava enquanto edita", ()
 
   it("uma tecla nova reinicia o debounce em vez de acumular gravações", async () => {
     render(<PageWorkspace pageId="cronograma" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     const titleField = screen.getByLabelText("Título da página");
     fireEvent.change(titleField, { target: { value: "Cronograma A" } });

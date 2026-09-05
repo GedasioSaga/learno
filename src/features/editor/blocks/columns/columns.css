@@ -1,0 +1,92 @@
+/*
+ * EDT-033: colunas / layout multi-coluna.
+ *
+ * `.ed-column-list` e `.ed-column` (as próprias divs de `column-nodes.ts`)
+ * não mostram nada por si - são âncoras de `id`/`data-*`. Quem vira uma
+ * linha flex é `.ed-children`, a div genérica do core para QUALQUER
+ * `childBlocks` (toggle, indentação de Tab...); por isso o seletor de irmão
+ * adjacente (`.ed-column-list + .ed-children`) é essencial aqui: sem ele,
+ * este CSS afetaria a indentação de todo bloco aninhado do editor inteiro,
+ * não só as colunas. A largura de cada coluna em si (uma fração numérica por
+ * instância) não cabe em CSS estático - `column-node-view.ts` escreve
+ * `flex-basis` via JS diretamente no wrapper (`.ed-block-wrapper`) de cada
+ * coluna, e é por isso que a fronteira de arrastar/redimensionar (`:has()`,
+ * suportado no WebView2/Chromium que este app roda) também depende de JS
+ * para não travar num container "auto".
+ */
+
+.ed-column-list {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ed-column-list + .ed-children {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-left: 0;
+  border-left: none;
+}
+
+/* Cada coluna, dentro da linha flex acima, é um item que não deve
+   transbordar o texto que carrega - flex items têm `min-width: auto` por
+   padrão, o que ignoraria `flex-basis` sempre que o conteúdo for largo
+   (uma frase sem espaço, um bloco de código). */
+.ed-column-list + .ed-children > .ed-block-wrapper {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.ed-column {
+  height: 0;
+  overflow: visible; /* a alça (abaixo) vive fora da própria caixa, de altura zero */
+}
+
+/* A alça de redimensionar precisa de um ancestral posicionado que cubra a
+   altura inteira da coluna - isso é o `.ed-block-wrapper` dela (avô do
+   `.ed-column`, pai de tudo que a coluna realmente mostra), nunca a div
+   `.ed-column` em si (altura zero). */
+.ed-block-wrapper:has(> .ed-column) {
+  position: relative;
+}
+
+.ed-column-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -0.3rem;
+  width: 0.6rem;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.ed-column-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.ed-column-resize-handle:hover::before,
+.ed-column-resize-handle:focus-visible::before {
+  background: var(--border);
+}
+
+/* O estado "em foco" nunca depende só da cor da barra (regra de
+   acessibilidade do projeto): o anel de foco do próprio botão já é o sinal
+   principal. */
+.ed-column-resize-handle:focus-visible {
+  outline: 2px solid var(--emerald);
+  outline-offset: 1px;
+}

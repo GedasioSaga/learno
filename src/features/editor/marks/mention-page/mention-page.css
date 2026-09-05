@@ -1,0 +1,66 @@
+/**
+ * EDT-044's chip and its "@" suggestion popup. Theme custom properties only
+ * (src/styles/theme.css) so both follow light/dark automatically, same
+ * convention as core/editor.css.
+ */
+
+.ed-mention-page {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+  background-color: var(--surface-sunken);
+  color: var(--amber-ink);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ed-mention-page:hover {
+  background-color: var(--surface);
+}
+
+.ed-mention-page:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.ed-mention-page-menu {
+  min-width: 12rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background-color: var(--surface);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  padding: 0.25rem;
+}
+
+.ed-mention-page-menu__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ed-mention-page-menu__item {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.25rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ed-mention-page-menu__item--active {
+  background-color: var(--surface-sunken);
+}
+
+/* Marcador de texto além da cor de fundo - a seleção nunca é comunicada só por cor. */
+.ed-mention-page-menu__item--active::before {
+  content: "▸ ";
+  color: var(--amber-ink);
+}
+
+.ed-mention-page-menu__empty {
+  padding: 0.3rem 0.5rem;
+  color: var(--ink-muted);
+}

@@ -1,0 +1,122 @@
+/**
+ * EDT-017: o bloco em si (renderizado pelo NodeView de `LinkToPageView.tsx`)
+ * e o seletor de página de `PageLinkPicker.tsx`. Plain CSS, não Tailwind -
+ * mesma convenção de `core/editor.css`: o conteúdo do bloco nasce de
+ * `renderHTML`/NodeView, não de JSX de app comum, e reusa as mesmas
+ * variáveis de tema para funcionar em claro e escuro sem regra própria.
+ */
+
+.ed-link-to-page {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--surface-sunken);
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.ed-link-to-page:hover {
+  background: var(--surface-raised, var(--surface));
+}
+
+.ed-link-to-page:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.ed-link-to-page--selected {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.ed-link-to-page--missing {
+  cursor: default;
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.ed-link-to-page__icon {
+  flex: none;
+}
+
+.ed-link-to-page__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 0.15rem;
+}
+
+.ed-link-to-page--missing .ed-link-to-page__title {
+  text-decoration: none;
+  font-style: italic;
+}
+
+.ed-page-link-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.ed-page-link-picker {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 22rem;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  overflow: hidden;
+}
+
+.ed-page-link-picker__input {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.ed-page-link-picker__empty {
+  padding: 0.75rem;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.ed-page-link-picker__list {
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+
+.ed-page-link-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ed-page-link-picker__item:hover,
+.ed-page-link-picker__item:focus-visible {
+  background: var(--surface-sunken);
+}

@@ -1,0 +1,183 @@
+/**
+ * Visual rendering for the structural block types (schema.ts). Reuses the
+ * theme's own custom properties (src/styles/theme.css) instead of hardcoded
+ * colors so the editor follows light/dark automatically. Deliberately plain
+ * CSS, not Tailwind utility classes: ProseMirror's `renderHTML` builds these
+ * elements directly (no JSX), and a few things here - the numbered-list
+ * counter, hiding a collapsed toggle's children - have no Tailwind utility
+ * equivalent anyway.
+ */
+
+.ed-root {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  outline: none;
+}
+
+.ed-root .ed-block {
+  padding: 0.15rem 0.1rem;
+  border-radius: 0.2rem;
+}
+
+.ed-root .ed-block:focus-within {
+  background-color: var(--surface-sunken);
+}
+
+.ed-children {
+  margin-left: 1.6rem;
+  border-left: 1px solid transparent;
+}
+
+.ed-heading--1 {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-top: 0.5rem;
+}
+
+.ed-heading--2 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-top: 0.4rem;
+}
+
+.ed-heading--3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-top: 0.3rem;
+}
+
+.ed-list-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.ed-list-item::before {
+  flex: none;
+  color: var(--ink-muted);
+}
+
+.ed-list-item--bulleted::before {
+  content: "•";
+}
+
+/* EDT-008: renumbering is free - the counter recomputes from DOM order on
+   every render, no stored index to keep in sync. Any non-numbered sibling
+   (a paragraph split off via Enter, say) resets the count that follows. */
+.ed-root {
+  counter-reset: ed-numbered-list;
+}
+
+.ed-list-item--numbered {
+  counter-increment: ed-numbered-list;
+}
+
+.ed-list-item--numbered::before {
+  content: counter(ed-numbered-list) ".";
+}
+
+.ed-todo {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.ed-todo__checkbox {
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.2rem;
+  border: 1.5px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.ed-todo[data-checked="true"] .ed-todo__checkbox {
+  background: var(--emerald);
+  border-color: var(--emerald);
+}
+
+.ed-todo[data-checked="true"] .ed-todo__content {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+}
+
+.ed-toggle {
+  display: flex;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+
+.ed-toggle__arrow {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transform: rotate(90deg);
+  transition: transform 0.1s ease;
+}
+
+.ed-toggle[data-collapsed="true"] .ed-toggle__arrow {
+  transform: rotate(0deg);
+}
+
+.ed-toggle__arrow::before {
+  content: "▸";
+}
+
+.ed-toggle[data-collapsed="true"] .ed-children {
+  display: none;
+}
+
+.ed-quote {
+  border-left: 3px solid var(--terracotta);
+  padding-left: 0.75rem;
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.ed-callout {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-sunken);
+  border-radius: 0.4rem;
+}
+
+.ed-callout::before {
+  content: attr(data-emoji);
+  flex: none;
+}
+
+.ed-divider {
+  height: 1px;
+  margin: 0.75rem 0;
+  background: var(--border);
+}
+
+/* The single selection toolbar `Editor.tsx` renders around every registered
+   `FormattingMenuItem` (see `block-spec.ts`). The buttons themselves are
+   each builder's own markup - this only owns the bar they sit in. */
+.ed-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+.ed-toolbar__item {
+  display: inline-flex;
+  align-items: center;
+}

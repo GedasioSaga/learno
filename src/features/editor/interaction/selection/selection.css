@@ -1,0 +1,43 @@
+/**
+ * Destaque dos blocos sob seleção múltipla (EDT-053/054) - a decoração de
+ * `selection-state.ts` só aplica esta classe no `.ed-block-wrapper` de cada
+ * bloco selecionado, toda a aparência mora aqui. `color-mix` contra as
+ * variáveis do tema (`--amber`) em vez de uma cor fixa, pra funcionar em
+ * claro e escuro sem duplicar a regra.
+ */
+/*
+ * A calha de EDT-053: a faixa vazia à esquerda dos blocos onde começa o
+ * arrasto de seleção.
+ *
+ * Sem isto o gesto não tem onde acontecer, e o `mousedown` de
+ * `selection-mouse.ts` era código morto. Medido no WebView2: `.ed-root`
+ * começava exatamente no mesmo x do primeiro `.ed-block-wrapper`, porque a
+ * faixa vazia visível ali é o `p-8` do container rolável de `Editor.tsx` —
+ * FORA do editor. Um `mousedown` naquela faixa nunca chegava ao ProseMirror
+ * (o evento não acontece dentro de `view.dom`), então "à esquerda da caixa
+ * do wrapper" e "dentro do editor" eram condições mutuamente exclusivas.
+ *
+ * `margin-left` negativa + `padding-left` de mesmo valor estica a caixa de
+ * `.ed-root` para dentro dessa faixa SEM mover a coluna de texto um pixel: o
+ * padding devolve o conteúdo para onde ele já estava. Some da conta do
+ * `p-8` (32px) do container, então nada transborda nem muda de lugar
+ * visualmente. Segue a mesma convenção de `drag.css`: este builder só
+ * ACRESCENTA propriedades a `.ed-root`/`.ed-block-wrapper` (o core define
+ * fonte, cor, outline e o contador de lista), nunca sobrescreve o que o core
+ * já declarou.
+ *
+ * Fica à esquerda da alça de arrastar (`drag.css`, `right: -1.7rem`) e não
+ * alcança o gatilho de "turn into" (`turn-into-handle.css`, `left: -3.1rem`
+ * ≈ 50px do wrapper, ainda fora desta calha de 28px).
+ */
+.ed-root {
+  margin-left: -1.75rem;
+  padding-left: 1.75rem;
+}
+
+.ed-block-wrapper--selected {
+  background-color: color-mix(in srgb, var(--amber) 16%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  outline-offset: -1px;
+  border-radius: 0.25rem;
+}

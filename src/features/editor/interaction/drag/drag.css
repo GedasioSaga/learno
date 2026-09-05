@@ -1,0 +1,59 @@
+/**
+ * Alça de arrastar bloco (EDT-050/EDT-051) - dois pontos verticais,
+ * visível ao passar o mouse. `.ed-block-wrapper` é do core
+ * (`core/schema.ts`); a regra abaixo só acrescenta `position: relative`
+ * pra dar contexto de posicionamento à alça, nunca sobrescreve nada que o
+ * core já define nela.
+ *
+ * FICA À DIREITA do bloco, não à esquerda - `interaction/turn-into/
+ * turn-into-handle.ts`'s próprio cabeçalho pede um handle irmão "mais para
+ * fora" (left: -3.1rem) na mesma faixa esquerda que ele ocupa
+ * (-1.6rem..-0.3rem), mas medido contra a página real (e2e, WebView2) essa
+ * faixa esquerda inteira - a área de padding do container rolável
+ * (`.overflow-y-auto`) antes do texto começar - tem só ~30px de largura, e
+ * o handle do turn-into (largura 1.3rem) já ocupa quase toda ela: sobra
+ * ~6px de um lado, ~4.5px do outro - nenhum dos dois cabe uma segunda alça
+ * de ~1.25rem sem ela ser cortada pelo próprio `overflow-x` do container
+ * (confirmado com `document.elementFromPoint`: a -3.1rem e a -2.85rem o
+ * ponto no centro da alça voltava o container-pai, não o botão - a alça
+ * existia no DOM mas estava fora da área visível/testável por hit-test).
+ * O lado direito do bloco tem a mesma folga (~30px) inteiramente livre.
+ */
+.ed-block-wrapper {
+  position: relative;
+}
+
+.ed-drag-handle {
+  position: absolute;
+  right: -1.7rem;
+  top: 0.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.ed-block-wrapper:hover > .ed-drag-handle,
+.ed-drag-handle:focus-visible {
+  opacity: 1;
+}
+
+.ed-drag-handle:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.ed-drag-handle:active {
+  cursor: grabbing;
+}

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { EmptyState } from "../../components/EmptyState";
 import { createPageVersionSnapshot } from "../../lib/ipc";
 import { ExportMarkdownButton, useAutosaveDraft } from "../backup";
+import { Editor } from "../editor";
 import { VersionHistoryDialog } from "../history";
 import { Breadcrumb } from "./Breadcrumb";
+import { BacklinksSection } from "./backlinks";
 import { EmojiIconPicker } from "./EmojiIconPicker";
 import { usePageTreeStore } from "./store";
 import { displayTitle } from "./tree-utils";
@@ -58,8 +60,8 @@ function usePeriodicVersionSnapshot(pageId: string, title: string | undefined) {
  * Cabeçalho de uma página aberta: breadcrumb (FUN-019), ícone (FUN-011),
  * título editável e a estrela de favoritar (FUN-008 é especificamente essa
  * estrela "no topo" — a remoção pelo menu de contexto, FUN-009, mora em
- * `PageContextMenu`). O corpo abaixo é um placeholder de propósito: o editor
- * de blocos em si é de outro builder da Fase 1, fora do escopo da árvore.
+ * `PageContextMenu`). O corpo abaixo monta o editor de blocos da Fase 2
+ * (`features/editor`) — ver `Editor`'s próprio hook de carregamento/save.
  */
 export function PageWorkspace({ pageId }: PageWorkspaceProps) {
   const page = usePageTreeStore((state) => state.pagesById.get(pageId));
@@ -86,6 +88,9 @@ export function PageWorkspace({ pageId }: PageWorkspaceProps) {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border px-8 py-4">
+        {/* FUN-019/FUN-045: `Breadcrumb` deriva a trilha da store da árvore,
+            então renomear um ancestral com a página aberta já atualiza aqui —
+            sem remount e sem ida nova ao backend. */}
         <Breadcrumb pageId={pageId} />
         <div className="mt-3 flex items-center gap-2">
           <EmojiIconPicker
@@ -140,10 +145,15 @@ export function PageWorkspace({ pageId }: PageWorkspaceProps) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-8">
-        <EmptyState
-          title="Conteúdo em construção"
-          description="O editor de blocos desta página é de outra parte do Learno — esta tela cuida só de navegação e organização."
-        />
+        {/* `key={page.id}` força uma instância nova do editor por página —
+            sem isso, a subárvore React de um <Editor> saindo de "Aula 1"
+            para "Aula 2" seria só re-renderizada, e o `useEditor` interno
+            já cuida da troca de conteúdo via seu próprio array de deps
+            (`use-blocks-document.ts`), mas o `key` garante que nenhum
+            estado de DOM/seleção de uma página vaze visualmente para a
+            próxima durante o frame de transição. */}
+        <Editor key={page.id} pageId={page.id} />
+        <BacklinksSection pageId={page.id} />
       </div>
 
       <VersionHistoryDialog

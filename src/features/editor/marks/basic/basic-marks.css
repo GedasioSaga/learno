@@ -1,0 +1,66 @@
+/* Buttons for the five basic marks (EDT-035/036/038/039 + underline) inside
+   core's selection toolbar (`.ed-toolbar`, owned by `core/editor.css`) -
+   this file only owns the buttons themselves. Uses the app's theme
+   variables so it matches light and dark without its own media query. */
+
+/* EDT-039: the `<code>` mark itself, as it renders inside the document
+   (`.ed-root`, owned by `core/editor.css`) - distinct from the toolbar
+   button below, which only toggles it. Needs its own background because a
+   bare `<code>` inherits no styling from `.ed-root`'s font-family. */
+.ed-root code {
+  padding: 0.125rem 0.3rem;
+  border-radius: 0.25rem;
+  background: var(--surface-sunken);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.ed-mark-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.375rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-mark-button:hover {
+  background: var(--surface-sunken);
+}
+
+.ed-mark-button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.ed-mark-button--active {
+  background: var(--surface-sunken);
+  color: var(--emerald);
+}
+
+.ed-mark-button[data-mark="bold"] {
+  font-weight: 700;
+}
+
+.ed-mark-button[data-mark="italic"] {
+  font-style: italic;
+}
+
+.ed-mark-button[data-mark="strike"] {
+  text-decoration: line-through;
+}
+
+.ed-mark-button[data-mark="code"] {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.ed-mark-button[data-mark="underline"] {
+  text-decoration: underline;
+}

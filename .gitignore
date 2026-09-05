@@ -52,3 +52,7 @@ sidecar/dist/
 # reproduzível a qualquer momento por download.
 e2e/.bin/
 e2e/wdio-logs/
+
+# Grafo de código do graphify: 1,9MB derivados do próprio repo, reconstruíveis
+# por `graphify update .` e obsoletos a cada commit (ver §2d do CLAUDE.md).
+graphify-out/

@@ -1,0 +1,100 @@
+.ed-code-block {
+  margin: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.ed-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.ed-code-block__language {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+}
+
+.ed-code-block__language:hover,
+.ed-code-block__language:focus-visible {
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.ed-code-block__copy {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+
+.ed-code-block__copy:hover,
+.ed-code-block__copy:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink-muted);
+}
+
+.ed-code-block__pre {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  overflow-x: auto;
+}
+
+.ed-code-block__code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre;
+}
+
+/* Cores distintas por token (EDT-018): palavra-chave, string e comentário
+   nunca compartilham cor, para não depender só da posição pra diferenciar. */
+.ed-code-block__code .hljs-comment,
+.ed-code-block__code .hljs-quote {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.ed-code-block__code .hljs-keyword,
+.ed-code-block__code .hljs-selector-tag,
+.ed-code-block__code .hljs-operator {
+  color: var(--terracotta);
+}
+
+.ed-code-block__code .hljs-string,
+.ed-code-block__code .hljs-doctag,
+.ed-code-block__code .hljs-regexp {
+  color: var(--emerald);
+}
+
+.ed-code-block__code .hljs-number,
+.ed-code-block__code .hljs-literal {
+  color: var(--amber);
+}
+
+.ed-code-block__code .hljs-title,
+.ed-code-block__code .hljs-section,
+.ed-code-block__code .hljs-built_in,
+.ed-code-block__code .hljs-name {
+  color: var(--mint);
+}
+
+.ed-code-block__code .hljs-attr,
+.ed-code-block__code .hljs-attribute,
+.ed-code-block__code .hljs-variable {
+  color: var(--amber);
+}

@@ -1,0 +1,127 @@
+/**
+ * EDT-045: o chip inline, o dropdown de sugestões e o mini-calendário.
+ * Vars do tema (src/styles/theme.css) só, como `core/editor.css` - segue
+ * claro/escuro sem regra própria.
+ */
+
+.ed-mention-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface-sunken);
+  color: var(--terracotta);
+  font: inherit;
+  font-size: 0.9em;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ed-mention-date:hover {
+  background: var(--surface-raised, var(--surface));
+}
+
+.ed-mention-date:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.ed-mention-date-suggestion {
+  position: fixed;
+  z-index: 40;
+  min-width: 12rem;
+  max-width: 18rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.ed-mention-date-suggestion__empty {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.9em;
+}
+
+.ed-mention-date-suggestion__item {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ed-mention-date-suggestion__item:hover,
+.ed-mention-date-suggestion__item--active {
+  background: var(--surface-sunken);
+}
+
+.ed-mention-date-calendar {
+  position: fixed;
+  z-index: 40;
+  width: 15.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  outline: none;
+}
+
+.ed-mention-date-calendar__month {
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: center;
+}
+
+.ed-mention-date-calendar__weekdays,
+.ed-mention-date-calendar__week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.ed-mention-date-calendar__weekdays span {
+  padding: 0.15rem 0;
+  color: var(--ink-muted);
+  font-size: 0.75em;
+  text-align: center;
+}
+
+.ed-mention-date-calendar__day {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ed-mention-date-calendar__day.is-outside {
+  color: var(--ink-muted);
+}
+
+.ed-mention-date-calendar__day:hover {
+  background: var(--surface-sunken);
+}
+
+.ed-mention-date-calendar__day.is-selected {
+  background: var(--emerald);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.ed-mention-date-calendar__day:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}

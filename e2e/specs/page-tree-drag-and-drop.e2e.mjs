@@ -18,8 +18,8 @@
 // first-run-wizard.e2e.mjs) — é só o caminho que existe para chegar à
 // árvore de páginas.
 
-import { execFileSync } from "node:child_process";
 import { TEST_DB } from "../lib/env.mjs";
+import { psql, psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
 
 const STAMP = Date.now();
 const PARENT_TITLE = `E2E Destino ${STAMP}`;
@@ -36,21 +36,11 @@ function treeItemByTitle(title) {
 
 /** Confirma no Postgres real — não só no DOM — que `parent_id` mudou (o que o critério de aceite do FUN-005 exige). */
 function parentIdOf(title) {
-  const url = `postgresql://${TEST_DB.user}@${TEST_DB.host}:${TEST_DB.port}/${TEST_DB.database}`;
-  const out = execFileSync(
-    "psql",
-    [url, "-tAc", `select parent_id from pages where title = '${title}'`],
-    { encoding: "utf-8" },
-  );
-  return out.trim();
+  return psql(`select parent_id from pages where title = ${sqlLiteral(title)}`);
 }
 
 function idOf(title) {
-  const url = `postgresql://${TEST_DB.user}@${TEST_DB.host}:${TEST_DB.port}/${TEST_DB.database}`;
-  const out = execFileSync("psql", [url, "-tAc", `select id from pages where title = '${title}'`], {
-    encoding: "utf-8",
-  });
-  return out.trim();
+  return psql(`select id from pages where title = ${sqlLiteral(title)}`);
 }
 
 async function createRootPage(title) {
@@ -86,12 +76,7 @@ describe("FUN-005 — arrastar uma página sobre outra a torna sua sub-página",
   after(() => {
     // Limpeza do próprio banco de teste descartável — mantém a suíte
     // repetível sem acumular páginas de execuções anteriores.
-    const url = `postgresql://${TEST_DB.user}@${TEST_DB.host}:${TEST_DB.port}/${TEST_DB.database}`;
-    try {
-      execFileSync("psql", [url, "-c", `delete from pages where title in ('${PARENT_TITLE}', '${CHILD_TITLE}')`]);
-    } catch {
-      // Limpeza best-effort — não deve derrubar o resultado do teste em si.
-    }
+    psqlQuiet(`delete from pages where title in (${sqlLiteral(PARENT_TITLE)}, ${sqlLiteral(CHILD_TITLE)})`);
   });
 
   it("cria duas páginas raiz para o cenário", async () => {

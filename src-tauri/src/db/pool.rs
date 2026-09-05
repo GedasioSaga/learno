@@ -6,11 +6,11 @@
 
 use std::path::Path;
 
-use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
 use crate::backup;
 use crate::config::{self, AppConfig, ConnectionTestInput};
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// Bounds how many concurrent Postgres connections the app opens. Fixed
 /// rather than configurable: a single local desktop user never needs more,
@@ -64,6 +64,78 @@ async fn has_a_pending_migration_against_established_history(pool: &PgPool) -> R
     Ok(MIGRATOR.iter().any(|migration| !applied.contains(&migration.version)))
 }
 
+/// True exactly when `error` is Postgres's own SQLSTATE `3D000`
+/// (`invalid_catalog_name`) — the code it returns when `connect`/`connect_with`
+/// targets a database that doesn't exist on an otherwise-reachable server.
+/// Matched on the structured code from [`DatabaseError::code`], never on the
+/// error's rendered message: message text is meant for humans and can change
+/// wording across Postgres versions or locales, while the SQLSTATE code is a
+/// stable, documented contract. Any connection failure that never got a
+/// response from a real Postgres server at all (`Io`, `Tls`, timeout, ...) is
+/// a different `sqlx::Error` variant entirely and answers `false` here, same
+/// as a `Database` error carrying a different code (wrong password, no
+/// permission).
+fn is_missing_database_error(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("3D000"))
+}
+
+/// Creates `connection.database` on the same server `connection` already
+/// points at, so [`connect_migrate_with_rollback`] can retry the real
+/// connection afterwards. Called only from the `3D000` branch there — never
+/// on its own — so a first-run user only ever needs a Postgres *server*
+/// running, not a pre-created database reached by hand through psql/pgAdmin.
+///
+/// Opens a second, short-lived connection to `postgres` — the maintenance
+/// database every real Postgres server ships with, and the one database
+/// guaranteed to exist precisely in the case this function is called for
+/// (the target one doesn't). `CREATE DATABASE` can't run against the
+/// database it's creating, and a session can't switch databases mid-
+/// connection, so this has to be a separate connection rather than reusing
+/// anything `connect_migrate_with_rollback` already opened.
+///
+/// `connection.database` is free text the first-run wizard's user typed
+/// (`ConnectionTestInput::database`), and Postgres has no bind-parameter
+/// syntax for a DDL identifier (`CREATE DATABASE $1` isn't valid SQL) — so
+/// this is deliberately two independent defenses, not one:
+/// [`config::validate_database_identifier`] rejects anything outside a
+/// strict ASCII allow-list before any SQL is built at all, and the `"`
+/// doubling below escapes the one character that could still break out of
+/// the quoted identifier, as defense in depth in case that validation is
+/// ever bypassed by a future caller.
+async fn create_database(connection: &ConnectionTestInput) -> Result<()> {
+    use sqlx::Connection;
+
+    config::validate_database_identifier(&connection.database)?;
+
+    let admin_options = PgConnectOptions::new()
+        .host(&connection.host)
+        .port(connection.port)
+        .username(&connection.user)
+        .password(&connection.password)
+        .database("postgres");
+
+    let mut admin_connection = sqlx::PgConnection::connect_with(&admin_options).await?;
+
+    let escaped_name = connection.database.replace('"', "\"\"");
+    let create_result = sqlx::query(&format!("CREATE DATABASE \"{escaped_name}\""))
+        .execute(&mut admin_connection)
+        .await;
+
+    // Best-effort close: the outcome of `CREATE DATABASE` above is what the
+    // caller actually needs, and a failure to close a connection this
+    // function is discarding either way shouldn't shadow that outcome.
+    let _ = admin_connection.close().await;
+
+    create_result.map_err(|error| {
+        Error::Config(format!(
+            "não foi possível criar o banco \"{}\" automaticamente — confirme que o usuário \"{}\" tem permissão CREATEDB neste servidor Postgres ({error})",
+            connection.database, connection.user
+        ))
+    })?;
+
+    Ok(())
+}
+
 /// PLT-020: like [`connect_and_migrate`], but when upgrading a database that
 /// already has committed migration history to a version with a pending
 /// migration, it's `pg_dump`-backed up to `backup_dir` first, and that
@@ -80,10 +152,29 @@ async fn has_a_pending_migration_against_established_history(pool: &PgPool) -> R
 /// `backup_dir` holds only this function's own pre-migration safety net; it
 /// is a separate concern from the user-facing PLT-011/PLT-013 backups.
 pub async fn connect_migrate_with_rollback(connection: &ConnectionTestInput, backup_dir: &Path) -> Result<PgPool> {
-    let pool = PgPoolOptions::new()
+    let pool = match PgPoolOptions::new()
         .max_connections(MAX_POOL_CONNECTIONS)
         .connect_with(config::build_connect_options(connection))
-        .await?;
+        .await
+    {
+        Ok(pool) => pool,
+        // 3D000 (`invalid_catalog_name`) is Postgres's own code for "no
+        // database by that name on this server" — checked on the error
+        // itself, never on `to_string()`, so this branch can't ever
+        // misfire against, say, a wrong-password message that happens to
+        // mention the database name. Any other failure (wrong password,
+        // host unreachable, no permission) falls through to `?` below and
+        // propagates exactly as it did before this function knew how to
+        // create anything.
+        Err(error) if is_missing_database_error(&error) => {
+            create_database(connection).await?;
+            PgPoolOptions::new()
+                .max_connections(MAX_POOL_CONNECTIONS)
+                .connect_with(config::build_connect_options(connection))
+                .await?
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     if !has_a_pending_migration_against_established_history(&pool).await? {
         sqlx::migrate!().run(&pool).await?;
@@ -148,6 +239,25 @@ mod tests {
             versions.windows(2).all(|pair| pair[0] < pair[1]),
             "migration versions must be strictly increasing, got {versions:?}"
         );
+    }
+
+    // `sqlx::Error::Database`'s inner `PgDatabaseError` isn't constructible
+    // outside the sqlx-postgres crate (its field is `pub(crate)`), so these
+    // two cover the "definitely false" branches the same way
+    // `connection_failure_is_credential_related`'s tests do in
+    // `ipc::commands` — the "actually 3D000" branch is proven by
+    // `live_database::connect_migrate_with_rollback_creates_a_missing_database_and_migrates_it`
+    // below, against a real server.
+    #[test]
+    fn is_missing_database_error_is_false_for_a_socket_level_error() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "recusada");
+        assert!(!super::is_missing_database_error(&sqlx::Error::Io(io_error)));
+    }
+
+    #[test]
+    fn is_missing_database_error_is_false_for_a_configuration_error() {
+        let boxed: Box<dyn std::error::Error + Send + Sync> = "url malformada".into();
+        assert!(!super::is_missing_database_error(&sqlx::Error::Configuration(boxed)));
     }
 
     #[test]
@@ -228,6 +338,48 @@ mod tests {
             let normalized: String =
                 sqlx::query_scalar("SELECT immutable_unaccent('revisão')").fetch_one(&pool).await.unwrap();
             assert_eq!(normalized, "revisao");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires LEARNO_TEST_DATABASE_URL"]
+        async fn connect_migrate_with_rollback_creates_a_missing_database_and_migrates_it() {
+            // Guaranteed not to already exist on the cluster — this is the
+            // exact gap this test closes: before the fix, pointing
+            // `connect_migrate_with_rollback` at a name like this failed
+            // with Postgres's 3D000 (`invalid_catalog_name`) and left the
+            // user stuck running `CREATE DATABASE` by hand before the
+            // first-run wizard could even get started.
+            let db_name = format!("learno_autocreate_test_{}", uuid::Uuid::new_v4().simple());
+            let connection = test_cluster_connection(&db_name);
+            let backup_dir = std::env::temp_dir().join(format!("learno-autocreate-{}", uuid::Uuid::new_v4()));
+
+            let pool = connect_migrate_with_rollback(&connection, &backup_dir).await.unwrap();
+
+            let applied_versions: Vec<i64> =
+                sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success ORDER BY version")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            let expected_versions: Vec<i64> = MIGRATOR.iter().map(|migration| migration.version).collect();
+            assert_eq!(
+                applied_versions, expected_versions,
+                "the auto-created database must end up with every embedded migration applied"
+            );
+            // A brand-new database has no migration history to protect, so
+            // this never takes the PLT-020 backup branch (see
+            // `plt_020_...` below for that branch specifically).
+            assert!(!backup_dir.exists(), "a brand-new database has nothing to back up");
+            pool.close().await;
+
+            // Cleanup: this test must not leave a database behind on the
+            // shared dev cluster. `WITH (FORCE)` drops it even though the
+            // `pool` above may still have idle connections open — same
+            // pattern `plt_020_...` below uses.
+            let mut admin_connection = sqlx::PgConnection::connect(&test_database_url()).await.unwrap();
+            sqlx::query(&format!("DROP DATABASE \"{db_name}\" WITH (FORCE)"))
+                .execute(&mut admin_connection)
+                .await
+                .unwrap();
         }
 
         #[tokio::test]

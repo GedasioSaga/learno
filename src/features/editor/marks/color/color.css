@@ -1,0 +1,82 @@
+/**
+ * `ColorMenuButton`'s own styles - lives beside its component and is
+ * imported only from `register.ts` (see the README: `core/editor.css` is
+ * core's, not this folder's, to touch).
+ */
+.ed-color-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.ed-color-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ed-color-menu__trigger:hover,
+.ed-color-menu__trigger[aria-expanded="true"] {
+  background: var(--surface-sunken);
+}
+
+.ed-color-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  min-width: 12.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+.ed-color-menu__group-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+.ed-color-menu__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.ed-color-menu__swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.65rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ed-color-menu__clear {
+  border: 1px dashed var(--border);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}

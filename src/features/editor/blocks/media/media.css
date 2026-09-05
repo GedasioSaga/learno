@@ -1,0 +1,168 @@
+/**
+ * Visual dos quatro blocos de mídia (EDT-024/025/026/027). Segue a mesma
+ * convenção de `core/editor.css`: variáveis do tema (theme.css), não cor
+ * fixa, para funcionar em claro e escuro sem regra própria.
+ */
+
+.ed-media {
+  padding: 0.4rem 0.1rem;
+}
+
+.ed-media__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ed-media__status {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.4rem;
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.ed-media__status--error {
+  color: var(--terracotta);
+  border: 1px solid var(--terracotta);
+  background: transparent;
+}
+
+.ed-media__picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-sunken);
+}
+
+.ed-media__pick-button {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ed-media__pick-button:hover {
+  background: var(--surface-raised, var(--surface));
+}
+
+.ed-media__url-form {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ed-media__url-form input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ed-media__url-form button {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* EDT-024: a imagem ocupa a largura do bloco por padrão (100%) e é
+   redimensionável pela borda direita - a alça só aparece visualmente no
+   hover/focus para não poluir a leitura do resto do documento. */
+.ed-media__image-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ed-media__image {
+  display: block;
+  width: 100%;
+  border-radius: 0.4rem;
+}
+
+.ed-media__resize-handle {
+  position: absolute;
+  top: 0;
+  right: -0.35rem;
+  bottom: 0;
+  width: 0.7rem;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.ed-media__resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  width: 0.2rem;
+  height: 2rem;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--amber);
+}
+
+.ed-media__image-wrap:hover .ed-media__resize-handle,
+.ed-media__resize-handle:focus-visible {
+  opacity: 1;
+}
+
+.ed-media__caption {
+  padding: 0.3rem 0.4rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.ed-media__caption:focus {
+  background: var(--surface-sunken);
+}
+
+.ed-media__video,
+.ed-media__audio {
+  width: 100%;
+  border-radius: 0.4rem;
+}
+
+.ed-media__file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface-sunken);
+}
+
+.ed-media__file-icon {
+  flex: none;
+  font-size: 1.1rem;
+}
+
+.ed-media__file-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.ed-media__file-link {
+  flex: none;
+  color: var(--mint);
+  text-decoration: underline;
+}

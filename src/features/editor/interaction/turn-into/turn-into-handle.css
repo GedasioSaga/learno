@@ -1,0 +1,88 @@
+/**
+ * EDT-049's block handle. Reuses the theme's own custom properties
+ * (src/styles/theme.css, same ones core/editor.css uses) so it follows
+ * light/dark automatically - no color of its own is invented here.
+ *
+ * `.ed-block-wrapper` getting `position: relative` here is this handle's
+ * positioning anchor, not a change owned by core (see turn-into-handle.ts's
+ * header) - core's own editor.css never sets `position` on that selector,
+ * so this only adds behavior, nothing overrides it.
+ */
+
+.ed-block-wrapper {
+  position: relative;
+}
+
+.ed-block-handle {
+  position: absolute;
+  top: 0.15rem;
+  /* Reserves rem 0..1.6 to the left of the block for this handle - see
+     turn-into-handle.ts's header for the offset a sibling drag handle
+     should stay clear of. */
+  left: -1.6rem;
+  z-index: 1;
+}
+
+.ed-block-handle__trigger {
+  width: 1.3rem;
+  height: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 0.95rem;
+}
+
+.ed-block-handle__trigger:hover,
+.ed-block-handle__trigger:focus-visible,
+.ed-block-handle__trigger[aria-expanded="true"] {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.ed-block-handle__menu {
+  position: absolute;
+  top: 1.5rem;
+  left: 0;
+  min-width: 11rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.25rem;
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+.ed-block-handle__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ed-block-handle__menu-item:hover,
+.ed-block-handle__menu-item:focus-visible {
+  background: var(--surface-sunken);
+}
+
+/* EDT-049's isActive marking - a glyph, not just a background tint, so it
+   isn't communicated by color alone. */
+.ed-block-handle__menu-mark {
+  width: 1rem;
+  flex: none;
+  color: var(--amber);
+}

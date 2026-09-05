@@ -122,6 +122,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        // EDT-028: cliente HTTP do lado Rust para buscar metadado de
+        // bookmark (título/descrição/favicon) sem esbarrar em CORS — ver
+        // src-tauri/capabilities/default.json para o escopo de URL.
+        .plugin(tauri_plugin_http::init())
         .manage(ipc::AppState::new())
         .setup(|app| {
             // PLT-004: sobe o sidecar uma vez, aqui, e guarda o handle em
@@ -169,6 +173,19 @@ pub fn run() {
             ipc::commands::create_page_version_snapshot,
             ipc::commands::search_pages,
             ipc::commands::check_database,
+            ipc::block_commands::list_page_blocks,
+            ipc::block_commands::create_block,
+            ipc::block_commands::update_block,
+            ipc::block_commands::delete_blocks,
+            ipc::block_commands::move_block,
+            ipc::block_commands::apply_block_changes,
+            ipc::block_commands::list_backlinks,
+            ipc::block_commands::list_outgoing_links,
+            ipc::block_commands::create_synced_block_copy,
+            ipc::block_commands::count_synced_copies,
+            ipc::block_commands::unsync_block,
+            ipc::block_commands::unsync_all_synced_copies,
+            ipc::block_commands::delete_synced_original,
             ipc::backup_commands::autosave_write_pending,
             ipc::backup_commands::autosave_clear_pending,
             ipc::backup_commands::autosave_list_recoverable,

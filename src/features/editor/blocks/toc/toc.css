@@ -1,0 +1,56 @@
+/* EDT-031 — bloco de sumário (table of contents). */
+
+.ed-toc-block {
+  margin: 0.25rem 0;
+}
+
+.ed-toc {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-sunken);
+  padding: 0.75rem 1rem;
+}
+
+.ed-toc--empty {
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.ed-toc__list {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+
+/* Cada nível aninhado ganha o mesmo recuo fixo, aplicado pela própria
+   estrutura de <ul> dentro de <li> - o recuo composto vem do aninhamento
+   real do DOM, não de uma margem calculada a partir de um número de nível. */
+.ed-toc__list .ed-toc__list {
+  padding-left: 1rem;
+  margin-top: 0.125rem;
+}
+
+.ed-toc__item {
+  margin: 0.125rem 0;
+}
+
+.ed-toc__link {
+  display: inline-block;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.ed-toc__link:hover {
+  background: var(--surface-raised);
+}
+
+.ed-toc__link:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}

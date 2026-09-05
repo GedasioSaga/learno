@@ -18,12 +18,22 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# "protocol-asset": exige o próprio Tauri que qualquer app usando
+# app.security.assetProtocol (tauri.conf.json) declare a feature — sem ela
+# o build falha com "does not match the allowlist defined under
+# tauri.conf.json". Necessária para EDT-024..027: é como `convertFileSrc`
+# consegue servir a mídia gravada em `$APPDATA/media` de volta ao WebView.
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
+# EDT-028: busca de metadado de bookmark (título/descrição/favicon) via HTTP
+# no lado Rust, fora da política de CORS que bloqueia um `fetch` direto do
+# WebView na maioria dos sites. Escopo de URL vive em
+# src-tauri/capabilities/default.json (permissão "http:default").
+tauri-plugin-http = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

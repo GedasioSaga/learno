@@ -56,6 +56,19 @@ export interface BlockPlacement {
 }
 
 export interface NewBlock {
+  /**
+   * The id the block already has in the editor's document, so the row is
+   * created with it instead of one the backend invents.
+   *
+   * Not an optimisation: ProseMirror puts an id on a node the moment it is
+   * typed, and every later edit refers to the block by that id. A backend
+   * that assigned its own would leave the editor updating a row that does
+   * not exist - which is exactly what happened before this field existed,
+   * and it silently dropped every block anyone typed. Optional so a caller
+   * with no id of its own (a test, a future importer) can still let the
+   * backend generate one.
+   */
+  id?: BlockId;
   blockType: string;
   content: BlockContent;
   plainText: string;

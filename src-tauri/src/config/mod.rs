@@ -115,6 +115,53 @@ pub fn validate_data_dir(data_dir: &str) -> Result<()> {
     Ok(())
 }
 
+/// Limite real do Postgres para comprimento de identificador, em bytes
+/// (`NAMEDATALEN` menos um). Usado abaixo para rejeitar um nome de banco
+/// longo demais antes de tentar `CREATE DATABASE` com ele.
+const MAX_POSTGRES_IDENTIFIER_BYTES: usize = 63;
+
+/// Confere que `name` é seguro para entrar sem bind em `CREATE DATABASE
+/// "<name>"` — Postgres não aceita identificador de DDL como parâmetro
+/// parametrizado, então isso é a primeira das duas defesas que
+/// `db::pool::create_database` usa antes de montar aquele SQL (a segunda é
+/// escapar aspas duplas por dobramento, como defesa em profundidade caso
+/// esta validação um dia seja pulada).
+///
+/// Deliberadamente mais estrito do que o próprio Postgres aceita: só letra
+/// ASCII minúscula, dígito e underscore, começando por letra, até
+/// [`MAX_POSTGRES_IDENTIFIER_BYTES`] bytes. Um identificador Postgres de
+/// verdade admite bem mais (maiúsculas entre aspas, acento, `$`), mas nada
+/// disso é necessário para um nome de banco de estudo e cada caractere a
+/// mais que se aceita é mais superfície para escapar errado.
+pub fn validate_database_identifier(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(Error::Invalid("nome do banco não pode ser vazio".into()));
+    }
+    if name.len() > MAX_POSTGRES_IDENTIFIER_BYTES {
+        return Err(Error::Invalid(format!(
+            "nome do banco não pode passar de {MAX_POSTGRES_IDENTIFIER_BYTES} bytes (recebido: {} bytes)",
+            name.len()
+        )));
+    }
+
+    let mut chars = name.chars();
+    // `.next()` não pode devolver `None` aqui — o `is_empty()` acima já
+    // garantiu que há ao menos um caractere.
+    let first = chars.next().unwrap_or_default();
+    if !first.is_ascii_lowercase() {
+        return Err(Error::Invalid(
+            "nome do banco precisa começar com uma letra minúscula de a a z".into(),
+        ));
+    }
+    if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+        return Err(Error::Invalid(
+            "nome do banco só pode ter letras minúsculas (a-z), dígitos e underscore".into(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Monta as opções de conexão do sqlx a partir do que o assistente coletou.
 /// Função pura — não abre socket nenhum, só existe para ser testável sem rede.
 pub fn build_connect_options(input: &ConnectionTestInput) -> PgConnectOptions {
@@ -228,6 +275,46 @@ mod tests {
     #[test]
     fn validate_data_dir_accepts_a_real_looking_path() {
         assert!(validate_data_dir(r"C:\Users\alguem\Learno").is_ok());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_empty_string() {
+        assert!(validate_database_identifier("").is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_name_starting_with_a_digit() {
+        assert!(validate_database_identifier("2_bancos").is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_double_quote() {
+        // The exact character `CREATE DATABASE "<name>"` would need escaped
+        // if this ever slipped through — proving it never even gets there.
+        assert!(validate_database_identifier("learno\"").is_err());
+        assert!(validate_database_identifier("a\"; DROP DATABASE learno; --").is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_semicolon() {
+        assert!(validate_database_identifier("learno;drop_table").is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_space() {
+        assert!(validate_database_identifier("meu banco").is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_rejects_a_name_longer_than_63_bytes() {
+        let too_long = "a".repeat(64);
+        assert!(validate_database_identifier(&too_long).is_err());
+    }
+
+    #[test]
+    fn validate_database_identifier_accepts_real_looking_schema_names() {
+        assert!(validate_database_identifier("learno_dev").is_ok());
+        assert!(validate_database_identifier("meu_banco_2").is_ok());
     }
 
     #[test]
