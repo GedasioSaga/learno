@@ -3,7 +3,7 @@
 
 use std::sync::RwLock;
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use crate::config::AppConfig;
 use crate::error::{Error, Result};
@@ -31,7 +31,7 @@ use crate::sidecar::SidecarProcess;
 /// reconecta ao Postgres sozinho depois de caído.
 pub struct AppState {
     config_cache: RwLock<Option<AppConfig>>,
-    pool: RwLock<Option<PgPool>>,
+    pool: RwLock<Option<SqlitePool>>,
     sidecar: RwLock<Option<SidecarProcess>>,
 }
 
@@ -46,9 +46,9 @@ impl AppState {
 
     /// A conexão ativa com o Postgres, ou `Error::Config` quando o app ainda
     /// não passou pelo assistente de primeira execução (ou a sessão ainda
-    /// não digitou a senha) — ver o comentário da struct acima. `PgPool::clone`
+    /// não digitou a senha) — ver o comentário da struct acima. `SqlitePool::clone`
     /// é barato: é só um handle para o mesmo pool de conexões.
-    pub fn pool(&self) -> Result<PgPool> {
+    pub fn pool(&self) -> Result<SqlitePool> {
         self.pool
             .read()
             .ok()
@@ -58,7 +58,7 @@ impl AppState {
 
     /// Chamado por `ipc::commands::connect_database`, depois que a conexão é
     /// aberta e migrada com sucesso.
-    pub fn set_pool(&self, pool: PgPool) {
+    pub fn set_pool(&self, pool: SqlitePool) {
         if let Ok(mut guard) = self.pool.write() {
             *guard = Some(pool);
         }
@@ -165,7 +165,7 @@ mod tests {
     // contexto sem abrir conexão nenhuma com o banco.
     #[tokio::test]
     async fn set_pool_makes_pool_return_it() {
-        let pool = sqlx::postgres::PgPoolOptions::new()
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect_lazy("postgres://user:pass@localhost/learno_test")
             .unwrap();
 

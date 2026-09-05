@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::postgres::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::backup;
 use crate::config::{self, AppConfig, ConnectionTestInput};
@@ -21,8 +21,8 @@ const MAX_POOL_CONNECTIONS: u32 = 10;
 /// Opens a pool against `database_url` and applies every pending migration
 /// under `migrations/` before returning it, so no caller can ever observe a
 /// pool whose schema isn't fully up to date.
-pub async fn connect_and_migrate(database_url: &str) -> Result<PgPool> {
-    let pool = PgPoolOptions::new()
+pub async fn connect_and_migrate(database_url: &str) -> Result<SqlitePool> {
+    let pool = SqlitePoolOptions::new()
         .max_connections(MAX_POOL_CONNECTIONS)
         .connect(database_url)
         .await?;
@@ -47,7 +47,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 /// change that a backup would guard against. `to_regclass` returns `NULL`
 /// instead of erroring when `_sqlx_migrations` doesn't exist yet, so the
 /// brand-new case doesn't need a separate existence check first.
-async fn has_a_pending_migration_against_established_history(pool: &PgPool) -> Result<bool> {
+async fn has_a_pending_migration_against_established_history(pool: &SqlitePool) -> Result<bool> {
     let table_exists: Option<String> =
         sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations')::text").fetch_one(pool).await?;
     if table_exists.is_none() {
@@ -107,7 +107,7 @@ async fn create_database(connection: &ConnectionTestInput) -> Result<()> {
 
     config::validate_database_identifier(&connection.database)?;
 
-    let admin_options = PgConnectOptions::new()
+    let admin_options = SqliteConnectOptions::new()
         .host(&connection.host)
         .port(connection.port)
         .username(&connection.user)
@@ -151,8 +151,8 @@ async fn create_database(connection: &ConnectionTestInput) -> Result<()> {
 ///
 /// `backup_dir` holds only this function's own pre-migration safety net; it
 /// is a separate concern from the user-facing PLT-011/PLT-013 backups.
-pub async fn connect_migrate_with_rollback(connection: &ConnectionTestInput, backup_dir: &Path) -> Result<PgPool> {
-    let pool = match PgPoolOptions::new()
+pub async fn connect_migrate_with_rollback(connection: &ConnectionTestInput, backup_dir: &Path) -> Result<SqlitePool> {
+    let pool = match SqlitePoolOptions::new()
         .max_connections(MAX_POOL_CONNECTIONS)
         .connect_with(config::build_connect_options(connection))
         .await
@@ -168,7 +168,7 @@ pub async fn connect_migrate_with_rollback(connection: &ConnectionTestInput, bac
         // create anything.
         Err(error) if is_missing_database_error(&error) => {
             create_database(connection).await?;
-            PgPoolOptions::new()
+            SqlitePoolOptions::new()
                 .max_connections(MAX_POOL_CONNECTIONS)
                 .connect_with(config::build_connect_options(connection))
                 .await?
@@ -452,7 +452,7 @@ mod tests {
             // The real assertion for PLT-020: the database must still be
             // queryable and intact after the failed attempt, not left in a
             // half-migrated or locked state.
-            let recovered = sqlx::postgres::PgPoolOptions::new()
+            let recovered = sqlx::sqlite::SqlitePoolOptions::new()
                 .connect_with(crate::config::build_connect_options(&connection))
                 .await
                 .unwrap();

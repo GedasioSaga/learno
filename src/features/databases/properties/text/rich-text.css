@@ -1,0 +1,11 @@
+/* DBS-004 — estilo mínimo do editor de célula. Ao lado do próprio código,
+   como toda pasta de builder da Fase 2 (ver README do editor). */
+.db-rich-text-editor {
+  outline: none;
+  min-height: 1.4em;
+  padding: 2px 4px;
+}
+
+.db-rich-text-editor p {
+  margin: 0;
+}

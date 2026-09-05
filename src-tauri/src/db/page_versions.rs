@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -47,11 +47,11 @@ pub struct PageVersionRow {
 }
 
 pub struct PageVersionRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl PageVersionRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
@@ -134,7 +134,7 @@ impl PageVersionRepository {
 /// (a transaction it shares with the page's title update) so the INSERT
 /// itself only has to be written once.
 async fn insert_snapshot(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut Transaction<'_, Sqlite>,
     page_id: Uuid,
     title: &str,
     content: serde_json::Value,

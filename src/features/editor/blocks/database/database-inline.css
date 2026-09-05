@@ -1,0 +1,14 @@
+/**
+ * DBS-001: só o suficiente pro átomo se comportar como um bloco de largura
+ * cheia, igual a `table`/`media` — o visual em si (borda, fundo, cabeçalho)
+ * é do `DatabaseContainer` (Tailwind, `src/features/databases/container`),
+ * não deste arquivo. Plain CSS, não Tailwind, pela mesma convenção de
+ * `page-link.css`/`core/editor.css`: o wrapper nasce de `renderHTML`/
+ * NodeView, não de JSX de app comum.
+ */
+
+.ed-database-inline {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0;
+}

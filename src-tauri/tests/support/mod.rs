@@ -27,7 +27,7 @@
 //! one is never mistaken for a (empty) test suite of its own — every file
 //! that wants it pulls it in with `mod support;`.
 
-use sqlx::{Connection, PgConnection, PgPool};
+use sqlx::{Connection, PgConnection, SqlitePool};
 use uuid::Uuid;
 
 /// The admin connection string every isolated database is created on and
@@ -71,7 +71,7 @@ async fn drop_database(admin_conn: &mut PgConnection, db_name: &str) {
 /// A private, fully migrated database that nothing outside the test holding
 /// it can see — the shape every `db_*.rs` test wants.
 pub struct IsolatedDatabase {
-    pub pool: PgPool,
+    pub pool: SqlitePool,
     /// This database's own connection URL — distinct from
     /// `LEARNO_TEST_DATABASE_URL`, which only ever names the cluster this
     /// database was created on. Needed by tests (`backup_dump.rs`) that

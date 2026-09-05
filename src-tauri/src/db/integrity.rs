@@ -12,7 +12,7 @@
 //! this kind of drift was the common case rather than the rare one.
 
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -28,11 +28,11 @@ pub struct IntegrityReport {
 }
 
 pub struct IntegrityRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl IntegrityRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
@@ -74,7 +74,7 @@ mod tests {
     /// database nothing else can see instead, the same pattern `db::pool`'s
     /// PLT-020 test already uses for the same reason.
     struct IsolatedDatabase {
-        pool: PgPool,
+        pool: SqlitePool,
         admin_conn: sqlx::PgConnection,
         db_name: String,
     }
@@ -131,7 +131,7 @@ mod tests {
     /// scenario at all, given the constraint that prevents it through every
     /// normal write path — and it leaves no lasting change: the setting is
     /// per-connection, reset before the connection is returned.
-    async fn insert_orphaned_card(pool: &PgPool) -> Uuid {
+    async fn insert_orphaned_card(pool: &SqlitePool) -> Uuid {
         let mut conn = pool.acquire().await.unwrap();
         sqlx::query("SET session_replication_role = replica").execute(&mut *conn).await.unwrap();
 

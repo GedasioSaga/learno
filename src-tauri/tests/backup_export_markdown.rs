@@ -29,11 +29,11 @@ mod support;
 use learno_lib::backup::{export_page_to_markdown, fetch_page_blocks};
 use learno_lib::db::PageRepository;
 use support::IsolatedDatabase;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 async fn insert_block(
-    pool: &PgPool,
+    pool: &SqlitePool,
     page_id: Uuid,
     parent_block_id: Option<Uuid>,
     block_type: &str,

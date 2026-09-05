@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::PgConnectOptions;
+use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::{Error, Result};
 
@@ -164,8 +164,8 @@ pub fn validate_database_identifier(name: &str) -> Result<()> {
 
 /// Monta as opções de conexão do sqlx a partir do que o assistente coletou.
 /// Função pura — não abre socket nenhum, só existe para ser testável sem rede.
-pub fn build_connect_options(input: &ConnectionTestInput) -> PgConnectOptions {
-    PgConnectOptions::new()
+pub fn build_connect_options(input: &ConnectionTestInput) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
         .host(&input.host)
         .port(input.port)
         .username(&input.user)

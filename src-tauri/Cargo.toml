@@ -41,7 +41,7 @@ serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls-ring",
-    "postgres",
+    "sqlite",
     "macros",
     "migrate",
     "uuid",

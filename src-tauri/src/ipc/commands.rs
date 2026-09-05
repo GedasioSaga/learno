@@ -176,7 +176,7 @@ pub async fn test_database_connection(input: ConnectionTestInput) -> Result<()> 
 
     let attempt = tokio::time::timeout(
         config::CONNECTION_TEST_TIMEOUT,
-        sqlx::postgres::PgConnection::connect_with(&options),
+        sqlx::sqlite::PgConnection::connect_with(&options),
     )
     .await;
 

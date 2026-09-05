@@ -3,20 +3,38 @@
 //! `search`), PLT-014's database integrity check (`integrity`), and Fase 2's
 //! block tree (`blocks`) with its backlink graph (`backlinks`). Every other
 //! module reaches Postgres only through here.
+//!
+//! Fase 3 acrescenta: o caminho UNICO de escrita de valor de propriedade
+//! (`record_values` — invariante I4 da arquitetura), o grafo de arestas de
+//! relacao (`relations`, a unica excecao a "valor e linha em
+//! database_record_values") e o motor de efeitos que template, botao,
+//! automacao, edicao em lote e import de CSV compartilham (`effects`).
 
 pub mod backlinks;
 pub mod blocks;
+pub mod effects;
 pub mod integrity;
 pub mod page_versions;
 pub mod pages;
 pub mod pool;
 pub mod position;
+pub mod record_values;
+pub mod relations;
 pub mod search;
 
 pub use backlinks::{BacklinkRepository, BacklinkRow, OutgoingLinkRow};
 pub use blocks::{BlockChangeInput, BlockPatchInput, BlockPlacementInput, BlockRepository, BlockRow, NewBlockInput};
+pub use effects::{
+    BrokenReference, BrokenReferenceOwner, EffectExecutionContext, EffectOutcome, EffectRepository, MissingKind,
+    OpenAfter, PropertyWrite, PropertyWriteOp, RecordEffect, ValueSource,
+};
 pub use integrity::{IntegrityReport, IntegrityRepository};
 pub use page_versions::{PageVersionRepository, PageVersionRow, SnapshotReason};
 pub use pages::{PageRepository, PageRow, SiblingPosition};
 pub use pool::{connect_and_migrate, connect_migrate_with_rollback};
+pub use record_values::{AppliedChanges, AppliedRecordValue, RecordValueChangeInput, RecordValueRepository, RecordValueRow};
+pub use relations::{
+    CreateRelationInput, CreateRelationResult, RecordTargets, RelationDefinitionRow, RelationRepository,
+    RelationTargetPage, RelationTargetRow,
+};
 pub use search::{SearchRepository, SearchResultRow, DEFAULT_RESULT_LIMIT};

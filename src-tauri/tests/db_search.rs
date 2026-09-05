@@ -18,7 +18,7 @@ mod support;
 
 use learno_lib::db::{PageRepository, SearchRepository};
 use support::IsolatedDatabase;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 const RESULT_LIMIT: i64 = 20;
@@ -26,7 +26,7 @@ const RESULT_LIMIT: i64 = 20;
 /// No block repository exists yet (Fase 2 owns `blocks`) — inserting one
 /// directly is the cheapest way to set up a content-match fixture without
 /// waiting on that builder.
-async fn insert_block(pool: &PgPool, page_id: Uuid, plain_text: &str) {
+async fn insert_block(pool: &SqlitePool, page_id: Uuid, plain_text: &str) {
     sqlx::query(
         "INSERT INTO blocks (id, page_id, block_type, content, plain_text, position) \
          VALUES ($1, $2, 'paragraph', '{}'::jsonb, $3, 'a0')",

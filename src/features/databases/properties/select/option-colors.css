@@ -1,0 +1,177 @@
+/*
+ * Tokens de cor para tag/chip de `select` e `multi_select` (DBS-007/008).
+ * PRÓPRIOS desta pasta — `src/styles/theme.css` não é arquivo desta peça
+ * para editar. Onde a marca já tem cor (âmbar, hortelã, esmeralda,
+ * terracota, marrom) ela é REUSADA via `var(--amber)` etc., inclusive a
+ * variante "-ink" (essas já trocam sozinhas no escuro, porque o próprio
+ * `theme.css` as redefine); "blue"/"purple" são tons novos, então têm bloco
+ * de tema explícito aqui, no mesmo padrão de três blocos que `theme.css`
+ * usa (claro default, escuro explícito, escuro do sistema sem escolha).
+ */
+
+.db-option-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--tag-border, var(--border));
+  background: var(--tag-bg, var(--surface-sunken));
+  color: var(--tag-fg, var(--ink-muted));
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Valor órfão (id que sumiu de `config.options`, arquitetura §6): chip
+   visível e diferenciado, nunca some em silêncio e nunca explode. */
+.db-option-tag--orphan {
+  border-style: dashed;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.db-option-tag__remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  font-size: 0.9em;
+}
+
+.db-option-tag__remove:focus-visible {
+  outline: 2px solid var(--emerald);
+  outline-offset: 1px;
+}
+
+.db-option-tag-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.db-option-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  margin: 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.db-option-picker__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.db-option-picker__item:hover,
+.db-option-picker__item:focus-visible {
+  background: var(--surface-sunken);
+  outline: none;
+}
+
+.db-option-picker__empty {
+  padding: 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.db-select-editor,
+.db-multi-select-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+/* --- cores por opção --------------------------------------------------- */
+
+.db-option-tag[data-color="gray"] {
+  --tag-bg: var(--surface-sunken);
+  --tag-fg: var(--ink-muted);
+  --tag-border: var(--border);
+}
+
+.db-option-tag[data-color="brown"] {
+  --tag-bg: rgb(125 57 18 / 16%);
+  --tag-fg: var(--brown);
+  --tag-border: rgb(125 57 18 / 35%);
+}
+
+.db-option-tag[data-color="amber"] {
+  --tag-bg: rgb(214 148 54 / 18%);
+  --tag-fg: var(--amber-ink);
+  --tag-border: rgb(214 148 54 / 40%);
+}
+
+.db-option-tag[data-color="mint"] {
+  --tag-bg: rgb(89 214 138 / 18%);
+  --tag-fg: var(--mint-ink);
+  --tag-border: rgb(89 214 138 / 40%);
+}
+
+.db-option-tag[data-color="emerald"] {
+  --tag-bg: rgb(13 86 77 / 14%);
+  --tag-fg: var(--emerald);
+  --tag-border: rgb(13 86 77 / 35%);
+}
+
+.db-option-tag[data-color="terracotta"] {
+  --tag-bg: rgb(159 88 46 / 18%);
+  --tag-fg: var(--terracotta-ink);
+  --tag-border: rgb(159 88 46 / 40%);
+}
+
+.db-option-tag[data-color="blue"] {
+  --tag-bg: rgb(59 110 165 / 16%);
+  --tag-fg: #2f5a86;
+  --tag-border: rgb(59 110 165 / 40%);
+}
+
+.db-option-tag[data-color="purple"] {
+  --tag-bg: rgb(124 94 165 / 16%);
+  --tag-fg: #5b3f82;
+  --tag-border: rgb(124 94 165 / 40%);
+}
+
+/* "blue"/"purple" não têm variante "-ink" pronta em `theme.css` para
+   reusar, então ganham override explícito nos dois modos escuros —
+   mesmos dois seletores que `theme.css` usa para tudo mais. */
+:root[data-theme="dark"] .db-option-tag[data-color="blue"] {
+  --tag-bg: rgb(143 184 224 / 16%);
+  --tag-fg: #8fb8e0;
+  --tag-border: rgb(143 184 224 / 40%);
+}
+
+:root[data-theme="dark"] .db-option-tag[data-color="purple"] {
+  --tag-bg: rgb(183 155 219 / 16%);
+  --tag-fg: #b79bdb;
+  --tag-border: rgb(183 155 219 / 40%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .db-option-tag[data-color="blue"] {
+    --tag-bg: rgb(143 184 224 / 16%);
+    --tag-fg: #8fb8e0;
+    --tag-border: rgb(143 184 224 / 40%);
+  }
+
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .db-option-tag[data-color="purple"] {
+    --tag-bg: rgb(183 155 219 / 16%);
+    --tag-fg: #b79bdb;
+    --tag-border: rgb(183 155 219 / 40%);
+  }
+}

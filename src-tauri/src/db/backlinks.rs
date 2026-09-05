@@ -13,7 +13,7 @@
 //! [`list_outgoing_links`]: BacklinkRepository::list_outgoing_links
 
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -113,11 +113,11 @@ pub struct OutgoingLinkRow {
 }
 
 pub struct BacklinkRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl BacklinkRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 

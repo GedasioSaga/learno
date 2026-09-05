@@ -8,7 +8,7 @@
 //! snippet, why it matched), never a full `PageRow`/block row.
 
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -55,11 +55,11 @@ const SEARCH_SQL: &str = "\
 ";
 
 pub struct SearchRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl SearchRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 

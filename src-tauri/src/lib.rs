@@ -15,7 +15,9 @@ pub mod backup;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod formula;
 pub mod ipc;
+pub mod rollup;
 pub mod sidecar;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -201,7 +203,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!());
 
-    // Sem shutdown explícito do pool sqlx (`sqlx::PgPool` não precisa de um:
+    // Sem shutdown explícito do pool sqlx (`sqlx::SqlitePool` não precisa de um:
     // o processo inteiro cai junto), o sidecar é o único recurso externo que
     // precisa de encerramento explícito — um `CommandChild` vivo sobrevive ao
     // processo pai morrer no Windows até o handle ser fechado, então

@@ -97,7 +97,7 @@ fn schedule_manifest(app: &AppHandle) -> Result<schedule::ScheduleManifest> {
 }
 
 /// `create_backup`/`restore_backup` shellam para fora do pool sqlx, então
-/// continuam precisando dos dados de conexão avulsos (não de um `PgPool`).
+/// continuam precisando dos dados de conexão avulsos (não de um `SqlitePool`).
 ///
 /// Recebe `&AppState` (não `State<'_, AppState>`): como `State` não tem
 /// construtor público fora de um `App`/`AppHandle` real, mantê-lo aqui

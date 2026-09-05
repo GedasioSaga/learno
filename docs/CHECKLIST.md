@@ -10,29 +10,29 @@ Este documento é o checklist de implementação do Learno (app desktop de estud
 
 ## Contagem por fase e por área
 
-| Fase | FUN | EDT | DBS | SRS | INT | MAP | POM | PLT | Total |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 — Fundação | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | **29** |
-| 2 — Editor de blocos | 4 | 62 | 0 | 0 | 0 | 0 | 0 | 0 | **66** |
-| 3 — Databases | 0 | 0 | 79 | 0 | 0 | 0 | 0 | 0 | **79** |
-| 4 — SRS/Anki | 0 | 0 | 0 | 107 | 9 | 0 | 0 | 2 | **118** |
-| 5 — Mapa mental e Pomodoro | 0 | 0 | 0 | 0 | 2 | 32 | 17 | 1 | **52** |
-| 6 — Polimento e instalador | 23 | 33 | 57 | 82 | 2 | 9 | 5 | 8 | **219** |
-| **Total por área** | **47** | **95** | **136** | **189** | **13** | **41** | **22** | **20** | **563** |
+| Fase | FUN | EDT | DBS | TRL | SRS | INT | MAP | POM | HOJ | PLT | Total |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 — Fundação | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | **29** |
+| 2 — Editor de blocos | 4 | 62 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **66** |
+| 3 — Databases e Trilha | 0 | 0 | 79 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | **94** |
+| 4 — SRS/Anki | 0 | 0 | 0 | 0 | 107 | 9 | 0 | 0 | 0 | 2 | **118** |
+| 5 — Mapa mental, Pomodoro e painel Hoje | 0 | 0 | 0 | 0 | 0 | 2 | 32 | 17 | 15 | 1 | **67** |
+| 6 — Polimento e instalador | 23 | 33 | 57 | 0 | 82 | 2 | 9 | 5 | 0 | 8 | **219** |
+| **Total por área** | **47** | **95** | **136** | **15** | **189** | **13** | **41** | **22** | **15** | **20** | **593** |
 
-Legenda de área: **FUN** Fundação · **EDT** Editor de blocos · **DBS** Databases · **SRS** SRS/Anki · **INT** Integração nota-card · **MAP** Mapa mental · **POM** Pomodoro · **PLT** Plataforma.
+Legenda de área: **FUN** Fundação · **EDT** Editor de blocos · **DBS** Databases · **TRL** Trilha · **SRS** SRS/Anki · **INT** Integração nota-card · **MAP** Mapa mental · **POM** Pomodoro · **HOJ** Painel Hoje e rotina · **PLT** Plataforma.
 
-**Total geral: 563 itens, sendo 345 essenciais e 218 não-essenciais.** Nenhum identificador se repete (verificado por varredura automática do documento) e cada item pertence a uma única área e uma única fase.
+**Total geral: 593 itens, sendo 375 essenciais e 218 não-essenciais.** Os 15 itens da área TRL (Trilha) e os 15 da área HOJ (painel Hoje e rotina de estudo) foram acrescentados em 05/09/2026 — TRL depois do grilling que fixou a feature, HOJ a partir do design que o usuário desenhou. Todos os 30 são essenciais; TRL é da Fase 3 e HOJ da Fase 5, que é quando as origens de cada faixa do painel passam a existir. Nenhum identificador se repete (verificado por varredura automática do documento) e cada item pertence a uma única área e uma única fase.
 
 | Fase | Itens | Essenciais | Não-essenciais |
 |---|---|---|---|
 | 1 — Fundação | 29 | 29 | 0 |
 | 2 — Editor de blocos | 66 | 66 | 0 |
-| 3 — Databases | 79 | 79 | 0 |
+| 3 — Databases e Trilha | 94 | 94 | 0 |
 | 4 — SRS/Anki | 118 | 118 | 0 |
-| 5 — Mapa mental e Pomodoro | 52 | 52 | 0 |
+| 5 — Mapa mental, Pomodoro e painel Hoje | 67 | 67 | 0 |
 | 6 — Polimento e instalador | 219 | 1 | 218 |
-| **Total** | **563** | **345** | **218** |
+| **Total** | **593** | **375** | **218** |
 
 ## Convenção da coluna Feito (Fases 1 e 2)
 
@@ -167,7 +167,7 @@ Todos os 66 itens da Fase 2 estão marcados Feito, e essa marcação vale mais q
 
 ---
 
-## Fase 3 — Databases
+## Fase 3 — Databases e Trilha
 
 ### Área DBS — Databases
 
@@ -252,6 +252,30 @@ Todos os 66 itens da Fase 2 estão marcados Feito, e essa marcação vale mais q
 | DBS-122 | **Edição em lote de múltiplas linhas/cards selecionados** | Dado 20 linhas selecionadas via checkbox numa view Tabela, quando a propriedade "Revisado" é marcada como verdadeira no painel de edição em lote (acionável também via Ctrl/Cmd+/), então as 20 linhas recebem o mesmo valor numa única operação, sem exigir editar cada uma individualmente. | e2e-webdriverio | Sim |
 | DBS-123 | **Import/export de database inteira como CSV** | Dado uma database com propriedades de texto, número, select e relação, quando exportada como CSV, então cada propriedade vira uma coluna, com valores de relação exportados como texto/URL plano (não reimportável como relação); importar um CSV compatível cria uma nova database com uma propriedade de texto por cabeçalho de coluna. | e2e-webdriverio | Sim |
 | DBS-130 | **Conjunto completo de cálculos de rodapé de coluna/board** | Dado uma coluna numérica com 10 registros visíveis, 3 com o valor vazio, quando cada tipo de cálculo de rodapé é selecionado, então "Count all" mostra 10, "Count values" conta corretamente propriedades multi-valor, "Count unique values" desconta duplicatas, "Count empty"/"Percent empty" mostram 3/30%, "Count not empty"/"Percent not empty" mostram 7/70%; para uma coluna de Data, "Earliest date"/"Latest date"/"Date range" retornam os valores corretos — além de Sum/Average/Median/Min/Max/Range já cobertos em DBS-058. | cargo-test | Sim |
+
+---
+
+### Área TRL — Trilha (cronograma com flechas)
+
+Uma **Trilha** é um quinto tipo de view sobre uma database, ao lado de Tabela, Quadro, Lista e Calendário. Cada etapa é um registro (logo, uma página inteira, com a nota dentro); as flechas são a dependência "bloqueada por" de DBS-119; o eixo horizontal é a **dependência**, nunca o tempo. Decisões travadas no grilling de 05/09/2026: o arrasto muda a dependência e a posição é derivada por nível topológico (o desenho nunca contradiz a regra de desbloqueio); fluxos diferentes são raias nomeadas, agrupadas por propriedade, reusando DBS-049; e o progresso do baralho é um rollup que acende sozinho quando a Fase 4 criar baralhos, sem reabrir esta view. Fica **fora** de escopo, por decisão explícita: posição livre em (x,y) — quem manda no layout é o grafo — e o eixo de tempo tipo Gantt, que é a view `timeline`, outra coisa.
+
+| ID | Feature | Critério de aceite | Teste | Essencial | Feito |
+|---|---|---|---|---|---|
+| TRL-001 | **View Trilha como tipo de view** — Quinto tipo, criável e alternável como os outros | Dado uma database com view Tabela, quando o usuário cria uma view do tipo "Trilha", então ela aparece no seletor de views ao lado das demais e exibe os mesmos registros; alternar entre Tabela e Trilha não altera nenhum valor de registro | vitest | Sim | Não |
+| TRL-002 | **Layout topológico: pré-requisito sempre à esquerda** — A posição é derivada do grafo, nunca guardada | Dado A pré-requisito de B, quando a Trilha é desenhada, então a coluna de A é estritamente menor que a de B, para qualquer configuração do grafo; e nenhuma coordenada de nó é persistida no banco (a posição é recalculada a cada abertura) | vitest | Sim | Não |
+| TRL-003 | **Flecha desenhada entre pré-requisito e dependente** — A aresta visível é a dependência de DBS-119, não um desenho separado | Dado B marcada como "bloqueada por" A pela view Tabela, quando a Trilha é aberta, então existe exatamente uma flecha de A para B; remover a dependência pela Tabela faz a flecha sumir sem editar a Trilha | vitest | Sim | Não |
+| TRL-004 | **Arrastar uma etapa sobre outra cria a dependência** — O arrasto muda a verdade, não o desenho | Dado A e B sem ligação, quando a etapa B é arrastada e solta sobre A, então B passa a ser "bloqueada por" A, a flecha aparece e o layout se reorganiza; a mesma operação é alcançável sem mouse por um comando de teclado | e2e-webdriverio | Sim | Não |
+| TRL-005 | **Recusa de ciclo ao ligar duas etapas** — Uma dependência que tornaria a etapa pré-requisito de si mesma é rejeitada | Dado A pré-requisito (direto ou indireto) de B, quando o usuário tenta tornar A dependente de B, então a ligação é recusada com uma explicação nomeando as duas etapas, e nenhuma aresta nasce | vitest | Sim | Não |
+| TRL-006 | **Estado de desbloqueio derivado dos pré-requisitos** — "O que posso fazer agora" é calculado, não marcado à mão | Dado C com pré-requisitos A (concluído) e B (em progresso), quando a Trilha é exibida, então C aparece como bloqueada; quando B passa a concluída, então C passa a disponível sem nenhuma outra ação, e uma etapa sem pré-requisito nasce sempre disponível | vitest | Sim | Não |
+| TRL-007 | **Raias nomeadas por propriedade de agrupamento** — Fluxos diferentes convivem na mesma tela, empilhados | Dado uma propriedade "Trilha" com os valores "T.I." e "Inglês", quando a Trilha agrupa por ela, então aparecem duas raias tituladas, cada uma contendo apenas as etapas do seu valor e desenhando só as flechas internas a ela | vitest | Sim | Não |
+| TRL-008 | **Raia recolhível com contador** — Uma raia pode ser fechada sem sumir da tela | Dado a raia "Concurso" com 7 etapas, quando ela é recolhida, então as 7 somem do canvas, o título continua visível exibindo "7", e o estado recolhido persiste ao reabrir a página | vitest | Sim | Não |
+| TRL-009 | **Arrastar etapa entre raias muda a propriedade** — Mesma mecânica do Quadro (DBS-043) | Dado "Azure" na raia "T.I.", quando ela é arrastada para a raia "Inglês", então a propriedade de agrupamento do registro passa a "Inglês" e a mudança aparece na view Tabela; se a gravação falhar, a etapa volta à raia de origem e o erro é mostrado | e2e-webdriverio | Sim | Não |
+| TRL-010 | **Prazo exibido na etapa e deslocado ao reordenar** — A data é informação na caixa, e segue a regra de DBS-119 | Dado A com término em 12/09 e B dependente com início em 13/09, quando o término de A vai para 20/09, então a data de B se desloca conforme o modo configurado em DBS-119 e o desenho da Trilha **não** muda (o eixo é dependência, não tempo) | cargo-test | Sim | Não |
+| TRL-011 | **Progresso do baralho na etapa** — Rollup sobre a relação, degradando quando ela não existe | Dado uma etapa relacionada a um baralho com 85 cards dos quais 12 maduros, quando a Trilha é exibida, então a etapa mostra a proporção 12/85; dado uma etapa sem relação a baralho nenhum, então nenhuma barra é exibida e nada quebra | vitest | Sim | Não |
+| TRL-012 | **Abrir a etapa mostra a página inteira** — Uma etapa é um registro, logo tem a nota dentro | Dado a etapa "Azure" na Trilha, quando ela é aberta, então o painel lateral mostra o registro com suas propriedades e o corpo de blocos editável, com a Trilha ainda visível ao fundo; expandir leva à página cheia, e o botão voltar retorna à Trilha | e2e-webdriverio | Sim | Não |
+| TRL-013 | **Navegação e operação por teclado no grafo** — A Trilha é utilizável sem mouse | Dado o foco numa etapa, quando as setas do teclado são usadas, então o foco anda entre etapas seguindo as flechas (direita avança para um dependente, esquerda volta para um pré-requisito) e o cartão focado é anunciado com seu estado de desbloqueio; Enter abre a etapa | vitest | Sim | Não |
+| TRL-014 | **Estado vazio explicado** — Uma Trilha sem etapas ou sem dependências diz o que fazer | Dado uma database sem nenhum registro, quando a Trilha é aberta, então ela explica como criar a primeira etapa em vez de mostrar um canvas vazio; dado registros sem nenhuma dependência entre si, então todos aparecem como disponíveis na primeira coluna, sem flecha alguma, e isso é apresentado como estado válido e não como erro | vitest | Sim | Não |
+| TRL-015 | **Configuração da Trilha persistida por view** — Agrupamento, raias recolhidas e filtro são da view, não da database | Dado duas views Trilha da mesma database com agrupamentos diferentes, quando uma delas recolhe uma raia, então a outra permanece inalterada, e ambas as configurações sobrevivem ao fechar e reabrir o app | cargo-test | Sim | Não |
 
 ---
 
@@ -392,7 +416,7 @@ Todos os 66 itens da Fase 2 estão marcados Feito, e essa marcação vale mais q
 
 ---
 
-## Fase 5 — Mapa mental e Pomodoro
+## Fase 5 — Mapa mental, Pomodoro e painel Hoje
 
 ### Área MAP — Mapa mental
 
@@ -452,6 +476,28 @@ Todos os 66 itens da Fase 2 estão marcados Feito, e essa marcação vale mais q
 | POM-016 | **Modo tela cheia sem distração** — Oculta sidebar/abas, deixando só o cronômetro | Dado sidebar visível, quando o modo foco é ativado, então sidebar e abas somem e só o cronômetro permanece | e2e-webdriverio | Sim |
 | POM-017 | **Pausar e retomar o timer** — Pausa a contagem no meio da etapa e retoma do ponto exato | Dado cronômetro em 15:00 restantes, quando pausado por 2min reais e retomado, então volta a contar de 15:00, não 13:00 | e2e-webdriverio | Sim |
 | POM-020 | **Indicador visual de progresso** — Barra/anel mostra a fração decorrida da etapa atual | Dado foco de 25min com 5min decorridos, quando observado, então o indicador mostra ~20% preenchido | e2e-webdriverio | Sim |
+
+### Área HOJ — Painel Hoje e rotina de estudo
+
+O painel **Hoje** é a tela inicial do app: reúne numa vista só o que estudar agora, o cronômetro em foco, os cartões vencidos, a semana planejada e o mapa do módulo. Decisão travada em 05/09/2026, a partir do design que o usuário desenhou: **o painel não tem dado próprio** — cada faixa é uma vista do que já existe em outra área (Trilha, SRS, Pomodoro, Mapa mental), e uma faixa cuja origem ainda não existe some em vez de mostrar zero. A **rotina semanal** é definida pelo usuário e o app apenas confere o cumprimento contra o tempo de foco real; o app nunca gera o plano sozinho, porque gerar exigiria estimar quanto tempo cada etapa leva — um chute que envelhece mal e briga com um horário fixo de acordar. Fica **fora** de escopo: distribuição automática de etapas nos dias, e sugestão de conteúdo por slot.
+
+| ID | Feature | Critério de aceite | Teste | Essencial |
+|---|---|---|---|---|
+| HOJ-001 | **"Hoje" é a tela inicial do app** — Abrir o Learno cai no painel, não numa página vazia | Dado o app fechado e reaberto com conteúdo já existente, quando ele inicia, então o painel "Hoje" é a primeira tela, e "Hoje" aparece como primeiro item da navegação lateral ao lado de Trilha, Cronograma, Cartões, Mapa mental e Biblioteca | e2e-webdriverio | Sim |
+| HOJ-002 | **Faixa "Agora": o pomodoro em foco com o que está sendo estudado** | Dado uma sessão de foco iniciada e vinculada à página "CPC 48" (POM-011), quando o painel é exibido, então a faixa mostra o tempo restante, o número do ciclo na forma "pomodoro 3 de 4", o título da página vinculada, e os controles de iniciar, pausar e reiniciar agindo sobre o mesmo cronômetro da área POM — nunca um segundo cronômetro paralelo | e2e-webdriverio | Sim |
+| HOJ-003 | **Contador de cartões para hoje** — Quantos cartões a fila do dia tem agora | Dado uma fila diária com 14 cartões devidos, quando o painel é exibido, então o número 14 aparece e clicar nele abre a revisão; quando o último cartão do dia é revisado, o número vai a zero sem recarregar a tela | vitest | Sim |
+| HOJ-004 | **Horas na semana contra a meta** — Tempo de foco real somado e comparado ao alvo | Dado uma meta de 8 horas semanais e 6,5 horas de foco já registradas na semana corrente (somadas das sessões de POM-014), quando o painel é exibido, então mostra "6,5 / 8"; a semana vira na segunda-feira, e sessões da semana anterior não contam | vitest | Sim |
+| HOJ-005 | **Faixa da Trilha com a etapa atual e o percentual** | Dado uma trilha com 5 etapas das quais a primeira concluída e a segunda em progresso, quando o painel é exibido, então as etapas aparecem em ordem com o progresso de cada uma ("4/4", "2/6"), a etapa atual visualmente distinta da concluída e da bloqueada, e o percentual concluído da trilha inteira; clicar numa etapa abre o registro dela | vitest | Sim |
+| HOJ-006 | **Faixa do Cronograma com a semana corrente** — Os sete dias, com o previsto e o cumprido | Dado a rotina definida em HOJ-011 e a semana de 31 de agosto a 6 de setembro, quando o painel é exibido, então os sete dias aparecem com o horário e o previsto de cada um ("2×25", "revisão", "mapa", "livre"), o dia de hoje é destacado, e cada dia mostra se foi cumprido | vitest | Sim |
+| HOJ-007 | **Revisão espaçada respondível sem sair do painel** | Dado 11 cartões de revisão e 3 novos na fila, quando o painel é exibido, então a próxima pergunta aparece com a resposta oculta e um botão de revelar; revelar e avaliar o cartão grava a revisão no SRS e traz a pergunta seguinte, sem navegar para outra tela e sem recarregar o painel inteiro | e2e-webdriverio | Sim |
+| HOJ-008 | **Mapa mental do módulo atual** — Miniatura do mapa ligado à etapa em estudo | Dado a etapa atual da trilha vinculada a um mapa mental, quando o painel é exibido, então uma miniatura navegável do mapa aparece; clicar abre o mapa inteiro; dado uma etapa sem mapa vinculado, então a faixa não é exibida | vitest | Sim |
+| HOJ-009 | **Notas da sessão com itens marcáveis** — Lista curta do que fazer nesta sessão | Dado uma nota de sessão com os itens "Ler item 5.5", "Criar 6 cartões" e "Atualizar mapa", quando um item é marcado no painel, então ele aparece marcado também ao abrir a nota no editor, porque são os mesmos blocos to-do (EDT-009) e não uma segunda lista | vitest | Sim |
+| HOJ-010 | **Sequência de dias cumpridos (streak)** — Conta dias em que a rotina foi cumprida, não dias em que o app abriu | Dado uma rotina que pede foco de segunda a sábado e marca domingo como livre, quando 12 dias consecutivos são cumpridos, então o painel mostra "12 dias seguidos"; um domingo livre **não** interrompe a sequência; um dia previsto e não cumprido interrompe | vitest | Sim |
+| HOJ-011 | **Definir a rotina semanal** — O usuário monta o plano; o app nunca o gera | Dado a tela de rotina, quando o usuário define para cada dia da semana um horário, uma quantidade de sessões de foco e um tipo ("foco", "revisão", "mapa" ou "livre"), então a rotina é salva e passa a valer para todas as semanas seguintes até ser alterada | cargo-test | Sim |
+| HOJ-012 | **A rotina se repete por semana sem ser recriada** | Dado uma rotina definida numa semana, quando a semana vira, então a semana nova já aparece com o mesmo previsto, sem nenhuma ação do usuário, e alterar a rotina afeta a semana corrente e as futuras sem reescrever o histórico das semanas passadas | cargo-test | Sim |
+| HOJ-013 | **Cumprimento do dia derivado do tempo real, não marcado à mão** | Dado um dia cuja rotina prevê duas sessões de 25 minutos, quando duas sessões de foco são concluídas nesse dia, então o dia é marcado como cumprido automaticamente; com apenas uma sessão, o dia aparece como parcial; e não existe botão de marcar o dia como feito manualmente | vitest | Sim |
+| HOJ-014 | **Meta semanal de horas configurável** | Dado a meta padrão, quando o usuário a altera para 10 horas, então a comparação de HOJ-004 passa a usar 10, o histórico de semanas anteriores mantém a meta que valia à época, e uma meta zero desliga a comparação em vez de dividir por zero | vitest | Sim |
+| HOJ-015 | **Cada faixa some quando sua origem não existe** — O painel degrada, nunca mostra zero enganoso | Dado um app sem nenhuma trilha, sem baralho e sem mapa, quando o painel é exibido, então as faixas correspondentes não aparecem e o painel explica o que criar primeiro, em vez de mostrar "0/0", "0 cartões" e uma miniatura vazia | vitest | Sim |
 
 ### Área INT — Integração nota-card
 

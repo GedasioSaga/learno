@@ -28,7 +28,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
 use crate::db::position;
@@ -121,11 +121,11 @@ pub enum BlockChangeInput {
 }
 
 pub struct BlockRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl BlockRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
@@ -512,7 +512,7 @@ fn position_between(siblings: &[(Uuid, String)], after_block_id: Option<Uuid>) -
 }
 
 async fn active_siblings(
-    pool: &PgPool,
+    pool: &SqlitePool,
     page_id: Uuid,
     parent_block_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
@@ -531,7 +531,7 @@ async fn active_siblings(
 }
 
 async fn active_siblings_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut Transaction<'_, Sqlite>,
     page_id: Uuid,
     parent_block_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
@@ -553,7 +553,7 @@ async fn active_siblings_tx(
 /// both active and already on the same page — a parent from another page
 /// would leave the child's `page_id` and `parent_block_id` disagreeing about
 /// which page it lives on.
-async fn validate_parent(pool: &PgPool, page_id: Uuid, parent_block_id: Option<Uuid>) -> Result<()> {
+async fn validate_parent(pool: &SqlitePool, page_id: Uuid, parent_block_id: Option<Uuid>) -> Result<()> {
     let Some(parent_id) = parent_block_id else {
         return Ok(());
     };
@@ -568,7 +568,7 @@ async fn validate_parent(pool: &PgPool, page_id: Uuid, parent_block_id: Option<U
     }
 }
 
-async fn validate_parent_tx(tx: &mut Transaction<'_, Postgres>, page_id: Uuid, parent_block_id: Option<Uuid>) -> Result<()> {
+async fn validate_parent_tx(tx: &mut Transaction<'_, Sqlite>, page_id: Uuid, parent_block_id: Option<Uuid>) -> Result<()> {
     let Some(parent_id) = parent_block_id else {
         return Ok(());
     };
@@ -583,7 +583,7 @@ async fn validate_parent_tx(tx: &mut Transaction<'_, Postgres>, page_id: Uuid, p
     }
 }
 
-async fn fetch_active_pool(pool: &PgPool, id: Uuid) -> Result<BlockRow> {
+async fn fetch_active_pool(pool: &SqlitePool, id: Uuid) -> Result<BlockRow> {
     let sql = format!("SELECT {BLOCK_COLUMNS} FROM blocks WHERE id = $1 AND deleted_at IS NULL");
     sqlx::query_as::<_, BlockRow>(&sql)
         .bind(id)
@@ -592,7 +592,7 @@ async fn fetch_active_pool(pool: &PgPool, id: Uuid) -> Result<BlockRow> {
         .ok_or_else(|| Error::NotFound(format!("bloco ativo {id}")))
 }
 
-async fn fetch_active_tx(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<BlockRow> {
+async fn fetch_active_tx(tx: &mut Transaction<'_, Sqlite>, id: Uuid) -> Result<BlockRow> {
     let sql = format!("SELECT {BLOCK_COLUMNS} FROM blocks WHERE id = $1 AND deleted_at IS NULL");
     sqlx::query_as::<_, BlockRow>(&sql)
         .bind(id)
@@ -604,7 +604,7 @@ async fn fetch_active_tx(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result
 /// Every id in `ids` must currently be an active block, or the whole caller
 /// (a bulk delete, a batch change) fails before it changes anything instead
 /// of silently skipping the ones that don't qualify.
-async fn ensure_all_active(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) -> Result<()> {
+async fn ensure_all_active(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Result<()> {
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM blocks WHERE id = ANY($1) AND deleted_at IS NULL")
         .bind(ids)
         .fetch_one(&mut **tx)
@@ -622,7 +622,7 @@ async fn ensure_all_active(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) -> 
 
 /// `ids` plus every live descendant of each, reachable through
 /// `parent_block_id` at any depth.
-async fn descendant_closure(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+async fn descendant_closure(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Result<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
         "WITH RECURSIVE d AS ( \
              SELECT id FROM blocks WHERE id = ANY($1) AND deleted_at IS NULL \
@@ -639,7 +639,7 @@ async fn descendant_closure(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) ->
 /// True when `candidate` is `ancestor` itself or lies anywhere in its live
 /// subtree — the same "would this reparent create a cycle" check
 /// `PageRepository::is_within_subtree` runs for pages, one level down.
-async fn is_within_subtree(tx: &mut Transaction<'_, Postgres>, ancestor: Uuid, candidate: Uuid) -> Result<bool> {
+async fn is_within_subtree(tx: &mut Transaction<'_, Sqlite>, ancestor: Uuid, candidate: Uuid) -> Result<bool> {
     let exists: bool = sqlx::query_scalar(
         "WITH RECURSIVE descendants AS ( \
              SELECT id FROM blocks WHERE id = $1 \
@@ -659,7 +659,7 @@ async fn is_within_subtree(tx: &mut Transaction<'_, Postgres>, ancestor: Uuid, c
 /// still has live copies — see `BlockRepository::delete_blocks`'s doc for why
 /// that path exists (`delete_synced_original`) instead of this one silently
 /// orphaning copies elsewhere on the workspace.
-async fn reject_synced_originals_with_copies(tx: &mut Transaction<'_, Postgres>, closure: &[Uuid]) -> Result<()> {
+async fn reject_synced_originals_with_copies(tx: &mut Transaction<'_, Sqlite>, closure: &[Uuid]) -> Result<()> {
     let has_offender: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
              SELECT 1 FROM blocks o WHERE o.id = ANY($1) AND o.deleted_at IS NULL \
@@ -682,7 +682,7 @@ async fn reject_synced_originals_with_copies(tx: &mut Transaction<'_, Postgres>,
 /// descendant only ever names its parent (`parent_block_id`), never its own
 /// page — its `page_id` column would otherwise silently disagree with the
 /// page it actually renders on.
-async fn cascade_page_id(tx: &mut Transaction<'_, Postgres>, moved_block_id: Uuid, new_page_id: Uuid) -> Result<()> {
+async fn cascade_page_id(tx: &mut Transaction<'_, Sqlite>, moved_block_id: Uuid, new_page_id: Uuid) -> Result<()> {
     sqlx::query(
         "WITH RECURSIVE d AS ( \
              SELECT id FROM blocks WHERE parent_block_id = $1 AND deleted_at IS NULL \
@@ -702,7 +702,7 @@ async fn cascade_page_id(tx: &mut Transaction<'_, Postgres>, moved_block_id: Uui
 /// omitted field at its current value) and reports how many rows matched, so
 /// callers can tell "patched" from "no such active block" without a second
 /// query.
-async fn apply_patch(tx: &mut Transaction<'_, Postgres>, id: Uuid, patch: &BlockPatchInput) -> Result<u64> {
+async fn apply_patch(tx: &mut Transaction<'_, Sqlite>, id: Uuid, patch: &BlockPatchInput) -> Result<u64> {
     let result = sqlx::query(
         "UPDATE blocks SET block_type = COALESCE($2, block_type), content = COALESCE($3, content), plain_text = COALESCE($4, plain_text) \
          WHERE id = $1 AND deleted_at IS NULL",
@@ -719,7 +719,7 @@ async fn apply_patch(tx: &mut Transaction<'_, Postgres>, id: Uuid, patch: &Block
 /// The other half of EDT-074: the same patch, mirrored onto every block whose
 /// `synced_source_id` points at `canonical_id`. Zero matching rows (the
 /// ordinary, non-synced case) is success, not an error.
-async fn apply_patch_to_copies(tx: &mut Transaction<'_, Postgres>, canonical_id: Uuid, patch: &BlockPatchInput) -> Result<()> {
+async fn apply_patch_to_copies(tx: &mut Transaction<'_, Sqlite>, canonical_id: Uuid, patch: &BlockPatchInput) -> Result<()> {
     sqlx::query(
         "UPDATE blocks SET block_type = COALESCE($2, block_type), content = COALESCE($3, content), plain_text = COALESCE($4, plain_text) \
          WHERE synced_source_id = $1 AND deleted_at IS NULL",
@@ -733,7 +733,7 @@ async fn apply_patch_to_copies(tx: &mut Transaction<'_, Postgres>, canonical_id:
     Ok(())
 }
 
-async fn create_in_tx(tx: &mut Transaction<'_, Postgres>, input: NewBlockInput) -> Result<BlockRow> {
+async fn create_in_tx(tx: &mut Transaction<'_, Sqlite>, input: NewBlockInput) -> Result<BlockRow> {
     validate_parent_tx(tx, input.placement.page_id, input.placement.parent_block_id).await?;
     let siblings = active_siblings_tx(tx, input.placement.page_id, input.placement.parent_block_id, None).await?;
     let new_position = position_between(&siblings, input.placement.after_block_id)?;

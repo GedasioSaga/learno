@@ -1,0 +1,67 @@
+/**
+ * O que o contêiner de database (DBS-001 inline / DBS-002 página inteira)
+ * precisa para se desenhar — ver `docs/FASE-3-ARQUITETURA.md` §11 (esta
+ * peça, S2) e §6 (os registros de propriedade/view que o corpo consome).
+ *
+ * Deliberadamente PURO: nenhum arquivo desta pasta chama `invoke` nem
+ * conhece Postgres — a mesma separação I/O-fora-da-lógica da regra 14. Quem
+ * monta a tela (o bloco do editor, ou a futura tela de página inteira)
+ * resolve os dados e passa por prop. Isso também evita este componente
+ * inventar a forma de um comando Rust que nenhuma peça publicou ainda:
+ * `get_database_schema` está listado na arquitetura §9, mas nenhum arquivo
+ * do repositório define `DatabaseSchemaRow` — ver a divergência registrada
+ * no relatório desta peça.
+ */
+import type { Database } from "../contract";
+import type { PropertyDescriptor } from "../core/property-spec";
+import type { ViewDescriptor } from "../core/view-spec";
+
+/** DBS-001 (inline, dentro de uma nota) vs DBS-002 (página inteira, bloqueável). */
+export type DatabaseContainerMode = "inline" | "fullPage";
+
+/**
+ * Uma database já resolvida para o formato que os registros de
+ * propriedade/view (`core/property-spec.ts`, `core/view-spec.ts`) esperam —
+ * nunca as linhas cruas de `contract.ts` (lá `config` ainda é
+ * `Record<string, unknown>`, sem o `TConfig` que cada spec concreto declara).
+ */
+export interface DatabaseSchema {
+  database: Database;
+  properties: readonly PropertyDescriptor[];
+  views: readonly ViewDescriptor[];
+}
+
+/**
+ * Estado de carregamento do schema, no mesmo formato de três estados que
+ * `usePageTreeStore`/`useVersionHistory` já usam neste repositório — quem
+ * fornecer os dados de verdade (leitura por `databaseId`) devolve isto,
+ * nunca `DatabaseSchema` cru, porque toda leitura por IPC tem uma janela de
+ * carregamento e um caminho de erro que uma célula de UI não pode ignorar.
+ */
+export type DatabaseContainerState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; schema: DatabaseSchema };
+
+/**
+ * Ações que o cabeçalho oferece. Cada uma é opcional de propósito: um
+ * callback ausente faz o botão correspondente (Filtrar/Ordenar/+Novo) não
+ * aparecer — nunca "aparece desabilitado sem função", que seria controle
+ * morto (regra 10). "+ Propriedade"/"+ View" são diferentes: SEMPRE
+ * aparecem (é o próprio critério de DBS-002 — o botão existe e fica
+ * desabilitado, não some), desabilitados quando não há callback OU quando
+ * `database.isLocked` — mas o texto explicativo (`title`) só fala da
+ * database bloqueada, porque essa é a única das duas razões que é
+ * informação de produto; a outra é só "esta rodada ainda não ligou isto".
+ * Nenhuma das duas nunca é o tipo de propriedade da célula — é o que separa
+ * DBS-002 (bloqueia estrutura) de travar edição de valor por engano.
+ */
+export interface DatabaseContainerActions {
+  /** DBS-001: "+ Novo" no cabeçalho. */
+  onCreateRecord?(): void;
+  onFilter?(): void;
+  onSort?(): void;
+  /** DBS-002: gate é `database.isLocked`, NUNCA o tipo de propriedade da célula. */
+  onAddProperty?(): void;
+  onAddView?(): void;
+}

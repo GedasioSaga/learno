@@ -16,7 +16,7 @@
 //! a live database, and is covered by the `#[ignore]`d integration test in
 //! `src-tauri/tests/backup_export_markdown.rs`.
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -45,7 +45,7 @@ struct ExportBlockNode {
 /// sibling group (same `parent_block_id`) the rows already come out in
 /// display order — `build_block_tree` below relies on exactly that, not on
 /// a global order across unrelated parents.
-pub async fn fetch_page_blocks(pool: &PgPool, page_id: Uuid) -> Result<Vec<ExportBlockRow>> {
+pub async fn fetch_page_blocks(pool: &SqlitePool, page_id: Uuid) -> Result<Vec<ExportBlockRow>> {
     let rows = sqlx::query_as::<_, ExportBlockRow>(
         "SELECT id, parent_block_id, block_type, content, plain_text, position \
          FROM blocks WHERE page_id = $1 AND deleted_at IS NULL ORDER BY position",

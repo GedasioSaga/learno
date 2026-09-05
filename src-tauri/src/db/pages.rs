@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
 use crate::db::position;
@@ -71,11 +71,11 @@ struct BlockCopyRow {
 }
 
 pub struct PageRepository {
-    pool: PgPool,
+    pool: SqlitePool,
 }
 
 impl PageRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
@@ -505,7 +505,7 @@ fn duplicate_title(original: &str) -> String {
     format!("{original} (cópia)")
 }
 
-async fn fetch_active_subtree(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Vec<SubtreeRow>> {
+async fn fetch_active_subtree(tx: &mut Transaction<'_, Sqlite>, id: Uuid) -> Result<Vec<SubtreeRow>> {
     let rows = sqlx::query_as::<_, SubtreeRow>(
         "WITH RECURSIVE subtree AS ( \
              SELECT id, parent_id, database_id, title, icon, position, is_favorite, 0 AS depth \
@@ -525,7 +525,7 @@ async fn fetch_active_subtree(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> R
 }
 
 async fn fetch_next_sibling_position(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut Transaction<'_, Sqlite>,
     parent_id: Option<Uuid>,
     after_position: &str,
 ) -> Result<Option<String>> {
@@ -541,7 +541,7 @@ async fn fetch_next_sibling_position(
 }
 
 async fn duplicate_blocks_for_page(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut Transaction<'_, Sqlite>,
     old_page_id: Uuid,
     new_page_id: Uuid,
 ) -> Result<()> {
