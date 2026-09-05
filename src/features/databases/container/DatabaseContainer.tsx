@@ -4,10 +4,25 @@
  * Ver `types.ts` para por que este arquivo nunca chama `invoke`.
  */
 import { useState } from "react";
+import { ensureDatabaseExtensionsDiscovered } from "../core/discover-extensions";
 import { DatabaseContainerBody } from "./DatabaseContainerBody";
 import { DatabaseContainerHeader } from "./DatabaseContainerHeader";
 import { ExpandedDatabaseOverlay } from "./ExpandedDatabaseOverlay";
 import type { DatabaseContainerActions, DatabaseContainerMode, DatabaseContainerState } from "./types";
+
+// Roda uma vez no carregamento do módulo, antes de qualquer database montar:
+// puxa todo `properties/**/register.ts` e `views/**/register.ts`, que é como
+// um tipo de propriedade ou de view entra nos registros de `core/` sem
+// ninguém importá-lo explicitamente.
+//
+// Esta linha existe porque ela FALTAVA, e a falta era invisível: o mecanismo
+// de descoberta estava escrito e testado, e nenhum arquivo do projeto o
+// chamava — `rg` achava só a própria definição. O sintoma seria uma database
+// que abre com todas as células vazias e nenhum tipo de propriedade
+// disponível, sem erro nenhum no console. É o mesmo padrão do editor
+// (`features/editor/core/Editor.tsx`), onde a chamada mora no componente que
+// monta a coisa, e não num módulo que alguém precise lembrar de importar.
+ensureDatabaseExtensionsDiscovered();
 
 interface DatabaseContainerProps {
   state: DatabaseContainerState;

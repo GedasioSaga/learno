@@ -10,19 +10,19 @@ Este documento é o checklist de implementação do Learno (app desktop de estud
 
 ## Contagem por fase e por área
 
-| Fase | FUN | EDT | DBS | TRL | SRS | INT | MAP | POM | HOJ | PLT | Total |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 — Fundação | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | **29** |
-| 2 — Editor de blocos | 4 | 62 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **66** |
-| 3 — Databases e Trilha | 0 | 0 | 79 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | **94** |
-| 4 — SRS/Anki | 0 | 0 | 0 | 0 | 107 | 9 | 0 | 0 | 0 | 2 | **118** |
-| 5 — Mapa mental, Pomodoro e painel Hoje | 0 | 0 | 0 | 0 | 0 | 2 | 32 | 17 | 15 | 1 | **67** |
-| 6 — Polimento e instalador | 23 | 33 | 57 | 0 | 82 | 2 | 9 | 5 | 0 | 8 | **219** |
-| **Total por área** | **47** | **95** | **136** | **15** | **189** | **13** | **41** | **22** | **15** | **20** | **593** |
+| Fase | FUN | EDT | DBS | TRL | SRS | INT | MAP | POM | HOJ | BIB | PLT | Total |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 — Fundação | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | **29** |
+| 2 — Editor de blocos | 4 | 62 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **66** |
+| 3 — Databases e Trilha | 0 | 0 | 79 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **94** |
+| 4 — SRS/Anki | 0 | 0 | 0 | 0 | 107 | 9 | 0 | 0 | 0 | 0 | 2 | **118** |
+| 5 — Mapa, Pomodoro, painel Hoje e Biblioteca | 0 | 0 | 0 | 0 | 0 | 2 | 32 | 17 | 15 | 15 | 1 | **82** |
+| 6 — Polimento e instalador | 23 | 33 | 57 | 0 | 82 | 2 | 9 | 5 | 0 | 0 | 8 | **219** |
+| **Total por área** | **47** | **95** | **136** | **15** | **189** | **13** | **41** | **22** | **15** | **15** | **20** | **608** |
 
-Legenda de área: **FUN** Fundação · **EDT** Editor de blocos · **DBS** Databases · **TRL** Trilha · **SRS** SRS/Anki · **INT** Integração nota-card · **MAP** Mapa mental · **POM** Pomodoro · **HOJ** Painel Hoje e rotina · **PLT** Plataforma.
+Legenda de área: **FUN** Fundação · **EDT** Editor de blocos · **DBS** Databases · **TRL** Trilha · **SRS** SRS/Anki · **INT** Integração nota-card · **MAP** Mapa mental · **POM** Pomodoro · **HOJ** Painel Hoje e rotina · **BIB** Biblioteca · **PLT** Plataforma.
 
-**Total geral: 593 itens, sendo 375 essenciais e 218 não-essenciais.** Os 15 itens da área TRL (Trilha) e os 15 da área HOJ (painel Hoje e rotina de estudo) foram acrescentados em 05/09/2026 — TRL depois do grilling que fixou a feature, HOJ a partir do design que o usuário desenhou. Todos os 30 são essenciais; TRL é da Fase 3 e HOJ da Fase 5, que é quando as origens de cada faixa do painel passam a existir. Nenhum identificador se repete (verificado por varredura automática do documento) e cada item pertence a uma única área e uma única fase.
+**Total geral: 608 itens, sendo 390 essenciais e 218 não-essenciais.** Os 15 itens da área TRL (Trilha) e os 15 da área HOJ (painel Hoje e rotina de estudo) foram acrescentados em 05/09/2026 — TRL depois do grilling que fixou a feature, HOJ a partir do design que o usuário desenhou. Todos os 30 são essenciais; TRL é da Fase 3, e HOJ e BIB (Biblioteca, acrescentada no mesmo dia) são da Fase 5, que é quando as origens de cada faixa do painel passam a existir. Nenhum identificador se repete (verificado por varredura automática do documento) e cada item pertence a uma única área e uma única fase.
 
 | Fase | Itens | Essenciais | Não-essenciais |
 |---|---|---|---|
@@ -30,9 +30,9 @@ Legenda de área: **FUN** Fundação · **EDT** Editor de blocos · **DBS** Data
 | 2 — Editor de blocos | 66 | 66 | 0 |
 | 3 — Databases e Trilha | 94 | 94 | 0 |
 | 4 — SRS/Anki | 118 | 118 | 0 |
-| 5 — Mapa mental, Pomodoro e painel Hoje | 67 | 67 | 0 |
+| 5 — Mapa, Pomodoro, painel Hoje e Biblioteca | 82 | 82 | 0 |
 | 6 — Polimento e instalador | 219 | 1 | 218 |
-| **Total** | **593** | **375** | **218** |
+| **Total** | **608** | **390** | **218** |
 
 ## Convenção da coluna Feito (Fases 1 e 2)
 
@@ -416,7 +416,7 @@ Uma **Trilha** é um quinto tipo de view sobre uma database, ao lado de Tabela, 
 
 ---
 
-## Fase 5 — Mapa mental, Pomodoro e painel Hoje
+## Fase 5 — Mapa mental, Pomodoro, painel Hoje e Biblioteca
 
 ### Área MAP — Mapa mental
 
@@ -476,6 +476,30 @@ Uma **Trilha** é um quinto tipo de view sobre uma database, ao lado de Tabela, 
 | POM-016 | **Modo tela cheia sem distração** — Oculta sidebar/abas, deixando só o cronômetro | Dado sidebar visível, quando o modo foco é ativado, então sidebar e abas somem e só o cronômetro permanece | e2e-webdriverio | Sim |
 | POM-017 | **Pausar e retomar o timer** — Pausa a contagem no meio da etapa e retoma do ponto exato | Dado cronômetro em 15:00 restantes, quando pausado por 2min reais e retomado, então volta a contar de 15:00, não 13:00 | e2e-webdriverio | Sim |
 | POM-020 | **Indicador visual de progresso** — Barra/anel mostra a fração decorrida da etapa atual | Dado foco de 25min com 5min decorridos, quando observado, então o indicador mostra ~20% preenchido | e2e-webdriverio | Sim |
+
+### Área BIB — Biblioteca (acervo de livros com progresso de leitura)
+
+Um lugar onde o usuário joga PDFs e EPUBs e o app os deixa legíveis. Decisões travadas em 05/09/2026: **um livro é um registro** de uma database "Biblioteca" — logo uma página inteira, com as anotações dentro e o progresso como propriedade, o que o torna filtrável e visível na Trilha e no painel Hoje; o acervo é uma view (galeria) dessa database. **Dois formatos**, PDF e EPUB, e o resto é recusado com explicação útil — MOBI/AZW normalmente têm DRM, e abrir arquivo com DRM está fora de questão. **Dois modos de leitura**: o original fiel (paginado, com tabela e fórmula no lugar) e um modo leitura de texto refluído, oferecido só quando existe camada de texto. **O arquivo é copiado** para a pasta de dados do app, nomeado por hash do conteúdo, reusando o armazenamento de mídia da Fase 2 — para reorganizar a pasta de Downloads não quebrar a Biblioteca e para o backup incluir os livros. **A barra só aumenta**: ela marca o ponto mais distante alcançado, não a posição atual, porque reler não desfaz leitura. Fica **fora** de escopo, por decisão explícita: OCR de PDF digitalizado, e conversão do arquivo para um formato interno único (perderia tabela e fórmula, que é onde mora a informação densa de um livro técnico).
+
+Depende da Fase 3 (database e views) e de nada da Fase 4 — está aqui pela afinidade com as outras superfícies de estudo, mas pode ser antecipada.
+
+| ID | Feature | Critério de aceite | Teste | Essencial |
+|---|---|---|---|---|
+| BIB-001 | **Importar livro arrastando ou pelo seletor** — O arquivo é copiado para dentro do app | Dado um `.pdf` arrastado para a Biblioteca, quando solto, então um registro nasce com o título derivado do nome do arquivo, o arquivo é copiado para a pasta de dados do app com nome derivado do hash do conteúdo, e apagar o arquivo original depois disso não afeta a leitura; jogar o mesmo arquivo de novo reconhece a duplicata e não cria um segundo registro | e2e-webdriverio | Sim |
+| BIB-002 | **Formato não suportado é recusado com explicação útil** | Dado um arquivo `.mobi` arrastado, quando solto, então o app recusa dizendo que os formatos suportados são PDF e EPUB e sugerindo converter, em vez de "formato inválido"; nenhum registro é criado e nenhum arquivo é copiado | vitest | Sim |
+| BIB-003 | **Abrir um livro abre o registro: leitor e anotações juntos** | Dado o livro "CPC 48" na Biblioteca, quando aberto, então a tela mostra o leitor e, na mesma página, as propriedades do registro e o corpo de blocos onde as anotações são escritas — porque um livro é um registro, e um registro é uma página | e2e-webdriverio | Sim |
+| BIB-004 | **Leitor de PDF fiel ao original** — Paginado, com o layout como foi diagramado | Dado um PDF de duas colunas com tabelas, quando aberto no modo original, então cada página renderiza com o layout, as tabelas e as fórmulas na posição original, e a navegação é por página com indicação de "página N de M" | e2e-webdriverio | Sim |
+| BIB-005 | **Leitor de EPUB** — Texto que reflui, com sumário navegável | Dado um EPUB com capítulos, quando aberto, então o texto reflui à largura da janela, o sumário lista os capítulos e clicar num deles navega até ele | e2e-webdriverio | Sim |
+| BIB-006 | **Modo leitura: texto refluído com a tipografia do usuário** | Dado um PDF com camada de texto, quando o modo leitura é acionado, então o texto aparece corrido na fonte, no tamanho e no tema escolhidos pelo usuário, e alternar de volta para o original devolve o layout diagramado sem perder a posição de leitura | e2e-webdriverio | Sim |
+| BIB-007 | **PDF digitalizado é detectado e explicado, nunca fingido** | Dado um PDF que é só imagem, sem camada de texto, quando aberto, então o modo original funciona normalmente e o modo leitura não é oferecido, com uma explicação de que o arquivo é digitalizado e de que texto refluído exigiria OCR — em vez de abrir uma tela em branco ou um texto vazio | vitest | Sim |
+| BIB-008 | **Continuar de onde parou** — Reabrir o livro volta à posição exata | Dado o livro fechado na página 124, quando reaberto, então ele abre na página 124; num EPUB, a posição é restaurada mesmo se o tamanho da fonte tiver mudado entre as duas sessões, porque a posição é guardada numa unidade estável do documento e não em número de tela | cargo-test | Sim |
+| BIB-009 | **A barra de progresso só aumenta** — Marca o ponto mais distante alcançado | Dado um livro com 62% lidos, quando o usuário volta ao capítulo 1 para revisar, então a barra continua em 62% e a posição de "continuar de" passa a ser o capítulo 1 — porque o app guarda as duas coisas separadamente e reler não desfaz leitura | vitest | Sim |
+| BIB-010 | **Corrigir o progresso à mão** | Dado que o usuário pulou para a última página só para consultar algo e a barra foi a 100%, quando ele corrige o progresso para 62%, então a barra volta a 62% e continua avançando dali em diante | vitest | Sim |
+| BIB-011 | **O progresso é uma propriedade do registro** — Filtrável e visível fora da Biblioteca | Dado três livros com 62%, 14% e 0% de progresso, quando um filtro "em leitura" é aplicado na view, então só os dois começados aparecem; e uma etapa da Trilha relacionada a um livro exibe o progresso dele sem a Biblioteca estar aberta | vitest | Sim |
+| BIB-012 | **A Biblioteca é uma view do acervo** — Capa, título e progresso por livro | Dado cinco livros importados, quando a Biblioteca é aberta, então cada um aparece com capa (extraída do arquivo quando existe), título, status e a barra de progresso; a ordenação e o filtro são os da view, como em qualquer outra database | vitest | Sim |
+| BIB-013 | **Preferências de leitura persistem** — Fonte, tamanho e tema | Dado o modo leitura configurado com fonte serifada, corpo maior e tema escuro, quando outro livro é aberto numa sessão seguinte, então as mesmas preferências valem, porque são do leitor e não do arquivo | vitest | Sim |
+| BIB-014 | **Trecho selecionado vira anotação na página do livro** | Dado um trecho selecionado no leitor, quando "anotar" é acionado, então o texto é inserido como citação no corpo de blocos do registro, com a referência da posição de origem (página no PDF, capítulo no EPUB), navegável de volta ao ponto exato | e2e-webdriverio | Sim |
+| BIB-015 | **Arquivo ausente é explicado, não é uma tela quebrada** | Dado um registro cujo arquivo foi removido da pasta de dados por fora do app, quando o livro é aberto, então a tela explica que o arquivo não está mais lá e oferece reimportá-lo, preservando progresso e anotações — que vivem no banco, não no arquivo | vitest | Sim |
 
 ### Área HOJ — Painel Hoje e rotina de estudo
 
