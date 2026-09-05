@@ -2,90 +2,109 @@
 -- derived at query time.
 --
 -- Deriving backlinks straight from `blocks.content` on every read (scan
--- every block, extract every `pageId` from its JSONB, filter by target)
+-- every block, extract every `pageId` from its JSON, filter by target)
 -- would mean a full-table scan of `blocks` each time any page's "Backlinks"
--- section renders — no index reaches inside JSONB structure-agnostically.
--- An edge table turns that read into "the rows in this table whose
--- `target_page_id` is this page", answerable through the index below, at
--- the cost of keeping the table in sync on write.
+-- section renders. An edge table turns that read into "the rows in this
+-- table whose `target_page_id` is this page", answerable through the index
+-- below, at the cost of keeping the table in sync on write.
 --
 -- A trigger (not application code in `db::blocks::BlockRepository`) is what
 -- keeps it in sync, because it is the one thing guaranteed to run no matter
 -- which code path writes a block's `content` — this repository's own
 -- create/update, `db::pages`'s page-duplication copy (raw `INSERT`, no
 -- repository call), a future importer. One trigger is one place that can
--- drift from `blocks.content`; N call sites remembering to also call a
--- "resync links" function is N places that can drift, and the mistake
--- (feature ships, someone forgets the call site) does not fail loudly.
+-- drift; N call sites remembering to also call a "resync links" function is
+-- N places that can drift, and the mistake does not fail loudly.
 --
 -- The wire convention a block's `content` must follow to be discoverable
 -- here: a JSON object anywhere inside `content`, at any nesting depth,
 -- carrying a string field literally named `pageId` is a reference to that
--- page. This covers an inline "@mention" node buried inside a paragraph's
--- rich-text tree and a top-level "link to page" block's own content with
--- the exact same rule, so the editor never needs a second code path for
--- "how do I make this discoverable as a link". It is additional to
--- `contract.ts`'s `BlockContent` (still opaque, still
--- `Record<string, unknown>` — this migration does not change that type or
--- weaken "the data layer never parses it" for ordinary block CRUD, which
--- never runs this expression); it is a convention the editor's mention and
--- link-to-page node authors need to follow for FUN-044/045 to work, not a
--- schema change to what a block IS. See CHECKLIST.md FUN-043/044/045 and
--- the ressalvas in this session's report for the integration note.
+-- page. Isso cobre a @-menção inline enterrada na árvore de texto rico de um
+-- parágrafo e o bloco "link para página" com a MESMA regra.
+--
+-- Essa convenção já custou caro uma vez: na Fase 2 o nó de menção gravava a
+-- chave como `id` (o `MentionNodeAttrs` do TipTap é sempre `{id, label}`) e
+-- a extração procurava `pageId`, então nenhuma menção real gerava backlink —
+-- e o teste que deveria ter pego fabricava um JSON com `pageId`, uma forma
+-- que o cliente nunca produzia. Ver `docs/ACHADOS-FASE-2.md`. Quem mexer
+-- aqui ou no nó de menção precisa manter as duas pontas com o MESMO nome.
 CREATE TABLE block_page_links (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_block_id UUID NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY NOT NULL,
+    source_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
     -- Denormalized from the source block at write time so a backlinks query
     -- never has to join back through `blocks` just to know which page a hit
     -- lives on.
-    source_page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-    target_page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    source_page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    target_page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     UNIQUE (source_block_id, target_page_id)
-);
+) STRICT;
 
 CREATE INDEX idx_block_page_links_target ON block_page_links (target_page_id);
 CREATE INDEX idx_block_page_links_source_page ON block_page_links (source_page_id);
 
--- Recomputes every edge sourced from NEW unconditionally (delete-then-insert
--- rather than a diff) — content changes on every keystroke via autosave, a
--- block rarely carries more than a handful of links, and this keeps the
--- logic here to one obviously-correct pass instead of a diff that could
--- itself drift from the extraction rule above.
+-- `json_tree(NEW.content)` é o equivalente exato de
+-- `jsonb_path_query(NEW.content, '$.**.pageId')` do Postgres: percorre o JSON
+-- inteiro recursivamente, uma linha por nó, com `key`, `value` e `type`. O
+-- filtro `key = 'pageId' AND type = 'text'` é a regra de descoberta acima,
+-- escrita em SQL comum.
 --
--- `target.id <> NEW.page_id` drops self-references (a page mentioning
--- itself) — a page's own backlinks section listing itself is noise, not a
--- feature anyone asked for, and FUN-044's criterion never exercises it.
+-- DUAS COISAS QUE O POSTGRES PRECISAVA E AQUI SOMEM:
 --
--- The `~* '^[0-9a-f]{8}-...'` filter (rather than trying to CAST every
--- match and catching the exception) is what keeps a stray non-UUID string
--- that happens to sit under a `pageId` key, or a `pageId` referencing a
--- page since permanently deleted, from raising an error out of this trigger
--- and failing the block save that triggered it — it is filtered out of the
--- candidate set before the join to `pages` ever runs.
-CREATE FUNCTION sync_block_page_links() RETURNS trigger AS $$
+-- 1. O filtro por regex de UUID (`~* '^[0-9a-f]{8}-...'`) existia para uma
+--    string qualquer sob uma chave `pageId` não estourar o `CAST` para uuid e
+--    derrubar o save do bloco. Aqui `pages.id` é TEXT e a comparação é
+--    TEXT com TEXT: uma string que não é id de página nenhuma simplesmente
+--    não casa no JOIN. Nada a proteger, e SQLite não tem regex de qualquer
+--    forma.
+-- 2. O `IF NEW.deleted_at IS NULL ... END IF` do corpo plpgsql vira o
+--    `WHERE NEW.deleted_at IS NULL` do próprio SELECT: um bloco na lixeira
+--    faz o SELECT não produzir linha nenhuma, e o DELETE acima já tirou as
+--    arestas antigas. Gatilho de SQLite só executa SQL comum, sem
+--    condicional de fluxo.
+--
+-- `target.id <> NEW.page_id` descarta auto-referência (uma página mencionando
+-- a si mesma): a seção de backlinks da própria página listando ela mesma é
+-- ruído, e o critério de FUN-044 nunca exercita esse caso.
+--
+-- O id da aresta é gerado aqui com `hex(randomblob(16))` porque uma aresta
+-- não tem dono do lado do cliente — diferente de bloco e registro, cujo id
+-- vem do cliente por decisão da Fase 2. Não precisa ser UUID canônico: nada
+-- fora desta tabela referencia esse id.
+
+-- Recomputa toda aresta originada em NEW incondicionalmente
+-- (apaga-e-insere, não diff) — `content` muda a cada tecla pelo autosave, um
+-- bloco raramente carrega mais que um punhado de links, e assim a lógica
+-- fica numa passada obviamente correta em vez de um diff que poderia
+-- divergir da regra de extração.
+CREATE TRIGGER blocks_sync_page_links_after_insert
+AFTER INSERT ON blocks
+BEGIN
+    INSERT INTO block_page_links (id, source_block_id, source_page_id, target_page_id)
+    SELECT DISTINCT hex(randomblob(16)), NEW.id, NEW.page_id, target.id
+    FROM json_tree(NEW.content) AS jt
+    JOIN pages target ON target.id = jt.value
+    WHERE jt.key = 'pageId'
+      AND jt.type = 'text'
+      AND target.id <> NEW.page_id
+      AND NEW.deleted_at IS NULL;
+END;
+
+-- Dispara em `content`, `deleted_at` ou `page_id` — as três colunas que
+-- podem mudar quais arestas estão corretas (as arestas de um bloco na
+-- lixeira somem; um bloco movido para outra página reorigina as suas).
+-- Qualquer outra coluna mudando (position, block_type sozinho) deixa o
+-- conjunto de arestas intacto, então isto não roda a cada escrita da linha.
+CREATE TRIGGER blocks_sync_page_links_after_update
+AFTER UPDATE OF content, deleted_at, page_id ON blocks
 BEGIN
     DELETE FROM block_page_links WHERE source_block_id = NEW.id;
 
-    IF NEW.deleted_at IS NULL THEN
-        INSERT INTO block_page_links (source_block_id, source_page_id, target_page_id)
-        SELECT DISTINCT NEW.id, NEW.page_id, target.id
-        FROM jsonb_path_query(NEW.content, '$.**.pageId') AS raw_match
-        CROSS JOIN LATERAL (SELECT trim(both '"' from raw_match::text) AS candidate) AS extracted
-        JOIN pages target ON target.id::text = extracted.candidate
-        WHERE extracted.candidate ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-          AND target.id <> NEW.page_id;
-    END IF;
-
-    RETURN NEW;
+    INSERT INTO block_page_links (id, source_block_id, source_page_id, target_page_id)
+    SELECT DISTINCT hex(randomblob(16)), NEW.id, NEW.page_id, target.id
+    FROM json_tree(NEW.content) AS jt
+    JOIN pages target ON target.id = jt.value
+    WHERE jt.key = 'pageId'
+      AND jt.type = 'text'
+      AND target.id <> NEW.page_id
+      AND NEW.deleted_at IS NULL;
 END;
-$$ LANGUAGE plpgsql;
-
--- Fires on `content`, `deleted_at` or `page_id` changing — the three
--- columns that can change which edges are correct (a soft-deleted block's
--- links must disappear; a block moved to another page must re-source its
--- edges from the new page). Any other column changing (position, block_type
--- alone, etc.) leaves the edge set untouched, so this does not run on every
--- unrelated write to the row.
-CREATE TRIGGER blocks_sync_page_links
-    AFTER INSERT OR UPDATE OF content, deleted_at, page_id ON blocks
-    FOR EACH ROW EXECUTE FUNCTION sync_block_page_links();

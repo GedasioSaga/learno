@@ -1,4 +1,19 @@
--- pg_trgm powers fuzzy/substring title matching for the global search palette
--- (FUN-037) and every "pick a page/database" picker; enabling it once here
--- means later migrations can add trigram indexes without repeating this.
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Na versão Postgres esta migração ligava `pg_trgm`, usada para
+-- correspondência de substring/typo-tolerante no título (`idx_pages_title_trgm`
+-- em 0004). SQLite não tem extensões carregadas por `CREATE EXTENSION` — cada
+-- capacidade é ou compilada no binário (FTS5, que 0004/0006 já usam) ou não
+-- existe.
+--
+-- PERDA REGISTRADA (ver `docs/MIGRACAO-SQLITE.md`): o contrato da migração só
+-- especifica equivalência para `tsvector`/`GIN`/`unaccent` -> FTS5, não para
+-- `pg_trgm`. FTS5 com `unicode61 remove_diacritics 2` (0004/0006) cobre busca
+-- por TOKEN (palavra inteira ou prefixo de palavra) e é insensível a acento;
+-- não cobre substring livre NO MEIO de uma palavra (o exemplo original era
+-- achar "Bio" dentro de "Biologia"). Quem herdar a busca pode recuperar isso
+-- com uma segunda tabela FTS5 usando `tokenize = 'trigram'` (suportado desde
+-- SQLite 3.34) se o produto pedir de volta essa forma de correspondência —
+-- não implementado aqui por não estar no contrato e por não ter caso de uso
+-- nomeado no checklist além do comentário original de FUN-037.
+--
+-- Arquivo mantido (não apagado) para preservar a numeração de migração
+-- 1:1 com o histórico Postgres; não faz nada.

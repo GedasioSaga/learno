@@ -1,10 +1,21 @@
--- One trigger function shared by every table with an `updated_at` column, so
--- "when was this last touched" (autosave conflict checks, DBS-026 Last
--- Edited Time, sync bookkeeping later) never depends on application code
--- remembering to set it on every write path.
-CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
-BEGIN
-    NEW.updated_at = now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+-- Na versão Postgres esta migração criava `set_updated_at()`, uma função
+-- `plpgsql` compartilhada por todo gatilho `BEFORE UPDATE ... FOR EACH ROW
+-- EXECUTE FUNCTION set_updated_at()` do schema.
+--
+-- SQLite não tem `CREATE FUNCTION`/`plpgsql` (ver a tabela de equivalências em
+-- `docs/MIGRACAO-SQLITE.md`) nem corpo de gatilho que reescreva `NEW.<coluna>`
+-- antes de gravar — um gatilho SQLite só executa instruções SQL comuns
+-- (INSERT/UPDATE/DELETE/SELECT), nunca atribuição a `NEW`. Por isso cada
+-- tabela que precisa de "atualizado em automático" declara o PRÓPRIO gatilho
+-- `AFTER UPDATE ... WHEN NEW.updated_at = OLD.updated_at`, que faz um segundo
+-- UPDATE gravando o timestamp — o padrão idiomático de SQLite para esta
+-- necessidade, verificado (com dado de verdade, não só lido) para não
+-- recursar infinitamente: a segunda passada do gatilho vê
+-- `NEW.updated_at <> OLD.updated_at` e o `WHEN` barra a repetição.
+--
+-- Essa versão por tabela vive na própria migração que cria a tabela (0003,
+-- 0006, 0007, 0008, 0009 — antes de 0017 assumir seu próprio caminho de
+-- escrita, 0010, 0011, 0013, 0018, 0021), não aqui.
+--
+-- Arquivo mantido (não apagado) para preservar a numeração de migração 1:1
+-- com o histórico Postgres; não faz nada.
