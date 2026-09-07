@@ -38,6 +38,7 @@ pub mod resumo_capitulo;
 pub mod review_log;
 pub mod search;
 pub mod sql;
+pub mod tags;
 pub mod trilha;
 pub mod vocabulario;
 
@@ -83,6 +84,7 @@ pub use relations::{
 pub use resumo_capitulo::{ResumoCapituloRepository, ResumoDeCapitulo};
 pub use review_log::{ReviewLogRepository, RevisaoDoDia, StudyStats};
 pub use search::{SearchRepository, SearchResultRow, DEFAULT_RESULT_LIMIT};
+pub use tags::{extract_tags, TagPageRow, TagRepository, TagSummaryRow};
 pub use trilha::{
     avaliar_desbloqueio, ConfiguracaoTrilha, Decisao, Desbloqueio, Etapa, Flecha, ImpactoDaTroca, MaterialDaEtapa,
     NivelTopologico, ProgressoDaEtapa, Raia, SituacaoNoCaminho, Trilha, TrilhaRepository, TrilhaResumo,

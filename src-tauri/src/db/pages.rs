@@ -773,6 +773,13 @@ async fn duplicate_blocks_for_page(
         .bind(&block.position)
         .execute(&mut **tx)
         .await?;
+        // This raw `INSERT` is exactly the write path
+        // `0016_block_page_links.sql`'s trigger comment calls out as the one
+        // a trigger protects against and application code has to remember —
+        // and tags have no trigger at all (see `db::tags`'s doc comment for
+        // why), so it is remembered here by hand: a duplicated page's blocks
+        // keep the same `#tags` their originals had.
+        crate::db::tags::sync_block_tags(tx, new_id, &block.block_type, &block.plain_text).await?;
     }
 
     Ok(())

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::db::{
     BacklinkRepository, BacklinkRow, BlockChangeInput, BlockPatchInput, BlockPlacementInput, BlockRepository, BlockRow,
-    NewBlockInput, OutgoingLinkRow,
+    NewBlockInput, OutgoingLinkRow, TagPageRow, TagRepository, TagSummaryRow,
 };
 use crate::error::Result;
 use crate::ipc::state::AppState;
@@ -22,6 +22,10 @@ fn block_repository(state: &AppState) -> Result<BlockRepository> {
 
 fn backlink_repository(state: &AppState) -> Result<BacklinkRepository> {
     Ok(BacklinkRepository::new(state.pool()?))
+}
+
+fn tag_repository(state: &AppState) -> Result<TagRepository> {
+    Ok(TagRepository::new(state.pool()?))
 }
 
 /// `BlockCommands.list_page_blocks`: a árvore inteira de blocos ativos da
@@ -117,4 +121,21 @@ pub async fn unsync_all_synced_copies(state: State<'_, AppState>, id: Uuid) -> R
 #[tauri::command]
 pub async fn delete_synced_original(state: State<'_, AppState>, id: Uuid, confirmed: bool) -> Result<()> {
     block_repository(&state)?.delete_synced_original(id, confirmed).await
+}
+
+/// Every `#tag` written anywhere across live pages, with the count of live
+/// pages each carries — not part of `BlockCommands`, aditivo pelo mesmo
+/// motivo dos comandos de backlink acima. Backend-only por decisão desta
+/// rodada: a marca no editor e o painel de navegação são a peça seguinte.
+#[tauri::command]
+pub async fn list_all_tags(state: State<'_, AppState>) -> Result<Vec<TagSummaryRow>> {
+    tag_repository(&state)?.list_all_tags().await
+}
+
+/// Every live page carrying `name` (case-insensitive) or a nested tag under
+/// it — asking for `"materia"` also reaches a page that only ever wrote
+/// `#materia/biologia`. See `db::tags::TagRepository::list_pages_for_tag`.
+#[tauri::command]
+pub async fn list_pages_for_tag(state: State<'_, AppState>, name: String) -> Result<Vec<TagPageRow>> {
+    tag_repository(&state)?.list_pages_for_tag(&name).await
 }

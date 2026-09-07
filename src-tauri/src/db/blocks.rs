@@ -181,11 +181,13 @@ impl BlockRepository {
         Ok(rows)
     }
 
-    /// Creates a block per `NewBlock`'s placement. Two round trips (validate
-    /// the parent, then insert) rather than one transaction — the same
-    /// accepted race as `PageRepository::create`'s `next_position_under` then
-    /// `INSERT`: nothing else in this app deletes a block out from under a
-    /// concurrent insert in the handful of milliseconds between them.
+    /// Creates a block per `NewBlock`'s placement. A short transaction (not
+    /// the two bare round trips this used to be — validate the parent, then
+    /// insert) because tag extraction (`db::tags::sync_block_tags`) needs to
+    /// commit atomically with the row it reads `content` from; the race this
+    /// module used to accept (nothing else deletes a block out from under a
+    /// concurrent insert in the handful of milliseconds between validating
+    /// the parent and inserting) is unaffected either way.
     pub async fn create(&self, input: NewBlockInput) -> Result<BlockRow> {
         validate_parent(&self.pool, input.placement.page_id, input.placement.parent_block_id).await?;
         let siblings = active_siblings(&self.pool, input.placement.page_id, input.placement.parent_block_id, None).await?;
@@ -193,6 +195,7 @@ impl BlockRepository {
         // `Uuid::now_v7()` só quando o chamador não trouxe id — ver `NewBlockInput::id`.
         let id = input.id.unwrap_or_else(Uuid::now_v7);
 
+        let mut tx = self.pool.begin().await?;
         let sql = format!(
             "INSERT INTO blocks (id, page_id, parent_block_id, block_type, content, plain_text, position) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {BLOCK_COLUMNS}"
@@ -205,8 +208,10 @@ impl BlockRepository {
             .bind(&input.content)
             .bind(&input.plain_text)
             .bind(&new_position)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
+        crate::db::tags::sync_block_tags(&mut tx, row.id, &row.block_type, &row.plain_text).await?;
+        tx.commit().await?;
 
         Ok(row)
     }
@@ -229,6 +234,7 @@ impl BlockRepository {
             return Err(Error::NotFound(format!("bloco ativo {canonical}")));
         }
         apply_patch_to_copies(&mut tx, canonical, &patch).await?;
+        resync_tags_for_canonical_and_copies(&mut tx, canonical).await?;
 
         let result = fetch_active_tx(&mut tx, id).await?;
         tx.commit().await?;
@@ -333,6 +339,7 @@ impl BlockRepository {
                         return Err(Error::NotFound(format!("bloco ativo {canonical}")));
                     }
                     apply_patch_to_copies(&mut tx, canonical, &patch).await?;
+                    resync_tags_for_canonical_and_copies(&mut tx, canonical).await?;
                     results.push(fetch_active_tx(&mut tx, id).await?);
                 }
                 BlockChangeInput::Delete { id } => {
@@ -394,6 +401,7 @@ impl BlockRepository {
         let new_position = position_between(&siblings, placement.after_block_id)?;
         let id = Uuid::now_v7();
 
+        let mut tx = self.pool.begin().await?;
         let sql = format!(
             "INSERT INTO blocks (id, page_id, parent_block_id, block_type, content, plain_text, synced_source_id, position) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {BLOCK_COLUMNS}"
@@ -407,8 +415,14 @@ impl BlockRepository {
             .bind(&canonical.plain_text)
             .bind(canonical_id.db())
             .bind(&new_position)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
+        // The pasted copy starts out with the same content (and thus the
+        // same tags) as its source — EDT-073 — so this new block's own
+        // block_id needs its own block_tags rows too, not just the
+        // original's.
+        crate::db::tags::sync_block_tags(&mut tx, row.id, &row.block_type, &row.plain_text).await?;
+        tx.commit().await?;
 
         Ok(row)
     }
@@ -795,6 +809,26 @@ async fn apply_patch_to_copies(tx: &mut Transaction<'_, Sqlite>, canonical_id: U
     Ok(())
 }
 
+/// After a patch lands on `canonical_id` and is mirrored onto its synced
+/// copies (`apply_patch_to_copies`), the tag index needs the same fan-out:
+/// canonical first, then every live copy, each re-scanned from its own
+/// current `block_type`/`plain_text` — not copied from canonical's tag set,
+/// because a copy can (rarely, but legally) have drifted to a different
+/// `block_type` via a patch that only touched `content`/`plain_text` on one
+/// instance before this function existed, and re-reading each row's own
+/// columns is no more expensive than trusting they still match.
+async fn resync_tags_for_canonical_and_copies(tx: &mut Transaction<'_, Sqlite>, canonical_id: Uuid) -> Result<()> {
+    let canonical = fetch_active_tx(tx, canonical_id).await?;
+    crate::db::tags::sync_block_tags(tx, canonical.id, &canonical.block_type, &canonical.plain_text).await?;
+
+    let sql = format!("SELECT {BLOCK_COLUMNS} FROM blocks WHERE synced_source_id = $1 AND deleted_at IS NULL");
+    let copies = sqlx::query_as::<_, BlockRow>(&sql).bind(canonical_id.db()).fetch_all(&mut **tx).await?;
+    for copy in copies {
+        crate::db::tags::sync_block_tags(tx, copy.id, &copy.block_type, &copy.plain_text).await?;
+    }
+    Ok(())
+}
+
 async fn create_in_tx(tx: &mut Transaction<'_, Sqlite>, input: NewBlockInput) -> Result<BlockRow> {
     validate_parent_tx(tx, input.placement.page_id, input.placement.parent_block_id).await?;
     let siblings = active_siblings_tx(tx, input.placement.page_id, input.placement.parent_block_id, None).await?;
@@ -816,6 +850,7 @@ async fn create_in_tx(tx: &mut Transaction<'_, Sqlite>, input: NewBlockInput) ->
         .bind(&new_position)
         .fetch_one(&mut **tx)
         .await?;
+    crate::db::tags::sync_block_tags(tx, row.id, &row.block_type, &row.plain_text).await?;
 
     Ok(row)
 }

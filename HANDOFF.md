@@ -214,6 +214,68 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Tags `#assim` (07/09/2026) — backend
+
+Bar: Obsidian. Tag inline no meio do texto, aninhada com `/`, com um jeito de ver todas e
+chegar às notas de cada uma.
+
+**O estado que motivou a peça:** páginas não tinham tag nenhuma, e as tags de CARTÃO
+existiam pela metade — `notes.tags` guarda, `createNote` aceita, `CriarCartao.tsx` tem campo
+para digitar, e **nada em lugar nenhum filtra ou navega por tag**. As tags entram e nunca
+mais são vistas. Por isso os comandos de consulta (`list_all_tags`, `list_pages_for_tag`)
+foram critério de aceite desta peça, não extra: sem eles a tag é enfeite, e o enfeite já
+existia.
+
+**Onde a tag mora:** tabela de índice (`0041_tags.sql`: `tags` + `block_tags`), alimentada
+pelo Rust em cada ponto de escrita de bloco. Trigger SQL foi descartado por um motivo
+concreto: a extração precisa ser Unicode-aware — acento, emoji, casefold — e o SQLite não
+faz isso, nem dá para registrar função customizada pelo driver `sqlx`. Coluna denormalizada
+em `pages` foi descartada por duplicar a fonte de verdade.
+
+O custo dessa escolha está escrito no topo de `db/tags.rs`: chamar à mão em cada caminho de
+escrita reintroduz o risco de "N lugares podem esquecer" que o comentário de
+`block_page_links` já nomeia. Os pontos cobertos estão listados lá — `create`,
+`create_in_tx`, `create_synced_copy`, `update`, `apply_changes` e o `INSERT` bruto de
+`duplicate_blocks_for_page`, que é a armadilha que o comentário do trigger de backlinks já
+apontava.
+
+`block_tags` guarda só `block_id`/`tag_id`, **sem `page_id`** — a página vem de JOIN vivo com
+`blocks.page_id`, o que elimina qualquer bookkeeping ao mover bloco.
+
+Decisões, todas testadas: identidade **case-insensível** (`#Biologia` == `#biologia`), como
+no Obsidian; `#tag` dentro de bloco de código **não conta** (span de código inline dentro de
+parágrafo não é tratado, e isso está declarado no código); hierarquia resolvida na
+**consulta**, não materializada no índice, com `substr`/concatenação em vez de `LIKE` para
+não deixar o `_` do wildcard virar coringa acidental.
+
+**Um defeito que o disco escondeu.** O builder escreveu o teste certo — `##biologia` não é
+tag — e **não conseguiu rodá-lo**: o disco chegou a 545 MB e o `cargo test` falhou com
+`Espaço insuficiente no disco (os error 112)`. O `clippy` passou limpo no mesmo instante,
+porque ele só faz `check` e não precisa linkar a biblioteca inteira. Ou seja: **um portão
+verde que não provava nada sobre comportamento.** O builder parou e avisou em vez de apagar
+nada, que é a regra desta máquina.
+
+A causa, depois que houve espaço: `is_tag_boundary` respondia **duas perguntas diferentes**
+com uma função só — "o que termina uma tag" e "o que pode vir antes de uma tag". Para `#` as
+respostas divergem: ele termina uma tag, mas não pode abrir a seguinte. Em `##biologia` o
+primeiro `#` era corretamente recusado, e aí o **segundo** era aceito, porque o `#` à
+esquerda contava como fronteira válida. Corrigido separando as duas perguntas, com o porquê
+no código.
+
+Portão desta rodada:
+
+- `cargo clippy --all-targets --all-features -- -D warnings -W clippy::unwrap_used
+  -W clippy::expect_used`: **exit 0**.
+- `cargo test --jobs 2`: **25 suítes, 879 testes, 0 falhas**, incluindo 12 de integração de
+  tags contra banco real — hierarquia alcançando página que só tem a tag aninhada,
+  case-insensível ponta a ponta, dedupe por página, editar remove a tag, apagar bloco remove
+  a tag, mover bloco leva a tag para a página nova, duplicar página leva a tag, cópia
+  sincronizada ganha tags próprias, página na lixeira some da tag, e migração sobre banco
+  pré-existente.
+
+**Falta a peça de tela:** a marca `#` no editor e o painel para navegar. Sem ela as tags
+novas repetem exatamente o estado das tags de cartão — gravadas e inalcançáveis. É a próxima.
+
 ### O gesto do produto (07/09/2026) — selecionar um trecho vira lacuna
 
 A rodada anterior entregou o cloze inteiro — tipo de nota, parser, um cartão por lacuna,

@@ -47,8 +47,8 @@ pub use biblioteca_commands::{
 };
 pub use block_commands::{
     apply_block_changes, count_synced_copies, create_block, create_synced_block_copy,
-    delete_blocks, delete_synced_original, list_backlinks, list_outgoing_links,
-    list_page_blocks, move_block, unsync_all_synced_copies, unsync_block, update_block,
+    delete_blocks, delete_synced_original, list_all_tags, list_backlinks, list_outgoing_links,
+    list_page_blocks, list_pages_for_tag, move_block, unsync_all_synced_copies, unsync_block, update_block,
 };
 pub use cronograma_commands::{
     atualizar_bloco, atualizar_materia, copiar_semana, criar_bloco, criar_materia, definir_meta_semanal,

@@ -125,6 +125,8 @@ pub fn run() {
             ipc::block_commands::unsync_block,
             ipc::block_commands::unsync_all_synced_copies,
             ipc::block_commands::delete_synced_original,
+            ipc::block_commands::list_all_tags,
+            ipc::block_commands::list_pages_for_tag,
             ipc::deck_commands::list_decks,
             ipc::deck_commands::create_deck,
             ipc::deck_commands::rename_deck,
