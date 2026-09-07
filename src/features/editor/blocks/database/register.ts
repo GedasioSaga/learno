@@ -4,18 +4,16 @@
  * Este arquivo nunca é importado por ninguém: `core/discover-extensions.ts`
  * o descobre via `import.meta.glob`.
  *
- * Sem item de menu "/" nesta rodada, de propósito: inserir um bloco novo
- * exigiria uma database recém-criada, e não existe comando Rust que crie
- * uma linha em `databases` ainda (ver a divergência S2 no relatório desta
- * peça — criar esse comando é trabalho de Rust, fora do papel deste
- * construtor). Um item de menu que inserisse um bloco sem `databaseId`
- * válido fabricaria um estado que a FK de `database_properties`/
- * `database_views` rejeitaria no primeiro uso real — pior que não oferecer
- * a entrada. O nó e o `BlockSpec` abaixo já estão prontos para um
- * `databaseId` de verdade assim que esse comando existir.
+ * O item "/database" cria a database E a primeira view antes de inserir o
+ * bloco (`actions.ts`) — um bloco sem `databaseId` válido fabricaria um
+ * estado que a FK de `database_views` rejeitaria no primeiro uso real.
  */
-import { registerBlockSpec } from "../../core/block-spec";
+import { createElement } from "react";
+import { registerBlockSpec, registerEditorOverlay, registerSlashMenuItem } from "../../core/block-spec";
 import { registerBlockExtension } from "../../core/registry";
+import { usePageTreeStore } from "../../../pages/store";
+import { createDatabaseAndInsert } from "./actions";
+import { DatabaseInsertError } from "./DatabaseInsertError";
 import { BLOCK_TYPE, DatabaseInline, NODE_NAME } from "./node";
 import "./database-inline.css";
 
@@ -38,4 +36,25 @@ registerBlockSpec({
     // nome de verdade.
     plainText: () => "",
   },
+});
+
+registerSlashMenuItem({
+  id: "blocks:database",
+  title: "Database",
+  keywords: ["database", "tabela", "table", "banco", "base de dados", "planilha"],
+  group: "Páginas",
+  icon: "▦",
+  run: (editor) => {
+    if (!usePageTreeStore.getState().selectedPageId) return false;
+    // Async por natureza (cria a database antes de saber o `databaseId` do
+    // bloco) — `run` só diz que a ação começou. Toda falha já foi levada à
+    // tela por `actions.ts` (store + overlay abaixo); nada é engolido aqui.
+    void createDatabaseAndInsert(editor);
+    return true;
+  },
+});
+
+registerEditorOverlay({
+  id: "blocks:database-insert-error",
+  render: () => createElement(DatabaseInsertError),
 });

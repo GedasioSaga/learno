@@ -61,6 +61,29 @@ export interface CellRenderContext<TValue, TConfig> {
   readOnly: boolean;
 }
 
+/**
+ * O que `renderConfigForm` recebe. `properties` e `records` existem porque
+ * um formulário de configuração pode precisar do RESTO da database — o
+ * editor de fórmula lista as propriedades irmãs na paleta (`prop("Nome")`)
+ * e avalia a prévia contra um registro real. Um formulário que não precisa
+ * simplesmente os ignora.
+ *
+ * Ao CRIAR uma propriedade (o único caminho hoje: `create_property` é o
+ * único comando que aceita `config`), `property.id` é `""` — a propriedade
+ * ainda não existe. O formulário usa isso para saber que não há id a passar
+ * ao backend (ex.: `validate_formula` recebe `propertyId: null`).
+ */
+export interface PropertyConfigFormContext<TConfig> {
+  config: TConfig;
+  property: PropertyDescriptor<TConfig>;
+  /** As outras propriedades da database, por posição. */
+  properties: readonly PropertyDescriptor[];
+  /** Os registros da database — para uma prévia contra dado real. */
+  records: readonly RecordRow[];
+  /** Chamado só com uma config VÁLIDA; quem monta o formulário persiste. */
+  commit(next: TConfig): void;
+}
+
 export interface CellEditContext<TValue, TConfig> {
   value: TValue;
   property: PropertyDescriptor<TConfig>;
@@ -115,11 +138,8 @@ export interface PropertySpec<TValue = unknown, TConfig = unknown> {
   renderValue(ctx: CellRenderContext<TValue, TConfig>): ReactNode;
   /** Ausente => propriedade somente-leitura. */
   renderEditor?(ctx: CellEditContext<TValue, TConfig>): ReactNode;
-  renderConfigForm?(ctx: {
-    config: TConfig;
-    property: PropertyDescriptor<TConfig>;
-    commit(next: TConfig): void;
-  }): ReactNode;
+  /** Presente => ao criar uma propriedade deste tipo, o contêiner abre este formulário antes de chamar `create_property`. */
+  renderConfigForm?(ctx: PropertyConfigFormContext<TConfig>): ReactNode;
 
   // ---- consulta: DECLARATIVA, jamais um predicado ----
   /** A UI de filtro oferece só estes; o Rust traduz a partir de `valueShape`. */

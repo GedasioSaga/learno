@@ -12,7 +12,8 @@
  * do repositório define `DatabaseSchemaRow` — ver a divergência registrada
  * no relatório desta peça.
  */
-import type { Database } from "../contract";
+import type { PropertyType } from "../../../lib/ipc";
+import type { Database, RecordRow } from "../contract";
 import type { PropertyDescriptor } from "../core/property-spec";
 import type { ViewDescriptor } from "../core/view-spec";
 
@@ -37,11 +38,13 @@ export interface DatabaseSchema {
  * fornecer os dados de verdade (leitura por `databaseId`) devolve isto,
  * nunca `DatabaseSchema` cru, porque toda leitura por IPC tem uma janela de
  * carregamento e um caminho de erro que uma célula de UI não pode ignorar.
+ * `records` anda junto do schema porque é o mesmo carregamento
+ * (`list_records`) — uma view nunca fica "pronta" sem saber suas linhas.
  */
 export type DatabaseContainerState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; schema: DatabaseSchema };
+  | { status: "ready"; schema: DatabaseSchema; records: readonly RecordRow[] };
 
 /**
  * Ações que o cabeçalho oferece. Cada uma é opcional de propósito: um
@@ -56,12 +59,28 @@ export type DatabaseContainerState =
  * Nenhuma das duas nunca é o tipo de propriedade da célula — é o que separa
  * DBS-002 (bloqueia estrutura) de travar edição de valor por engano.
  */
+/**
+ * O que `onAddProperty` devolve quando é assíncrono: o diálogo de
+ * configuração (`NewPropertyDialog`) espera isto para só fechar depois de
+ * a propriedade existir — em erro, ele fica aberto com a expressão intacta
+ * e a mensagem do backend ao lado do botão, em vez de sumir e deixar o
+ * erro aparecer noutro canto da tela.
+ */
+export type AddPropertyResult = { ok: true } | { ok: false; message: string };
+
 export interface DatabaseContainerActions {
   /** DBS-001: "+ Novo" no cabeçalho. */
   onCreateRecord?(): void;
   onFilter?(): void;
   onSort?(): void;
-  /** DBS-002: gate é `database.isLocked`, NUNCA o tipo de propriedade da célula. */
-  onAddProperty?(): void;
+  /**
+   * DBS-002: gate é `database.isLocked`, NUNCA o tipo de propriedade da
+   * célula. Recebe o tipo escolhido no menu e o nome (o rótulo do tipo, ou o
+   * que o usuário digitou no diálogo de configuração). `config` só vem
+   * quando o spec do tipo tem `renderConfigForm` e o usuário o preencheu —
+   * é a `database_properties.config` inicial (ex.: `{ expression }` de uma
+   * fórmula).
+   */
+  onAddProperty?(type: PropertyType, name: string, config?: unknown): void | Promise<AddPropertyResult>;
   onAddView?(): void;
 }

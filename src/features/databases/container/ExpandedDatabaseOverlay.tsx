@@ -7,17 +7,19 @@
  * clique dentro não propaga, Escape fecha).
  */
 import type { KeyboardEvent, MouseEvent } from "react";
+import type { ViewMutations } from "../core/view-spec";
 import { DatabaseContainer } from "./DatabaseContainer";
 import type { DatabaseContainerActions, DatabaseContainerState } from "./types";
 
 interface ExpandedDatabaseOverlayProps {
   state: DatabaseContainerState;
   actions: DatabaseContainerActions;
+  mutations: ViewMutations | null;
   activeViewId?: string;
   onClose(): void;
 }
 
-export function ExpandedDatabaseOverlay({ state, actions, activeViewId, onClose }: ExpandedDatabaseOverlayProps) {
+export function ExpandedDatabaseOverlay({ state, actions, mutations, activeViewId, onClose }: ExpandedDatabaseOverlayProps) {
   const title = state.status === "ready" ? state.schema.database.name || "Database" : "Database";
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -46,7 +48,7 @@ export function ExpandedDatabaseOverlay({ state, actions, activeViewId, onClose 
             ✕
           </button>
         </div>
-        <DatabaseContainer state={state} mode="fullPage" actions={actions} activeViewId={activeViewId} />
+        <DatabaseContainer state={state} mode="fullPage" actions={actions} mutations={mutations} activeViewId={activeViewId} />
       </div>
     </div>
   );

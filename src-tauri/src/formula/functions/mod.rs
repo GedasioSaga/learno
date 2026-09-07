@@ -23,6 +23,20 @@
 //! Nenhuma outra peça precisa tocar em `ipc::formula_commands` para isso —
 //! aquele arquivo só chama [`register_all`] uma vez, sem saber o que foi
 //! registrado.
+//!
+//! **Esta rodada acrescenta duas categorias**: `matematica` (DBS-062),
+//! `agregacao` (DBS-063) e `texto` (DBS-066) já existiam; `data`
+//! (DBS-070/071/073/074) e `logica` (DBS-075/076/077) são novas — ver o
+//! `mod.rs` de cada uma para as funções e as decisões de borda. `lógica`
+//! cobre só condicional/booleano/igualdade — a parte de LISTA de ordem
+//! superior (`map`/`filter`/`some`/`every`, F5) e `pagina` ficam para
+//! rodadas seguintes.
+
+mod agregacao;
+mod data;
+mod logica;
+mod matematica;
+mod texto;
 
 use std::sync::Once;
 
@@ -36,13 +50,14 @@ use std::sync::Once;
 pub fn register_all() {
     static REGISTERED: Once = Once::new();
     REGISTERED.call_once(|| {
-        // F1..F6 acrescentam uma linha cada aqui, ex.:
-        //   matematica::register_all();
-        //   texto::register_all();
-        //   data::register_all();
+        matematica::register_all();
+        agregacao::register_all();
+        texto::register_all();
+        data::register_all();
+        logica::register_all();
+        // Categorias seguintes, ex.:
         //   logica_lista::register_all();
         //   pagina::register_all();
-        // Vazio de propósito por enquanto — ver o comentário do módulo.
     });
 }
 

@@ -1,6 +1,6 @@
 //! Os três comandos de fórmula da arquitetura §9 — `formula::core` faz o
 //! trabalho puro (léxico, sintaxe, tipo, avaliação); este arquivo é só a
-//! fronteira: busca o schema/valores em Postgres, monta o adaptador de
+//! fronteira: busca o schema/valores em SQLite, monta o adaptador de
 //! `ValueSource` sobre esse instantâneo, e converte posição de erro de
 //! bytes UTF-8 (o que o núcleo produz) para unidades UTF-16 (o que o
 //! JavaScript usa) — "Preço" tem 6 bytes e 5 unidades UTF-16, e é essa
@@ -43,6 +43,8 @@ use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
+use crate::db::sql;
 use crate::error::{Error, Result};
 use crate::formula::core::{compile, eval, list_functions, Diagnostic, EvalCtx, PageMeta, PropertyId, Span, Type, Value, ValueSource};
 use crate::formula::functions;
@@ -88,6 +90,19 @@ pub struct FormulaPreview {
     /// que uma célula ausente já usa no mapa `RecordRow.values`.
     pub value: serde_json::Value,
     pub diagnostics: Vec<DiagnosticDto>,
+}
+
+/// Um valor da coluna calculada, por registro — a saída de
+/// `evaluate_formula_column`. Estrutura NOVA que atravessa a fronteira IPC:
+/// o `contrato_ipc.test.ts` do frontend precisa conhecer este shape antes
+/// de confiar nele (ver o relato desta peça).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormulaColumnValue {
+    pub record_id: Uuid,
+    /// `Value::to_json()` — `null` para `Value::Empty`, a mesma convenção
+    /// de `FormulaPreview::value`.
+    pub value: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -144,6 +159,45 @@ pub async fn preview_formula(
     let page = load_page_meta(&pool, record_id).await?;
     let schema = RecordSnapshot { properties, values, page };
     Ok(build_preview(&expression, &schema, record_id))
+}
+
+/// O comando que faltava para uma COLUNA de fórmula numa tabela de
+/// centenas de registros: `list_records` (`db::databases`) só devolve o que
+/// já está gravado em `database_record_values`, e fórmula NÃO é gravada
+/// ali (é calculada) — sem este comando, a única forma de mostrar uma
+/// coluna de fórmula seria chamar `preview_formula` uma vez por linha, o
+/// exato N+1 que o `//!` no topo deste arquivo já nomeava como dívida
+/// ("`ValueSource` que pré-busque a leitura"). Aqui a leitura é UMA consulta
+/// de propriedades, UMA de páginas e `ceil(registros / sql::MAX_BIND_PARAMS)`
+/// consultas de valor — nunca uma consulta por registro — e a expressão é
+/// `compile()`ada uma única vez para toda a coluna.
+///
+/// Uma fórmula que referencia outra propriedade de fórmula (DBS-084) fica
+/// FORA desta rodada: `load_properties` já exclui `property_type =
+/// "formula"` do schema (`map_property_type` não mapeia esse tipo), então
+/// `prop("OutraFórmula")` falha a checagem de tipo como "propriedade não
+/// encontrada" — [`build_column_values`] trata QUALQUER falha de
+/// `compile()` (essa inclusive) devolvendo vazio (`null`) para todo
+/// registro, nunca um erro que derruba o comando inteiro: "uma célula não
+/// pode derrubar a view" vale para a coluna inteira aqui.
+#[tauri::command]
+pub async fn evaluate_formula_column(
+    state: State<'_, AppState>,
+    database_id: Uuid,
+    property_id: Uuid,
+) -> Result<Vec<FormulaColumnValue>> {
+    functions::register_all();
+    let pool = state.pool()?;
+
+    let expression = load_formula_expression(&pool, database_id, property_id).await?;
+    let properties = load_properties(&pool, database_id).await?;
+    let pages = load_all_page_meta(&pool, database_id).await?;
+    let record_ids: Vec<Uuid> = pages.iter().map(|meta| meta.id).collect();
+    let values = load_all_record_values(&pool, &record_ids, &properties).await?;
+    let pages_by_id: HashMap<Uuid, PageMeta> = pages.into_iter().map(|meta| (meta.id, meta)).collect();
+
+    let schema = ColumnSnapshot { properties, values, pages: pages_by_id };
+    Ok(build_column_values(&expression, &schema, &record_ids, Utc::now()))
 }
 
 /// `FormulaCommands.list_formula_functions` — a paleta/autocompletar do
@@ -213,6 +267,40 @@ fn build_preview(expression: &str, schema: &dyn ValueSource, record_id: Uuid) ->
             value: serde_json::Value::Null,
             diagnostics: diagnostics.iter().map(|d| diagnostic_to_dto(expression, d)).collect(),
         },
+    }
+}
+
+/// A lógica pura de `evaluate_formula_column` — testável sem SQLite.
+/// Compila `expression` UMA VEZ contra `schema` e avalia contra cada
+/// `record_id` de `record_ids`, reaproveitando o MESMO `Compiled` e o MESMO
+/// `schema` para todos — nada aqui reabre conexão nem refaz `compile()`
+/// por registro. `now` é fixado UMA vez pelo chamador (não um
+/// `Utc::now()` por registro): a mesma razão de `EvalCtx::now()` já ser
+/// fixado no início de uma única avaliação (arquitetura §4) — todos os
+/// registros desta coluna, avaliados na mesma chamada, veem o MESMO
+/// instante.
+///
+/// Se `expression` não compilar — ver o comentário de
+/// `evaluate_formula_column` para a DBS-084 — todo registro recebe `null`,
+/// nunca um `Err` que derruba o comando inteiro.
+fn build_column_values(
+    expression: &str,
+    schema: &ColumnSnapshot,
+    record_ids: &[Uuid],
+    now: DateTime<Utc>,
+) -> Vec<FormulaColumnValue> {
+    match compile(expression, schema) {
+        Ok(compiled) => record_ids
+            .iter()
+            .map(|&record_id| {
+                let mut ctx = EvalCtx::new(schema, record_id, now);
+                let value = eval(&compiled.expr, &mut ctx);
+                FormulaColumnValue { record_id, value: value.to_json() }
+            })
+            .collect(),
+        Err(_) => {
+            record_ids.iter().map(|&record_id| FormulaColumnValue { record_id, value: serde_json::Value::Null }).collect()
+        }
     }
 }
 
@@ -354,17 +442,95 @@ impl ValueSource for RecordSnapshot {
     }
 }
 
+/// Schema + valores de TODOS os registros de uma database — usado só por
+/// `evaluate_formula_column`. Diferente de [`RecordSnapshot`] (um registro
+/// só), aqui os valores de TODA a database já estão em memória, indexados
+/// por `(record_id, property_id)`; `EvalCtx::new` troca só o
+/// `current_record` a cada chamada de `eval`, então o MESMO `compile()` e
+/// o MESMO `ColumnSnapshot` atendem a database inteira — é isto que torna
+/// "uma consulta por database, nunca uma por registro" possível.
+///
+/// `related()` continua devolvendo lista vazia — a MESMA limitação nomeada
+/// de [`RecordSnapshot`] (ver o comentário do módulo): relação vive em
+/// `database_relation_edges`, outra tabela, fora do escopo desta peça.
+struct ColumnSnapshot {
+    properties: HashMap<String, (PropertyId, Type)>,
+    values: HashMap<(Uuid, PropertyId), Value>,
+    pages: HashMap<Uuid, PageMeta>,
+}
+
+impl ValueSource for ColumnSnapshot {
+    fn value(&self, record: Uuid, property: PropertyId) -> Value {
+        self.values.get(&(record, property)).cloned().unwrap_or(Value::Empty)
+    }
+    fn related(&self, _record: Uuid, _property: PropertyId) -> Vec<Uuid> {
+        Vec::new()
+    }
+    fn page_meta(&self, record: Uuid) -> PageMeta {
+        self.pages
+            .get(&record)
+            .cloned()
+            .unwrap_or_else(|| PageMeta { id: record, title: String::new(), created_at: String::new(), updated_at: String::new() })
+    }
+    fn property_by_name(&self, name: &str) -> Option<(PropertyId, Type)> {
+        self.properties.get(name).cloned()
+    }
+}
+
+/// A expressão de UMA propriedade de fórmula, lida de
+/// `database_properties.config` — `0008_database_properties_views.sql`
+/// documenta "formula expression" como o que aquele blob guarda para
+/// `property_type = 'formula'`, mas não nomeia a CHAVE. Nenhuma peça do
+/// frontend gravou uma fórmula ainda (`src/features/databases` não tem
+/// nenhum uso de uma chave de config de fórmula — conferido antes de
+/// escrever esta função), então `"expression"` é a escolha desta peça,
+/// alinhada ao parâmetro `expression` que `validate_formula`/
+/// `preview_formula` já usam (ver o relato desta peça).
+///
+/// Recusa (`Error::NotFound`/`Error::Invalid`) quando a propriedade não
+/// existe, não é do tipo `formula`, ou não tem `"expression"` como texto em
+/// `config` — são erros de CONFIGURAÇÃO da coluna, não de célula, então
+/// aqui é apropriado propagar `Err` (diferente de `build_column_values`,
+/// que nunca falha o comando por uma fórmula que não compila).
+async fn load_formula_expression(pool: &SqlitePool, database_id: Uuid, property_id: Uuid) -> Result<String> {
+    let row = sqlx::query_as::<_, (String, serde_json::Value)>(
+        "SELECT property_type, config FROM database_properties WHERE id = $1 AND database_id = $2",
+    )
+    .bind(property_id.db())
+    .bind(database_id.db())
+    .fetch_optional(pool)
+    .await?;
+
+    let (property_type, config) = row.ok_or_else(|| Error::NotFound(format!("propriedade {property_id}")))?;
+    if property_type != "formula" {
+        return Err(Error::Invalid(format!("propriedade {property_id} não é do tipo formula (é {property_type:?})")));
+    }
+    config
+        .get("expression")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| Error::Invalid(format!("propriedade {property_id} não tem \"expression\" configurada em config")))
+}
+
 async fn load_properties(pool: &SqlitePool, database_id: Uuid) -> Result<HashMap<String, (PropertyId, Type)>> {
-    let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+    // `DbId` nos dois lados — no bind e no decode — e aqui isso não é
+    // formalidade. Ligar um `Uuid` cru contra uma coluna TEXT não dá erro
+    // nenhum: o SQLite compara um BLOB com um texto, não casa, e a consulta
+    // devolve ZERO linha. O sintoma seria uma database sem propriedade
+    // nenhuma, e toda fórmula rejeitada como "propriedade desconhecida", sem
+    // uma única mensagem de erro apontando para o banco.
+    let rows = sqlx::query_as::<_, (DbId, String, String)>(
         "SELECT id, name, property_type FROM database_properties WHERE database_id = $1",
     )
-    .bind(database_id)
+    .bind(database_id.db())
     .fetch_all(pool)
     .await?;
 
     Ok(rows
         .into_iter()
-        .filter_map(|(id, name, property_type)| map_property_type(&property_type).map(|ty| (name, (id, ty))))
+        .filter_map(|(id, name, property_type)| {
+            map_property_type(&property_type).map(|ty| (name, (Uuid::from(id), ty)))
+        })
         .collect())
 }
 
@@ -385,13 +551,20 @@ async fn load_record_values(
         return Ok(HashMap::new());
     }
 
-    let rows = sqlx::query_as::<_, (Uuid, serde_json::Value)>(
-        "SELECT property_id, value FROM database_record_values WHERE record_id = $1 AND property_id = ANY($2)",
-    )
-    .bind(record_id)
-    .bind(&scalar_ids)
-    .fetch_all(pool)
-    .await?;
+    // `IN (?, ?, ...)` no lugar de `= ANY($2)`: o SQLite não tem tipo array,
+    // então a lista vira um placeholder por elemento, montados por
+    // `db::sql::in_placeholders` (que só produz `?` e vírgula) e ligados um a
+    // um logo abaixo.
+    let lista = crate::db::sql::in_placeholders(scalar_ids.len());
+    let sql = format!(
+        "SELECT property_id, value FROM database_record_values WHERE record_id = ? AND property_id IN ({lista})"
+    );
+    let mut query = sqlx::query_as::<_, (DbId, serde_json::Value)>(&sql).bind(record_id.db());
+    for id in &scalar_ids {
+        query = query.bind(id.db());
+    }
+    let rows: Vec<(Uuid, serde_json::Value)> =
+        query.fetch_all(pool).await?.into_iter().map(|(id, value)| (Uuid::from(id), value)).collect();
 
     let type_by_id: HashMap<Uuid, &Type> = properties.values().map(|(id, ty)| (*id, ty)).collect();
     Ok(rows
@@ -404,12 +577,77 @@ async fn load_page_meta(pool: &SqlitePool, record_id: Uuid) -> Result<PageMeta> 
     let row = sqlx::query_as::<_, (String, DateTime<Utc>, DateTime<Utc>)>(
         "SELECT title, created_at, updated_at FROM pages WHERE id = $1",
     )
-    .bind(record_id)
+    .bind(record_id.db())
     .fetch_optional(pool)
     .await?;
 
     let (title, created_at, updated_at) = row.ok_or_else(|| Error::NotFound(format!("página {record_id}")))?;
     Ok(PageMeta { id: record_id, title, created_at: format_local_i5(created_at), updated_at: format_local_i5(updated_at) })
+}
+
+/// Página + metadado de TODO registro ativo de uma database — o mesmo
+/// filtro (`is_template = 0 AND deleted_at IS NULL`) que
+/// `DatabaseRepository::list_records` usa, mas só as colunas que
+/// [`PageMeta`] precisa. Usado só por `evaluate_formula_column`, que
+/// precisa da lista INTEIRA de registros de uma vez (para saber por quais
+/// avaliar a fórmula), não de um registro isolado como `load_page_meta`.
+async fn load_all_page_meta(pool: &SqlitePool, database_id: Uuid) -> Result<Vec<PageMeta>> {
+    let rows = sqlx::query_as::<_, (DbId, String, DateTime<Utc>, DateTime<Utc>)>(
+        "SELECT id, title, created_at, updated_at FROM pages \
+         WHERE database_id = $1 AND is_template = 0 AND deleted_at IS NULL ORDER BY position",
+    )
+    .bind(database_id.db())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, title, created_at, updated_at)| PageMeta {
+            id: Uuid::from(id),
+            title,
+            created_at: format_local_i5(created_at),
+            updated_at: format_local_i5(updated_at),
+        })
+        .collect())
+}
+
+/// Todo valor de `database_record_values` para os registros de
+/// `record_ids`, indexado por `(record_id, property_id)` — o carregamento
+/// em LOTE que `evaluate_formula_column` existe para fazer. Fatiado por
+/// `sql::MAX_BIND_PARAMS` (mesma convenção de
+/// `DatabaseRepository::list_records`): `ceil(record_ids.len() /
+/// MAX_BIND_PARAMS)` consultas, nunca uma por registro — o ponto de
+/// performance inteiro deste comando. Uma linha cujo `property_id` não
+/// está em `properties` (uma propriedade `relation`/`formula`/outro tipo
+/// não-escalar, ou uma propriedade apagada entre a leitura do schema e
+/// esta consulta) é descartada, não vira erro — mesma tolerância de
+/// `load_record_values`.
+async fn load_all_record_values(
+    pool: &SqlitePool,
+    record_ids: &[Uuid],
+    properties: &HashMap<String, (PropertyId, Type)>,
+) -> Result<HashMap<(Uuid, PropertyId), Value>> {
+    let type_by_id: HashMap<Uuid, &Type> = properties.values().map(|(id, ty)| (*id, ty)).collect();
+    let mut values: HashMap<(Uuid, PropertyId), Value> = HashMap::new();
+
+    for chunk in record_ids.chunks(sql::MAX_BIND_PARAMS) {
+        let placeholders = sql::in_placeholders(chunk.len());
+        let query_sql =
+            format!("SELECT record_id, property_id, value FROM database_record_values WHERE record_id IN ({placeholders})");
+        let mut query = sqlx::query_as::<_, (DbId, DbId, serde_json::Value)>(&query_sql);
+        for id in chunk {
+            query = query.bind(id.db());
+        }
+        for (record_id, property_id, raw) in query.fetch_all(pool).await? {
+            let record_id = Uuid::from(record_id);
+            let property_id = Uuid::from(property_id);
+            if let Some(ty) = type_by_id.get(&property_id) {
+                values.insert((record_id, property_id), json_to_value(ty, &raw));
+            }
+        }
+    }
+
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -441,6 +679,70 @@ mod tests {
         let mut properties = HashMap::new();
         properties.insert("Preço", (Uuid::from_u128(1), Type::Number));
         FakeSchema { properties }
+    }
+
+    /// A trava contra o defeito mais repetido deste projeto, aplicada à
+    /// linguagem de fórmula: código correto, testado, e **desconectado do
+    /// caminho real**. `formula::functions::register_all()` ficou VAZIO por
+    /// rodadas — o núcleo (lexer, parser, checagem de tipo, avaliador) tinha
+    /// testes próprios e passava, e a linguagem inteira não sabia somar dois
+    /// números, porque nenhuma categoria estava registrada.
+    ///
+    /// O sintoma seria uma paleta de fórmulas em branco e todo `round(...)`
+    /// virando "função desconhecida", com a suíte inteira verde: cada teste do
+    /// núcleo prova a PEÇA, e o que faltava era a LIGAÇÃO.
+    ///
+    /// Este teste atravessa a ligação de propósito — ele chama o mesmo
+    /// `register_all()` que o comando IPC chama, e depois consulta a mesma
+    /// tabela global que a paleta consulta. Não afirma um número exato de
+    /// funções (isso quebraria a cada categoria nova, sem defeito nenhum);
+    /// afirma que cada categoria já implementada chegou lá, e que uma função
+    /// nomeada de cada uma é encontrável pelo nome.
+    #[test]
+    fn register_all_liga_as_categorias_a_tabela_que_a_paleta_consulta() {
+        functions::register_all();
+        let todas = list_functions();
+
+        for categoria in ["matemática", "agregação", "texto", "data", "lógica"] {
+            assert!(
+                todas.iter().any(|def| def.category == categoria),
+                "categoria {categoria:?} não chegou à tabela global; \
+                 register_all() provavelmente não a registra"
+            );
+        }
+
+        for nome in ["round", "sum", "length", "now", "if"] {
+            assert!(
+                todas.iter().any(|def| def.name == nome),
+                "função {nome:?} não é encontrável pela paleta"
+            );
+        }
+    }
+
+    /// A outra metade da mesma ligação: registrar não basta se o CHECADOR DE
+    /// TIPO não alcançar a função. Uma expressão que usa as três categorias
+    /// de uma vez, pelo mesmo caminho que `validate_formula` usa.
+    ///
+    /// A lista vem de uma PROPRIEDADE, não de um literal: a linguagem não tem
+    /// sintaxe de lista literal — `[1, 2, 3]` morre no lexer com
+    /// `caractere inesperado: "["`. Isso não é defeito das funções de
+    /// agregação; é o formato da linguagem, e é como o Notion também se
+    /// comporta (uma lista nasce de uma relação ou de `split`, nunca escrita à
+    /// mão). Fica registrado aqui porque a alternativa — descobrir isso de
+    /// novo daqui a três rodadas — custa mais que o comentário.
+    #[test]
+    fn uma_formula_que_usa_as_tres_categorias_passa_na_checagem_de_tipo() {
+        functions::register_all();
+
+        let mut properties = HashMap::new();
+        properties.insert("Notas", (Uuid::from_u128(7), Type::List(Box::new(Type::Number))));
+        let schema = FakeSchema { properties };
+
+        let resultado = build_validation("round(sum(prop(\"Notas\")) / length(\"café\"), 2)", &schema, None);
+
+        assert!(resultado.valid, "esperava fórmula válida, obtido {:?}", resultado.diagnostics);
+        assert_eq!(resultado.return_type.as_deref(), Some("número"));
+        assert_eq!(resultado.depends_on, vec![Uuid::from_u128(7)]);
     }
 
     #[test]
@@ -567,5 +869,360 @@ mod tests {
         // unidade UTF-16) — se a fronteira devolvesse o byte cru em vez de
         // converter, este teste pegaria: 17 != 16.
         assert_eq!(diagnostic.start, 16);
+    }
+
+    /// As tres funcoes de carga deste arquivo, contra um banco de verdade.
+    ///
+    /// Este modulo existe por causa de um bug que passou por revisao de
+    /// codigo, por `cargo test`, por `clippy` e por `tsc` sem ser notado:
+    /// `load_properties` e `load_page_meta` ligavam um `Uuid` cru contra
+    /// coluna TEXT. Ligar `Uuid` cru NAO da erro — o `sqlx` manda um BLOB, o
+    /// SQLite compara BLOB com texto, nao casa, e a consulta devolve zero
+    /// linha. Na pratica: toda database aparecia sem propriedade nenhuma
+    /// (e portanto toda formula era rejeitada como "propriedade
+    /// desconhecida"), e `preview_formula` respondia `NotFound` para
+    /// qualquer pagina existente.
+    ///
+    /// Nenhum teste de logica pura pegaria isso, porque o defeito esta
+    /// exatamente na fronteira com o banco. Estes tres pegam.
+    mod com_banco {
+        #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+        use super::*;
+        use crate::db::ids::IdBind;
+
+        struct Cenario {
+            pool: SqlitePool,
+            caminho: std::path::PathBuf,
+            database_id: Uuid,
+            record_id: Uuid,
+            property_id: Uuid,
+        }
+
+        async fn montar() -> Cenario {
+            let caminho =
+                std::env::temp_dir().join(format!("learno-formula-test-{}.sqlite", Uuid::new_v4()));
+            let pool = crate::db::connect_and_migrate(&caminho).await.unwrap();
+
+            let container_id = Uuid::now_v7();
+            let database_id = Uuid::now_v7();
+            let property_id = Uuid::now_v7();
+            let record_id = Uuid::now_v7();
+
+            sqlx::query("INSERT INTO pages (id, title, position) VALUES (?, ?, ?)")
+                .bind(container_id.db())
+                .bind("Materias")
+                .bind("a0")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO databases (id, container_page_id, name) VALUES (?, ?, ?)")
+                .bind(database_id.db())
+                .bind(container_id.db())
+                .bind("Materias")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO database_properties (id, database_id, name, property_type, position) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(property_id.db())
+            .bind(database_id.db())
+            .bind("Preco")
+            .bind("number")
+            .bind("a0")
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES (?, ?, ?, ?)")
+                .bind(record_id.db())
+                .bind(database_id.db())
+                .bind("Mitocondria")
+                .bind("a1")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO database_record_values (record_id, property_id, value) VALUES (?, ?, ?)",
+            )
+            .bind(record_id.db())
+            .bind(property_id.db())
+            .bind("42.5")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            Cenario { pool, caminho, database_id, record_id, property_id }
+        }
+
+        async fn desmontar(cenario: Cenario) {
+            cenario.pool.close().await;
+            let _ = std::fs::remove_file(&cenario.caminho);
+            for sufixo in ["-wal", "-shm"] {
+                let mut com_sufixo = cenario.caminho.clone().into_os_string();
+                com_sufixo.push(sufixo);
+                let _ = std::fs::remove_file(std::path::PathBuf::from(com_sufixo));
+            }
+        }
+
+        #[tokio::test]
+        async fn load_properties_enxerga_as_propriedades_da_database() {
+            let cenario = montar().await;
+
+            let propriedades = load_properties(&cenario.pool, cenario.database_id).await.unwrap();
+
+            assert_eq!(propriedades.len(), 1, "a database tem uma propriedade e ela precisa aparecer");
+            let (id, tipo) = propriedades.get("Preco").expect("propriedade `Preco` precisa estar no schema");
+            assert_eq!(*id, cenario.property_id);
+            assert_eq!(*tipo, Type::Number);
+
+            desmontar(cenario).await;
+        }
+
+        #[tokio::test]
+        async fn load_record_values_le_o_valor_gravado() {
+            let cenario = montar().await;
+            let propriedades = load_properties(&cenario.pool, cenario.database_id).await.unwrap();
+
+            let valores = load_record_values(&cenario.pool, cenario.record_id, &propriedades).await.unwrap();
+
+            assert_eq!(valores.get(&cenario.property_id), Some(&Value::Number(42.5)));
+
+            desmontar(cenario).await;
+        }
+
+        #[tokio::test]
+        async fn load_page_meta_acha_a_pagina_em_vez_de_responder_nao_encontrada() {
+            let cenario = montar().await;
+
+            let meta = load_page_meta(&cenario.pool, cenario.record_id).await.unwrap();
+
+            assert_eq!(meta.id, cenario.record_id);
+            assert_eq!(meta.title, "Mitocondria");
+
+            desmontar(cenario).await;
+        }
+
+        /// O caminho completo do comando, sem `State`: schema mais valores
+        /// mais pagina, e a formula avaliando em cima disso. E o que
+        /// `preview_formula` faz depois de resolver o pool.
+        #[tokio::test]
+        async fn a_previa_de_formula_avalia_contra_o_valor_real_do_registro() {
+            let cenario = montar().await;
+            functions::register_all();
+
+            let properties = load_properties(&cenario.pool, cenario.database_id).await.unwrap();
+            let values = load_record_values(&cenario.pool, cenario.record_id, &properties).await.unwrap();
+            let page = load_page_meta(&cenario.pool, cenario.record_id).await.unwrap();
+            let schema = RecordSnapshot { properties, values, page };
+
+            let previa = build_preview("prop(\"Preco\") * 2", &schema, cenario.record_id);
+
+            assert!(previa.diagnostics.is_empty(), "esperava formula valida, obtido {:?}", previa.diagnostics);
+            assert_eq!(previa.value, serde_json::json!(85.0));
+
+            desmontar(cenario).await;
+        }
+
+        /// Insere uma propriedade `formula` com `config.expression` — a
+        /// chave que `load_formula_expression` lê.
+        async fn criar_propriedade_formula(pool: &SqlitePool, database_id: Uuid, name: &str, expression: &str, position: &str) -> Uuid {
+            let id = Uuid::now_v7();
+            sqlx::query(
+                "INSERT INTO database_properties (id, database_id, name, property_type, config, position) \
+                 VALUES (?, ?, ?, 'formula', ?, ?)",
+            )
+            .bind(id.db())
+            .bind(database_id.db())
+            .bind(name)
+            .bind(serde_json::json!({ "expression": expression }))
+            .bind(position)
+            .execute(pool)
+            .await
+            .unwrap();
+            id
+        }
+
+        /// Monta o schema + valores + páginas da database inteira, do mesmo
+        /// jeito que `evaluate_formula_column` faz depois de resolver o
+        /// pool — sem passar por `State`, mesmo padrão de
+        /// `a_previa_de_formula_avalia_contra_o_valor_real_do_registro`.
+        async fn avaliar_coluna(pool: &SqlitePool, database_id: Uuid, expression: &str) -> Vec<FormulaColumnValue> {
+            let properties = load_properties(pool, database_id).await.unwrap();
+            let pages = load_all_page_meta(pool, database_id).await.unwrap();
+            let record_ids: Vec<Uuid> = pages.iter().map(|meta| meta.id).collect();
+            let values = load_all_record_values(pool, &record_ids, &properties).await.unwrap();
+            let pages_by_id: HashMap<Uuid, PageMeta> = pages.into_iter().map(|meta| (meta.id, meta)).collect();
+            let schema = ColumnSnapshot { properties, values, pages: pages_by_id };
+            build_column_values(expression, &schema, &record_ids, Utc::now())
+        }
+
+        /// Entrega 2: a coluna inteira avalia o valor certo por registro —
+        /// inclusive um registro SEM valor de "Preco" (recebe `null`, não
+        /// derruba a coluna toda).
+        #[tokio::test]
+        async fn evaluate_formula_column_computes_the_right_value_per_record() {
+            let cenario = montar().await;
+            functions::register_all();
+
+            let dobro_id = criar_propriedade_formula(&cenario.pool, cenario.database_id, "Dobro", "prop(\"Preco\") * 2", "a1").await;
+
+            let record_sem_valor = Uuid::now_v7();
+            sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES (?, ?, ?, ?)")
+                .bind(record_sem_valor.db())
+                .bind(cenario.database_id.db())
+                .bind("Sem preco")
+                .bind("a2")
+                .execute(&cenario.pool)
+                .await
+                .unwrap();
+
+            let expression = load_formula_expression(&cenario.pool, cenario.database_id, dobro_id).await.unwrap();
+            let resultados = avaliar_coluna(&cenario.pool, cenario.database_id, &expression).await;
+
+            let por_registro: HashMap<Uuid, serde_json::Value> = resultados.into_iter().map(|r| (r.record_id, r.value)).collect();
+            assert_eq!(por_registro.get(&cenario.record_id), Some(&serde_json::json!(85.0)), "Preco=42.5 * 2 = 85.0");
+            assert_eq!(
+                por_registro.get(&record_sem_valor),
+                Some(&serde_json::Value::Null),
+                "registro sem Preco não pode derrubar a coluna inteira — recebe null"
+            );
+
+            desmontar(cenario).await;
+        }
+
+        /// DBS-084, fora do escopo desta rodada: uma fórmula que referencia
+        /// OUTRA propriedade de fórmula não é resolvida — `load_properties`
+        /// já exclui `property_type = "formula"` do schema, então
+        /// `prop("Dobro")` (também uma fórmula) falha a checagem de tipo, e
+        /// TODO registro da coluna recebe `null`, nunca um erro que
+        /// derrubaria o comando inteiro.
+        #[tokio::test]
+        async fn evaluate_formula_column_referencing_another_formula_is_null_for_every_record() {
+            let cenario = montar().await;
+            functions::register_all();
+
+            criar_propriedade_formula(&cenario.pool, cenario.database_id, "Dobro", "prop(\"Preco\") * 2", "a1").await;
+            let quadruplo_id =
+                criar_propriedade_formula(&cenario.pool, cenario.database_id, "Quadruplo", "prop(\"Dobro\") * 2", "a2").await;
+
+            let expression = load_formula_expression(&cenario.pool, cenario.database_id, quadruplo_id).await.unwrap();
+            let resultados = avaliar_coluna(&cenario.pool, cenario.database_id, &expression).await;
+
+            assert!(!resultados.is_empty());
+            assert!(
+                resultados.iter().all(|r| r.value == serde_json::Value::Null),
+                "referenciar outra fórmula devia dar null para todo registro, não um erro nem um valor resolvido: {resultados:?}"
+            );
+
+            desmontar(cenario).await;
+        }
+
+        #[tokio::test]
+        async fn load_formula_expression_rejects_a_non_formula_property() {
+            let cenario = montar().await;
+
+            let err = load_formula_expression(&cenario.pool, cenario.database_id, cenario.property_id).await.unwrap_err();
+            assert!(matches!(err, Error::Invalid(_)), "esperava Error::Invalid, obtido {err:?}");
+
+            desmontar(cenario).await;
+        }
+
+        #[tokio::test]
+        async fn load_formula_expression_rejects_a_missing_expression_key() {
+            let cenario = montar().await;
+            let sem_expressao_id = Uuid::now_v7();
+            sqlx::query(
+                "INSERT INTO database_properties (id, database_id, name, property_type, config, position) \
+                 VALUES (?, ?, ?, 'formula', ?, ?)",
+            )
+            .bind(sem_expressao_id.db())
+            .bind(cenario.database_id.db())
+            .bind("SemExpressao")
+            .bind(serde_json::json!({}))
+            .bind("a9")
+            .execute(&cenario.pool)
+            .await
+            .unwrap();
+
+            let err = load_formula_expression(&cenario.pool, cenario.database_id, sem_expressao_id).await.unwrap_err();
+            assert!(matches!(err, Error::Invalid(_)), "esperava Error::Invalid, obtido {err:?}");
+
+            desmontar(cenario).await;
+        }
+
+        #[tokio::test]
+        async fn load_formula_expression_reports_not_found_for_a_missing_property() {
+            let cenario = montar().await;
+
+            let err = load_formula_expression(&cenario.pool, cenario.database_id, Uuid::now_v7()).await.unwrap_err();
+            assert!(matches!(err, Error::NotFound(_)), "esperava Error::NotFound, obtido {err:?}");
+
+            desmontar(cenario).await;
+        }
+
+        /// O ponto de performance desta entrega, provado: mais de
+        /// `sql::MAX_BIND_PARAMS` registros força `load_all_record_values` a
+        /// rodar em MAIS de um chunk — e ainda assim devolve o valor certo
+        /// por registro, sem nenhuma consulta por registro (só
+        /// `ceil(n / MAX_BIND_PARAMS)` consultas de valor, não `n`).
+        #[tokio::test]
+        async fn evaluate_formula_column_across_more_than_one_max_bind_params_chunk() {
+            let cenario = montar().await;
+            functions::register_all();
+
+            let dobro_id = criar_propriedade_formula(&cenario.pool, cenario.database_id, "Dobro", "prop(\"Preco\") * 2", "a1").await;
+
+            let total_extra = sql::MAX_BIND_PARAMS + 5; // força pelo menos 2 chunks
+            let mut ids_criados: Vec<Uuid> = Vec::with_capacity(total_extra);
+            let mut tx = cenario.pool.begin().await.unwrap();
+            for i in 0..total_extra {
+                let record_id = Uuid::now_v7();
+                sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES (?, ?, ?, ?)")
+                    .bind(record_id.db())
+                    .bind(cenario.database_id.db())
+                    .bind(format!("Registro {i}"))
+                    .bind(format!("b{i:05}"))
+                    .execute(&mut *tx)
+                    .await
+                    .unwrap();
+                sqlx::query("INSERT INTO database_record_values (record_id, property_id, value) VALUES (?, ?, ?)")
+                    .bind(record_id.db())
+                    .bind(cenario.property_id.db())
+                    .bind(i.to_string())
+                    .execute(&mut *tx)
+                    .await
+                    .unwrap();
+                ids_criados.push(record_id);
+            }
+            tx.commit().await.unwrap();
+
+            let expression = load_formula_expression(&cenario.pool, cenario.database_id, dobro_id).await.unwrap();
+            let properties = load_properties(&cenario.pool, cenario.database_id).await.unwrap();
+            let pages = load_all_page_meta(&cenario.pool, cenario.database_id).await.unwrap();
+            let record_ids: Vec<Uuid> = pages.iter().map(|meta| meta.id).collect();
+            assert!(
+                record_ids.len() > sql::MAX_BIND_PARAMS,
+                "o teste precisa de mais registros que MAX_BIND_PARAMS para provar o chunking: tem {}",
+                record_ids.len()
+            );
+
+            let values = load_all_record_values(&cenario.pool, &record_ids, &properties).await.unwrap();
+            let pages_by_id: HashMap<Uuid, PageMeta> = pages.into_iter().map(|meta| (meta.id, meta)).collect();
+            let schema = ColumnSnapshot { properties, values, pages: pages_by_id };
+
+            let resultados = build_column_values(&expression, &schema, &record_ids, Utc::now());
+            assert_eq!(resultados.len(), record_ids.len());
+
+            let por_registro: HashMap<Uuid, serde_json::Value> = resultados.into_iter().map(|r| (r.record_id, r.value)).collect();
+            // O registro original do cenário (Preco=42.5) continua correto no
+            // meio de centenas de outros.
+            assert_eq!(por_registro.get(&cenario.record_id), Some(&serde_json::json!(85.0)));
+            // Um registro do meio do lote de mais de 900 — prova que o
+            // chunking não perde nem embaralha valor de nenhum registro.
+            assert_eq!(por_registro.get(&ids_criados[500]), Some(&serde_json::json!(1000.0)), "Preco=500 * 2 = 1000");
+
+            desmontar(cenario).await;
+        }
     }
 }

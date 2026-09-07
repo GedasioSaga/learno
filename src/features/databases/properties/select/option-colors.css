@@ -1,12 +1,21 @@
 /*
  * Tokens de cor para tag/chip de `select` e `multi_select` (DBS-007/008).
  * PRÓPRIOS desta pasta — `src/styles/theme.css` não é arquivo desta peça
- * para editar. Onde a marca já tem cor (âmbar, hortelã, esmeralda,
- * terracota, marrom) ela é REUSADA via `var(--amber)` etc., inclusive a
- * variante "-ink" (essas já trocam sozinhas no escuro, porque o próprio
- * `theme.css` as redefine); "blue"/"purple" são tons novos, então têm bloco
- * de tema explícito aqui, no mesmo padrão de três blocos que `theme.css`
- * usa (claro default, escuro explícito, escuro do sistema sem escolha).
+ * para editar (a exceção é a camada de matiz: `--matiz-azul`/`--matiz-roxo`
+ * vivem lá, fora dos blocos de tema, porque "azul" e "roxo" também servem à
+ * paleta do editor em `palette.ts`).
+ *
+ * Todo `--tag-bg`/`--tag-fg`/`--tag-border` abaixo é `color-mix()` entre um
+ * TOM (a marca — `var(--amber)` etc. — ou, quando a marca não cobre, a
+ * matiz — `var(--matiz-azul)`/`var(--matiz-roxo)`) e um token do TEMA ativo
+ * (`--surface`/`--ink`). Isso substitui o que havia antes: RGB do tema claro
+ * escrito à mão como número, que por ser número fixo não mudava com o tema —
+ * incluindo nas cinco cores de marca, cujo fundo/borda ficavam presos no
+ * claro mesmo a marca já tendo variante escura. Agora fundo, texto e borda
+ * seguem o tema ativo sozinhos, sem override por tema: "blue"/"purple" não
+ * têm mais bloco `[data-theme="dark"]` nem `@media`, porque não precisam —
+ * é exatamente esse tipo de bloco que quebraria nos temas novos que não seja
+ * "claro" nem "escuro padrão".
  */
 
 .db-option-tag {
@@ -106,72 +115,48 @@
 }
 
 .db-option-tag[data-color="brown"] {
-  --tag-bg: rgb(125 57 18 / 16%);
+  --tag-bg: color-mix(in srgb, var(--brown) 16%, var(--surface));
   --tag-fg: var(--brown);
-  --tag-border: rgb(125 57 18 / 35%);
+  --tag-border: color-mix(in srgb, var(--brown) 40%, var(--surface));
 }
 
 .db-option-tag[data-color="amber"] {
-  --tag-bg: rgb(214 148 54 / 18%);
+  --tag-bg: color-mix(in srgb, var(--amber) 18%, var(--surface));
   --tag-fg: var(--amber-ink);
-  --tag-border: rgb(214 148 54 / 40%);
+  --tag-border: color-mix(in srgb, var(--amber) 42%, var(--surface));
 }
 
 .db-option-tag[data-color="mint"] {
-  --tag-bg: rgb(89 214 138 / 18%);
+  --tag-bg: color-mix(in srgb, var(--mint) 18%, var(--surface));
   --tag-fg: var(--mint-ink);
-  --tag-border: rgb(89 214 138 / 40%);
+  --tag-border: color-mix(in srgb, var(--mint) 42%, var(--surface));
 }
 
 .db-option-tag[data-color="emerald"] {
-  --tag-bg: rgb(13 86 77 / 14%);
+  --tag-bg: color-mix(in srgb, var(--emerald) 16%, var(--surface));
   --tag-fg: var(--emerald);
-  --tag-border: rgb(13 86 77 / 35%);
+  --tag-border: color-mix(in srgb, var(--emerald) 38%, var(--surface));
 }
 
 .db-option-tag[data-color="terracotta"] {
-  --tag-bg: rgb(159 88 46 / 18%);
+  --tag-bg: color-mix(in srgb, var(--terracotta) 18%, var(--surface));
   --tag-fg: var(--terracotta-ink);
-  --tag-border: rgb(159 88 46 / 40%);
+  --tag-border: color-mix(in srgb, var(--terracotta) 42%, var(--surface));
 }
 
+/* "blue"/"purple" não têm cor de marca para reusar — usam a matiz
+   equivalente (`theme.css`) misturada com o tema, no mesmo padrão acima.
+   `--tag-fg` mistura mais matiz que `--tag-bg`/`--tag-border` (72% contra
+   16-42%) de propósito: texto precisa ler como "a cor", fundo e borda só
+   precisam de um traço dela. */
 .db-option-tag[data-color="blue"] {
-  --tag-bg: rgb(59 110 165 / 16%);
-  --tag-fg: #2f5a86;
-  --tag-border: rgb(59 110 165 / 40%);
+  --tag-bg: color-mix(in srgb, var(--matiz-azul) 16%, var(--surface));
+  --tag-fg: color-mix(in srgb, var(--matiz-azul) 72%, var(--ink));
+  --tag-border: color-mix(in srgb, var(--matiz-azul) 42%, var(--surface));
 }
 
 .db-option-tag[data-color="purple"] {
-  --tag-bg: rgb(124 94 165 / 16%);
-  --tag-fg: #5b3f82;
-  --tag-border: rgb(124 94 165 / 40%);
-}
-
-/* "blue"/"purple" não têm variante "-ink" pronta em `theme.css` para
-   reusar, então ganham override explícito nos dois modos escuros —
-   mesmos dois seletores que `theme.css` usa para tudo mais. */
-:root[data-theme="dark"] .db-option-tag[data-color="blue"] {
-  --tag-bg: rgb(143 184 224 / 16%);
-  --tag-fg: #8fb8e0;
-  --tag-border: rgb(143 184 224 / 40%);
-}
-
-:root[data-theme="dark"] .db-option-tag[data-color="purple"] {
-  --tag-bg: rgb(183 155 219 / 16%);
-  --tag-fg: #b79bdb;
-  --tag-border: rgb(183 155 219 / 40%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) .db-option-tag[data-color="blue"] {
-    --tag-bg: rgb(143 184 224 / 16%);
-    --tag-fg: #8fb8e0;
-    --tag-border: rgb(143 184 224 / 40%);
-  }
-
-  :root:not([data-theme="light"]):not([data-theme="dark"]) .db-option-tag[data-color="purple"] {
-    --tag-bg: rgb(183 155 219 / 16%);
-    --tag-fg: #b79bdb;
-    --tag-border: rgb(183 155 219 / 40%);
-  }
+  --tag-bg: color-mix(in srgb, var(--matiz-roxo) 16%, var(--surface));
+  --tag-fg: color-mix(in srgb, var(--matiz-roxo) 72%, var(--ink));
+  --tag-border: color-mix(in srgb, var(--matiz-roxo) 42%, var(--surface));
 }

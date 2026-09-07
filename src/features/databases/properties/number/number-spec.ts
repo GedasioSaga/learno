@@ -47,6 +47,23 @@ export function formatNumberValue(value: number, format: NumberFormat): string {
       return formatter({ style: "currency", currency: "BRL" });
     case "plain":
       return formatter({ maximumFractionDigits: 6 });
+    // O `switch` acima é exaustivo para o TIPO `NumberFormat`, e é por isso
+    // que o `tsc` nunca reclamou da falta deste ramo. Mas `format` chega de
+    // `database_properties.config`, que é JSON do banco — em tempo de
+    // execução ele pode ser `undefined` (uma propriedade criada sem config
+    // nasce com `{}`) ou qualquer string.
+    //
+    // Sem este `default`, a função saía sem `return` e devolvia `undefined`
+    // com assinatura de `string`: o React não renderizava nada e a célula
+    // ficava MUDA para sempre — o valor certo no banco, invisível na tela,
+    // sem erro no console. Recarregar não resolvia, porque o `config`
+    // persistido continuava `{}`. Pego por `e2e/specs/database-formula.e2e.mjs`.
+    //
+    // "plain" é o fallback certo porque é o `defaultConfig` deste spec: uma
+    // config ausente significa "ninguém escolheu formato", não "formato
+    // desconhecido".
+    default:
+      return formatter({ maximumFractionDigits: 6 });
   }
 }
 

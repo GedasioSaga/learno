@@ -1,0 +1,326 @@
+/*
+ * Célula e editor da propriedade Fórmula. Plain CSS ao lado do código, como
+ * `views/table/table.css` — e SÓ tokens de `src/styles/theme.css`: nenhum
+ * hex, para os cinco temas funcionarem sem override.
+ *
+ * A única literal não-token do arquivo é a pilha monoespaçada: o projeto
+ * não declara `--font-mono` (ver `pages/PageSurface.tsx`), e a regra de
+ * "só token" do DESIGN-TOKENS.md é sobre cor.
+ *
+ * Sem animação no editor: digitar e clicar função é ação de alta
+ * frequência dentro da sessão (regra 2 de movimento); o feedback é cor e
+ * texto. A entrada do diálogo que o envolve é de `NewPropertyDialog`.
+ */
+
+.db-cell-formula--error {
+  color: var(--terracotta-ink);
+  font-size: 0.8125rem;
+}
+
+.formula-editor {
+  --formula-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(14rem, 2fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+@media (max-width: 720px) {
+  .formula-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.formula-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* A caixa de expressão: o textarea real por cima de um espelho que só
+   existe para desenhar o sublinhado do erro na posição exata. Os dois
+   compartilham fonte, padding e quebra de linha — qualquer diferença
+   desloca o sublinhado. */
+.formula-editor__box {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface-sunken);
+}
+
+.formula-editor__box--invalid {
+  border-color: var(--terracotta);
+}
+
+.formula-editor__box:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.formula-editor__mirror,
+.formula-editor__textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 7.5rem;
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  font-family: var(--formula-mono);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+.formula-editor__mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+}
+
+.formula-editor__mirror mark {
+  background: transparent;
+  color: transparent;
+  text-decoration: underline wavy var(--terracotta);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 0.2em;
+}
+
+.formula-editor__textarea {
+  position: relative;
+  display: block;
+  resize: vertical;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.formula-editor__textarea::placeholder {
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+}
+
+.formula-editor__status {
+  min-height: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+.formula-editor__status--valid {
+  color: var(--mint-ink);
+}
+
+.formula-editor__status--invalid {
+  color: var(--terracotta-ink);
+}
+
+.formula-editor__diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.formula-editor__diagnostic {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: baseline;
+}
+
+/* "Linha 2, coluna 7" é um botão que leva o cursor até o erro — o mesmo
+   gesto de um terminal ou de um editor de código. */
+.formula-editor__jump {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: var(--formula-mono);
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.formula-editor__jump:hover {
+  color: var(--ink);
+}
+
+.formula-editor__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.25rem;
+}
+
+.formula-editor__preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+.formula-editor__preview-record {
+  max-width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.formula-editor__preview-value {
+  min-height: 1.5rem;
+  font-family: var(--formula-mono);
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.formula-editor__preview-value--empty {
+  font-family: var(--font-sans);
+  color: var(--ink-muted);
+}
+
+.formula-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--hairline);
+}
+
+/* A paleta: uma coluna rolável, com as funções agrupadas pela categoria
+   que o Rust nomeia. Cada item é um botão de largura cheia; o feedback de
+   pressionar é a cor (elemento de largura cheia encolhendo parece quebrado). */
+.formula-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  min-width: 0;
+  border-left: 1px solid var(--hairline);
+  padding-left: 1rem;
+}
+
+@media (max-width: 720px) {
+  .formula-palette {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--hairline);
+    padding-top: 0.75rem;
+  }
+}
+
+.formula-palette__search {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.formula-palette__search::placeholder {
+  color: var(--ink-muted);
+}
+
+.formula-palette__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.formula-palette__group-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.formula-palette__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.formula-palette__item {
+  display: block;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.formula-palette__item:hover {
+  background: var(--surface-raised);
+}
+
+.formula-palette__item:active {
+  background: var(--surface-sunken);
+}
+
+.formula-palette__item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.formula-palette__name {
+  font-family: var(--formula-mono);
+  font-size: 0.875rem;
+}
+
+.formula-palette__arity {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+.formula-palette__doc {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--ink-muted);
+}
+
+.formula-palette__empty,
+.formula-palette__status {
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+.formula-palette__status--error {
+  color: var(--terracotta-ink);
+}

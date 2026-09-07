@@ -1,0 +1,145 @@
+<title>Fronteira do Learno</title>
+<style>
+  :root{
+    --paper:#f5f5f5; --paper-2:#ececec; --ink:#2d3142; --muted:#4f5d75; --soft:#7a8399;
+    --rule:rgba(45,49,66,0.12); --rule-solid:#bfc0c0;
+    --accent:#eb6c36; --accent-tint:rgba(235,108,54,0.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#2d3142; --paper-2:#393e53; --ink:#f5f5f5; --muted:#bfc0c0; --soft:#8e98ac;
+      --rule:rgba(245,245,245,0.12); --rule-solid:rgba(191,192,192,0.25);
+      --accent:#f08a59; --accent-tint:rgba(240,138,89,0.10);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#2d3142; --paper-2:#393e53; --ink:#f5f5f5; --muted:#bfc0c0; --soft:#8e98ac;
+    --rule:rgba(245,245,245,0.12); --rule-solid:rgba(191,192,192,0.25);
+    --accent:#f08a59; --accent-tint:rgba(240,138,89,0.10);
+  }
+  body{background:var(--paper); color:var(--ink); font-family:'Geist',sans-serif;}
+  .wrap{max-width:1040px; margin:0 auto; padding:40px 24px 56px;}
+  .eyebrow{font-family:'Geist Mono',monospace; font-size:8px; letter-spacing:0.18em; text-transform:uppercase; color:var(--soft); margin:0 0 8px;}
+  h1{font-family:'Instrument Serif',serif; font-weight:400; font-size:1.75rem; margin:0 0 6px;}
+  .subtitle{font-family:'Geist',sans-serif; font-size:13px; color:var(--muted); margin:0 0 28px; max-width:640px;}
+  .diagram{overflow-x:auto;}
+  svg{display:block; width:100%; height:auto;}
+  footer{margin-top:20px; padding-top:12px; border-top:1px solid var(--rule); font-family:'Geist Mono',monospace; font-size:8px; color:var(--soft); letter-spacing:0.06em;}
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<div class="wrap">
+  <p class="eyebrow">Learno — arquitetura</p>
+  <h1>Da interface ao SQLite</h1>
+  <p class="subtitle">Camadas do app: React fala com o backend Rust só através da fronteira IPC, onde o <code>serde_json</code> traduz struct por struct — o ponto onde os defeitos históricos do projeto moraram.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 960 644" role="img" aria-labelledby="arqlearno-title arqlearno-desc">
+      <title id="arqlearno-title">Arquitetura em camadas do Learno</title>
+      <desc id="arqlearno-desc">Diagrama mostrando a interface React chamando o backend Rust através de uma fronteira IPC onde serde_json traduz, o backend roteando para os subsistemas db, srs, formula e backup, e db/backup persistindo em SQLite.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <rect width="960" height="644" fill="var(--paper)"/>
+
+      <!-- ============ ARROWS (drawn before boxes) ============ -->
+
+      <!-- React -> Fronteira IPC (straight, shared x) -->
+      <path d="M 480,104 V 176" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="446" y="130" width="68" height="12" rx="2" fill="var(--paper)"/>
+      <text x="480" y="139" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">INVOKE()</text>
+
+      <!-- Fronteira IPC -> 4 subsistemas (fan-out elbows) -->
+      <path d="M 396,256 V 288 Q 396,296 388,296 H 242 Q 234,296 234,304 V 336" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 452,256 V 288 Q 452,296 444,296 H 406 Q 398,296 398,304 V 336" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 508,256 V 288 Q 508,296 516,296 H 554 Q 562,296 562,304 V 336" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 564,256 V 288 Q 564,296 572,296 H 718 Q 726,296 726,304 V 336" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- db/ -> SQLite, backup/ -> SQLite (fan-in elbows) -->
+      <path d="M 234,400 V 432 Q 234,440 242,440 H 432 Q 440,440 440,448 V 480" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 726,400 V 432 Q 726,440 718,440 H 528 Q 520,440 520,448 V 480" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- ============ NODES ============ -->
+
+      <!-- React/TypeScript -->
+      <rect x="360" y="40" width="240" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="360" y="40" width="240" height="64" rx="6" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="372" y="48" width="48" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="396" y="57" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">REACT</text>
+      <text x="480" y="78" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Interface (React)</text>
+      <text x="480" y="94" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src/</text>
+
+      <!-- Fronteira IPC — FOCAL / boundary -->
+      <rect x="340" y="176" width="280" height="80" rx="6" fill="var(--paper)"/>
+      <rect x="340" y="176" width="280" height="80" rx="6" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="4,4"/>
+      <rect x="352" y="184" width="40" height="12" rx="2" fill="transparent" stroke="var(--accent)" stroke-opacity="0.5" stroke-width="0.8"/>
+      <text x="372" y="193" fill="var(--accent)" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">IPC</text>
+      <text x="480" y="214" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Fronteira IPC</text>
+      <text x="480" y="230" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src/lib/ipc.ts ↔ src-tauri/src/ipc/</text>
+      <text x="480" y="244" fill="var(--accent)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">serde_json traduz aqui</text>
+
+      <!-- db/ -->
+      <rect x="164" y="336" width="140" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="164" y="336" width="140" height="64" rx="6" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="176" y="344" width="38" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="195" y="353" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">RUST</text>
+      <text x="234" y="374" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">db/ (repositórios)</text>
+      <text x="234" y="390" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src-tauri/src/db/</text>
+
+      <!-- srs/ -->
+      <rect x="328" y="336" width="140" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="328" y="336" width="140" height="64" rx="6" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="340" y="344" width="38" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="359" y="353" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">RUST</text>
+      <text x="398" y="374" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">srs/ (agendador)</text>
+      <text x="398" y="390" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src-tauri/src/srs/</text>
+
+      <!-- formula/ -->
+      <rect x="492" y="336" width="140" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="492" y="336" width="140" height="64" rx="6" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="504" y="344" width="38" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="523" y="353" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">RUST</text>
+      <text x="562" y="374" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">formula/ (fórmulas)</text>
+      <text x="562" y="390" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src-tauri/src/formula/</text>
+
+      <!-- backup/ -->
+      <rect x="656" y="336" width="140" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="656" y="336" width="140" height="64" rx="6" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="668" y="344" width="38" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="687" y="353" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">RUST</text>
+      <text x="726" y="374" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">backup/ (backup)</text>
+      <text x="726" y="390" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">src-tauri/src/backup/</text>
+
+      <!-- SQLite -->
+      <rect x="360" y="480" width="240" height="64" rx="6" fill="var(--paper)"/>
+      <rect x="360" y="480" width="240" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="var(--muted)" stroke-width="1"/>
+      <rect x="372" y="488" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="389" y="497" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+      <text x="480" y="518" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">SQLite (learno.sqlite)</text>
+      <text x="480" y="534" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">sqlx + migrations</text>
+
+      <!-- ============ CALLOUT ============ -->
+      <path d="M 656 68 Q 668 140 620 208" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="620" cy="208" r="2" fill="var(--accent)"/>
+      <text x="944" y="60" fill="var(--accent)" font-size="14" font-style="italic" font-family="'Instrument Serif',serif" text-anchor="end">as costuras de IPC quebradas moravam aqui</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="30" y1="576" x2="930" y2="576" stroke="var(--rule)" stroke-width="0.8"/>
+      <text x="30" y="592" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <rect x="140" y="584" width="16" height="10" rx="2" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="4,4"/>
+      <text x="164" y="592" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">FRONTEIRA / FOCO</text>
+
+      <rect x="360" y="584" width="16" height="10" rx="2" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <text x="384" y="592" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">CAMADA (TS/RUST)</text>
+
+      <rect x="560" y="584" width="16" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="584" y="592" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">ARMAZENAMENTO</text>
+    </svg>
+  </div>
+
+  <footer>docs/diagrams/arquitetura-learno.html — arquitetura em camadas, gerado a partir de src-tauri/src/lib.rs, src/lib/ipc.ts e HANDOFF.md</footer>
+</div>

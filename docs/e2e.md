@@ -19,7 +19,7 @@ WebdriverIO (Node, e2e/specs/*.e2e.mjs)
 Microsoft Edge WebDriver (msedgedriver.exe)
         │  dirige o WebView2 (Chromium) da janela do learno.exe
         ▼
-   learno.exe (o app de verdade, com Postgres de verdade por trás)
+   learno.exe (o app de verdade, com SQLite local por trás)
 ```
 
 Não existe "modo headless" aqui: uma janela real do Learno abre na tela
@@ -46,7 +46,7 @@ custom-protocol = ["tauri/custom-protocol"]
 
 Sem essa feature ligada na crate `tauri`, `tauri::Builder::get_app_url`
 (`tauri-2.11.5/src/manager/mod.rs`) sempre resolve pelo ramo `#[cfg(dev)]` —
-que carrega `devUrl` (`http://localhost:1420`) — porque `cfg(dev)` só vira
+que carrega `devUrl` (`http://localhost:1430`) — porque `cfg(dev)` só vira
 `false` quando essa feature está ligada (`tauri-2.11.5/build.rs:255-261`).
 Isso vale para **qualquer** build Rust deste crate hoje, `cargo build`,
 `tauri build` ou `tauri build --debug`, com ou sem `--release`: nenhum deles
@@ -63,8 +63,6 @@ verdade, do mesmo jeito que `tauri dev` já faz — nenhuma mudança em
 ## Como rodar
 
 ```powershell
-$env:DATABASE_URL = "postgres://learno@127.0.0.1:5433/learno_dev"
-$env:LEARNO_TEST_DATABASE_URL = "postgres://learno@127.0.0.1:5433/learno_test"
 npm run test:e2e
 ```
 
@@ -75,30 +73,54 @@ esperar o build do Rust de novo:
 
 ```powershell
 $env:E2E_SKIP_BUILD = "1"
-npx wdio run ./e2e/wdio.conf.mjs --spec ./e2e/specs/first-run-wizard.e2e.mjs
+npx wdio run ./e2e/wdio.conf.mjs --spec ./e2e/specs/primeira-execucao.e2e.mjs
 ```
 
 Uma janela real do Learno vai abrir e fechar sozinha — isso é o esperado.
 
+### Status de execução
+
+**Verde: 8 specs, 25 testes, 0 falhas**, medido em 05/09/2026 contra o app Tauri
+de verdade, e repetido quatro vezes seguidas para não confundir sorte com
+estabilidade.
+
+A primeira execução pós-migração encontrou quatro coisas que nenhum teste de
+unidade pegaria, e vale registrar o que foram porque três delas eram do produto,
+não da suíte:
+
+1. `React.StrictMode` monta o efeito de `App.tsx` duas vezes em desenvolvimento,
+   então o app abria o banco DUAS vezes em paralelo e as duas rodavam a migração.
+   O sintoma na tela era `table mindmaps already exists` ou `database is locked`,
+   e na suíte era sempre "a barra lateral não apareceu em 30s", em spec diferente
+   a cada rodada. Corrigido serializando a abertura no backend
+   (`AppState::lock_workspace_open`).
+2. A própria suíte apagava o banco do usuário: ela limpa `%APPDATA%\com.learno.app`
+   entre sessões, que antes só tinha configuração e agora tem o banco. Passou a
+   apontar o app para uma pasta de trabalho temporária, uma por spec.
+3. Matar o `tauri-driver` não mata o `learno.exe` que ele spawnou, e o Edge
+   WebDriver da sessão seguinte às vezes se ligava ao WebView2 da instância
+   órfã. `afterSession` agora encerra o app também.
+4. Um arrasto de bloco falhava 1 rodada em 4 porque `element.dragAndDrop` solta o
+   botão no mesmo instante do movimento final; virou uma sequência explícita de
+   ponteiro com pausa antes de soltar.
+
+Quando um teste falha, o `afterTest`/`afterHook` do `wdio.conf.mjs` imprime o que
+estava na tela (URL, texto do corpo e o `role="alert"` da tela de erro do app) —
+foi esse dump que transformou "o seletor não apareceu" nas causas acima.
+
 ### O que a suíte não destrói
 
-- **`config.json` de um dev de verdade** (`%APPDATA%\com.learno.app\config.json`):
-  cada sessão precisa nascer sem configuração salva (é o que faz o
-  assistente de primeira execução aparecer), então `wdio.conf.mjs` apaga
-  esse arquivo antes de cada sessão. Se já havia um `config.json` real, faz
-  backup antes e restaura depois — um developer com o app já configurado
-  não perde a configuração rodando a suíte. Se não havia nenhum (máquina
-  nunca aberta manualmente), o arquivo que a própria sessão de teste cria
-  ao conectar de verdade (necessário para chegar à árvore de páginas — ver
-  `page-tree-drag-and-drop.e2e.mjs`) é apagado de novo ao fim, para a
-  máquina voltar exatamente ao estado de antes.
-- **`learno_dev`**: o teste do assistente de primeira execução conecta nele
-  de propósito (é o cenário real de "banco vazio, primeira vez"), e as
-  migrações que ele aplica ficam — não há rollback. Isso é o comportamento
-  esperado do próprio PLT-016/PLT-002, não um efeito colateral do teste.
-- **`learno_test`**: o teste de drag-and-drop cria duas páginas com título
-  carimbado por timestamp e as apaga no `after()` — best-effort, não trava
-  o resultado do teste se a limpeza falhar.
+- **Configuração pessoal do app** (`%APPDATA%\com.learno.app`): cada sessão
+  de teste começa com a pasta de dados do app vazia — `wdio.conf.mjs` apaga
+  essa pasta antes de cada spec. Se já havia uma configuração real (app
+  aberto manualmente antes), faz backup e restaura depois. Um developer que
+  tenha usado o app de verdade não perde seus dados ou preferências rodando
+  a suíte — a máquina volta exatamente ao estado de antes.
+  
+  Por isso a primeira execução do app numa sessão de teste cria um banco
+  SQLite novo naquela pasta (PLT-016 valida que isso acontece sem pedir
+  nada ao usuário), e as migrações rodam naquele arquivo descartável. Quando
+  a sessão termina e a pasta é apagada, tudo desaparece com ela.
 
 ## Dependências instaladas para isto
 
@@ -137,34 +159,23 @@ Expand-Archive edgedriver.zip -DestinationPath e2e/.bin -Force
 como o endereço oficial, não resolve mais nesta rede — `msedgedriver.microsoft.com`
 é quem responde hoje, mesmo caminho de versão.)
 
-## Os dois testes
+## Testes principais
 
-### `first-run-wizard.e2e.mjs` — PLT-016
+### `primeira-execucao.e2e.mjs` — PLT-016
 
-*"Assistente de primeira execução para conectar ao Postgres local"* — o
-critério de aceite (`docs/CHECKLIST.md`) só se prova com o processo Tauri de
-verdade, IPC real e um Postgres de verdade respondendo; um teste de
-componente Vitest troca `invoke()` por mock e nunca passa perto disso.
+*"Primeira execução numa máquina limpa"* — Substitui o antigo
+`first-run-wizard.e2e.mjs`. Após a migração para SQLite, não há mais
+assistente de conexão: o banco é um arquivo local criado automaticamente.
+O critério de aceite mudou: a primeira execução **não deve pedir nada** ao
+usuário.
 
-Sobe o app contra `learno_dev` **vazio** (sem `_sqlx_migrations` nem
-nenhuma das 17 tabelas — confirmado por `psql` antes da rodada), preenche o
-formulário, clica "Testar conexão", clica "Continuar", e confirma que a
-árvore de páginas aparece. Depois da rodada, `psql` contra `learno_dev`
-mostra as 17 tabelas — prova, fora do DOM, que a migração (PLT-002) rodou
-de verdade.
-
-**Achado que este teste expôs, ainda de pé:** o campo Senha em
-`FirstRunWizard.tsx` nasce com o `required` padrão de `Field` (nada ali o
-desliga). Contra um Postgres local com autenticação `trust` — como o
-cluster de dev desta própria tarefa — o conteúdo da senha é irrelevante,
-mas o campo **vazio** aciona a validação nativa do HTML5 e barra o clique
-em "Testar conexão" antes mesmo do `onSubmit` disparar: nenhum alerta,
-nenhuma mudança de estado, só o clique sendo engolido pelo navegador. Um
-usuário real de Postgres local sem senha não consegue preencher este
-assistente deixando a Senha em branco. `first-run-wizard.e2e.mjs` contorna
-isto preenchendo um valor qualquer só para conseguir testar o alvo real do
-arquivo (a conexão); não foi corrigido porque `FirstRunWizard.tsx` está em
-`src/`, fora do escopo permitido para esta tarefa.
+Valida que:
+- O app abre direto no workspace de páginas, sem nenhuma tela de
+  configuração.
+- O arquivo do banco é criado na pasta de dados do app (`%APPDATA%\com.learno.app\learno.sqlite`)
+  antes de qualquer interação do usuário.
+- As migrações rodam sozinhas e o schema completo (páginas, blocos,
+  histórico de migração) fica pronto ao abrir o app.
 
 ### `page-tree-drag-and-drop.e2e.mjs` — FUN-005
 
@@ -179,8 +190,8 @@ Cria duas páginas raiz com título carimbado por timestamp, arrasta uma para
 o meio da outra (`dragAndDrop` mira o centro do elemento, que cai na faixa
 "aninhar" de `zoneFromPointerY`), expande o pai (a recém-aninhada só
 reaparece na árvore depois disso — `move()` na store não expande sozinho) e
-confirma `aria-level` subindo de 1 para 2. Terceira asserção roda `psql`
-direto no `learno_test` e confirma que `parent_id` da origem é de fato o
+confirma `aria-level` subindo de 1 para 2. Terceira asserção consulta o banco
+do app (via `e2e/lib/db.mjs`) e confirma que `parent_id` da origem é de fato o
 `id` do destino — não só o DOM, o dado persistido.
 
 ## Nota sobre desenvolvimento concorrente
@@ -198,3 +209,26 @@ depende do estado antigo. Fica registrado porque mostra exatamente o tipo
 de lacuna que motivou esta tarefa (um caminho que só um teste de ponta a
 ponta alcança) e porque, num repositório com mais de uma sessão trabalhando
 ao mesmo tempo, os arquivos podem mudar debaixo do pé de quem investiga.
+
+## Por que a porta de desenvolvimento é 1430, e não 1420
+
+1420 é o padrão do Tauri, e é justamente por isso que ele não serve aqui: outro projeto
+desta máquina (`C:\dev\Projeto Genesis\ui`) também é Tauri e já ocupa a 1420 com
+`strictPort`. Com os dois no padrão, subir um derrubava o `npm run dev` do outro.
+
+O sintoma, quando isso aconteceu, foi muito pior que um erro de porta ocupada: o
+`learno.exe` de desenvolvimento **abriu renderizando o WebView2 do OUTRO app**. Ele só pede
+a URL do `devUrl` e não tem como saber quem respondeu. A suíte e2e falhou com um
+diagnóstico que não parecia ter nada a ver com o Learno — a tela capturada era o painel do
+outro projeto.
+
+O número aparece em **três** lugares, que precisam concordar:
+
+| Arquivo | Campo |
+|---|---|
+| `vite.config.ts` | `server.port` (e `hmr.port`, 1431) |
+| `src-tauri/tauri.conf.json` | `devUrl` — o Tauri **assa** isso no binário de dev |
+| `e2e/wdio.conf.mjs` | `DEV_SERVER_URL` |
+
+Mudar um sem os outros faz o app abrir numa tela em branco, sem erro. E como o `devUrl` é
+assado no binário, mudar `tauri.conf.json` exige **rebuild** do Rust para valer.

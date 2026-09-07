@@ -1,0 +1,199 @@
+/*
+ * A grade da view Tabela. Plain CSS, ao lado do código, como toda pasta de
+ * construtor (README do editor) — e SÓ tokens de `src/styles/theme.css`:
+ * nenhum hex aqui, para os cinco temas funcionarem sem override.
+ *
+ * Régua (docs/DESIGN-TOKENS.md): divisor entre linhas/colunas é `hairline`
+ * (< 3:1 de propósito — grade densa com `border` vira gaiola); o contorno da
+ * grade inteira já vem do contêiner. Linha em hover sobe um degrau
+ * (`surface-raised`). O editor aberto é o único elemento "flutuando"
+ * (nível 2: `border` + `shadow-hard`).
+ *
+ * Sem animação de abrir/fechar célula: editar célula é ação de altíssima
+ * frequência (regra 2 de movimento) — e quase sempre iniciada por teclado.
+ */
+
+.db-table {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.db-table__scroll {
+  overflow-x: auto;
+  border-top: 1px solid var(--hairline);
+}
+
+.db-table__grid {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  /* Cresce só com as colunas: `min-width` vem de `colgroup`, não daqui. */
+  width: max-content;
+  min-width: 100%;
+}
+
+.db-table__th,
+.db-table__cell {
+  position: relative;
+  height: 2.125rem; /* 34px: 32 de linha + 1px de divisor + folga — o Notion usa 33 */
+  padding: 0;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+  text-align: left;
+}
+
+.db-table__th:last-child,
+.db-table__cell:last-child {
+  border-right: 0;
+}
+
+.db-table__th {
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Uma coluna somente-leitura (derivada) avisa no cabeçalho, não na célula: o dado não é "desabilitado", só não é seu para mudar. */
+}
+
+.db-table__th-icon {
+  display: inline-block;
+  width: 1.25em;
+  margin-right: 0.25rem;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.db-table__row:hover .db-table__cell {
+  background: var(--surface-raised);
+}
+
+.db-table__cell {
+  cursor: cell;
+}
+
+.db-table__cell--readonly {
+  cursor: default;
+  color: var(--ink-muted);
+}
+
+/* Anel de foco DENTRO da célula (offset negativo): fora dela o anel seria
+   engolido pelo `overflow` do contêiner de rolagem e pelas células vizinhas
+   — a única exceção permitida ao `:focus-visible` global é raio/offset. */
+.db-table__cell:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.db-table__value {
+  display: block;
+  padding: 0 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-table__value--title {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.db-table__value--placeholder {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+/* O editor aberto: portal no body, cravado sobre a célula (top/left/min-
+   width/min-height vêm do retângulo dela, via `EditorFlyout`), flutuando
+   por cima das vizinhas. É a "célula expandida" do Notion — o mesmo
+   mecanismo serve texto (cresce em altura), seleção (lista de opções) e
+   data (dois inputs). */
+.db-table__editor {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-hard);
+  cursor: auto;
+}
+
+.db-table__editor:focus-visible {
+  outline: none;
+}
+
+.db-table__title-input {
+  width: 100%;
+  min-width: 12rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  outline: none;
+}
+
+.db-table__title-input::placeholder {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.db-table__empty {
+  padding: 0.75rem 0.5rem;
+  color: var(--ink-muted);
+}
+
+/* "+ Nova linha": o rodapé do Notion. Um botão de largura cheia, alinhado
+   com a coluna de título, que só ganha cor no hover — a tabela é o assunto,
+   não ele. Press = scale(0.97)? Não: um elemento de largura cheia encolhendo
+   parece quebrado; o feedback é a cor, como numa linha de lista. */
+.db-table__add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.db-table__add-row:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.db-table__add-row:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.db-table__status {
+  padding: 0.375rem 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+/* A célula de checkbox: o input já é o valor inteiro; centralizado na
+   coluna como o Notion, sem texto ao lado. */
+.db-table__cell .db-cell-checkbox {
+  display: block;
+  margin: 0 auto;
+  accent-color: var(--emerald);
+}

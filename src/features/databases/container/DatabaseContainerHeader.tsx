@@ -16,6 +16,7 @@
  */
 import { useState, type FocusEvent } from "react";
 import type { Database } from "../contract";
+import { AddPropertyMenu } from "./AddPropertyMenu";
 import type { DatabaseContainerActions, DatabaseContainerMode } from "./types";
 
 interface DatabaseContainerHeaderProps {
@@ -101,15 +102,18 @@ export function DatabaseContainerHeader({ database, mode, actions, onExpand }: D
               (§ "HTML semântico antes de ARIA"). Sem aria-label aqui: um
               rótulo diferente do texto visível quebraria "nome contém o
               rótulo visível" pra quem navega por comando de voz. */}
-          <button
-            type="button"
-            onClick={actions.onAddProperty}
-            disabled={database.isLocked || !actions.onAddProperty}
-            title={database.isLocked ? LOCKED_TITLE : undefined}
-            className="rounded-sm px-2 py-1 text-xs text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            + Propriedade
-          </button>
+          {actions.onAddProperty ? (
+            <AddPropertyMenu disabled={database.isLocked} disabledTitle={LOCKED_TITLE} onPick={actions.onAddProperty} />
+          ) : (
+            <button
+              type="button"
+              disabled
+              title={database.isLocked ? LOCKED_TITLE : undefined}
+              className="rounded-sm px-2 py-1 text-xs text-ink-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              + Propriedade
+            </button>
+          )}
           <button
             type="button"
             onClick={actions.onAddView}

@@ -21,7 +21,7 @@ use crate::formula::core::types::{PageMeta, PropertyId, Type, Value};
 /// A fronteira congelada (arquitetura §9) entre o motor puro e onde os dados
 /// realmente moram. `ipc::formula_commands` é quem implementa isto de
 /// verdade, em cima de `state.pool()` — este módulo só CONSOME o trait,
-/// nunca sabe que existe Postgres do outro lado.
+/// nunca sabe que existe SQLite do outro lado.
 ///
 /// Pré-buscado em lote é responsabilidade de QUEM IMPLEMENTA o trait, não
 /// deste módulo: um `.map()` sobre uma relação de 5.000 itens chama

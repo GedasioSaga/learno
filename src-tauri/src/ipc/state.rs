@@ -11,12 +11,11 @@ use crate::sidecar::SidecarProcess;
 
 /// Estado compartilhado do app.
 ///
-/// `pool` fica `None` até `ipc::commands::connect_database` preencher com o
-/// resultado de `db::connect_migrate_with_rollback` — uma vez no fim do
-/// assistente de primeira execução, e de novo a cada abertura do app em que
-/// existe configuração salva mas a sessão ainda não digitou a senha (ela
-/// nunca é persistida). Este arquivo só guarda o slot; os comandos de página
-/// em `ipc::commands` já leem daqui via `pool()`.
+/// `pool` fica `None` até `ipc::commands::open_workspace` preencher com o
+/// resultado de `db::connect_migrate_with_rollback` — uma vez por abertura do
+/// app, e de novo se o usuário trocar de pasta de trabalho ou restaurar um
+/// backup. Este arquivo só guarda o slot; os comandos de página em
+/// `ipc::commands` já leem daqui via `pool()`.
 ///
 /// `sidecar` segue o mesmo desenho: `lib.rs` sobe o processo uma vez, em
 /// `.setup()` (precisa de um `AppHandle` real, que `AppState` nunca tem), e
@@ -28,11 +27,12 @@ use crate::sidecar::SidecarProcess;
 /// `sidecar::reader::run`), então quem estava esperando recebe o erro
 /// imediatamente em vez de travar até o timeout. Decisão deliberada de não
 /// reconectar sozinho depois disso — mesmo espírito de `pool`, que também não
-/// reconecta ao Postgres sozinho depois de caído.
+/// se reabre sozinho depois de fechado.
 pub struct AppState {
     config_cache: RwLock<Option<AppConfig>>,
     pool: RwLock<Option<SqlitePool>>,
     sidecar: RwLock<Option<SidecarProcess>>,
+    open_workspace_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {
@@ -41,13 +41,33 @@ impl AppState {
             config_cache: RwLock::new(None),
             pool: RwLock::new(None),
             sidecar: RwLock::new(None),
+            open_workspace_lock: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// A conexão ativa com o Postgres, ou `Error::Config` quando o app ainda
-    /// não passou pelo assistente de primeira execução (ou a sessão ainda
-    /// não digitou a senha) — ver o comentário da struct acima. `SqlitePool::clone`
-    /// é barato: é só um handle para o mesmo pool de conexões.
+    /// Segura o direito de abrir a pasta de trabalho — só uma abertura por
+    /// vez, no processo inteiro.
+    ///
+    /// Não é zelo teórico: `React.StrictMode` monta cada efeito DUAS vezes em
+    /// desenvolvimento, então `App.tsx` chama `open_workspace` duas vezes
+    /// quase ao mesmo tempo, e as duas chamadas abriam o mesmo arquivo em
+    /// paralelo. Contra um banco novo isso faz as duas rodarem `migrate()`
+    /// juntas e a perdedora falhar com `table mindmaps already exists`; contra
+    /// um banco existente, `database is locked`. Os dois erros foram
+    /// observados na suíte e2e, na tela de "Não deu para abrir o banco de
+    /// dados".
+    ///
+    /// É `tokio::sync::Mutex` (e não o `std`) porque quem o segura atravessa
+    /// um `await` — conectar e migrar — e um mutex síncrono bloquearia a
+    /// thread do runtime inteira nesse meio-tempo.
+    pub async fn lock_workspace_open(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.open_workspace_lock.lock().await
+    }
+
+    /// A conexão ativa com o banco, ou `Error::Config` quando o app ainda não
+    /// abriu a pasta de trabalho — ver o comentário da struct acima.
+    /// `SqlitePool::clone` é barato: é só um handle para o mesmo pool de
+    /// conexões.
     pub fn pool(&self) -> Result<SqlitePool> {
         self.pool
             .read()
@@ -56,12 +76,26 @@ impl AppState {
             .ok_or_else(|| Error::Config("banco de dados ainda não conectado".into()))
     }
 
-    /// Chamado por `ipc::commands::connect_database`, depois que a conexão é
+    /// Chamado por `ipc::commands::open_workspace`, depois que a conexão é
     /// aberta e migrada com sucesso.
     pub fn set_pool(&self, pool: SqlitePool) {
         if let Ok(mut guard) = self.pool.write() {
             *guard = Some(pool);
         }
+    }
+
+    /// Tira o pool do slot e devolve para quem chamou, deixando o app sem
+    /// conexão até alguém chamar `set_pool` de novo.
+    ///
+    /// Existe por causa de um detalhe do SQLite que não tinha equivalente em
+    /// Postgres: restaurar um backup significa trocar o ARQUIVO do banco, e
+    /// fazer isso com conexões abertas em cima dele é o caminho conhecido
+    /// para corrompê-lo. Devolver o pool (em vez de só limpar o slot) obriga
+    /// quem chama a fechá-lo de verdade — `SqlitePool::close` é `async`, e um
+    /// pool meramente derrubado não garante que os handles do sistema
+    /// operacional já foram soltos.
+    pub fn take_pool(&self) -> Option<SqlitePool> {
+        self.pool.write().ok().and_then(|mut guard| guard.take())
     }
 
     /// Lê a última configuração conhecida sem tocar o disco.
@@ -77,11 +111,29 @@ impl AppState {
             .unwrap_or(None)
     }
 
-    /// Atualiza o cache em memória. Chamado depois que um comando lê ou grava
-    /// a configuração no store, para manter as duas cópias em sincronia.
-    pub fn set_cached_config(&self, config: Option<AppConfig>) {
+    /// Registra qual pasta de trabalho está aberta. Só quem de fato abre uma
+    /// chama isto — hoje, `ipc::commands::open_workspace_and_wire_state`.
+    ///
+    /// Recebe `AppConfig`, não `Option<AppConfig>`, e a diferença é a correção
+    /// de uma classe inteira de bug, não estilo. Enquanto aceitava `Option`,
+    /// "esquecer a pasta de trabalho" era uma operação que qualquer chamador
+    /// podia fazer sem querer — e foi exatamente o que aconteceu:
+    /// `get_app_config` passava adiante o que o store devolvia, e o store
+    /// devolve `None` em toda instalação que nunca escolheu pasta à mão. Com
+    /// isso, a tela de Configurações (montada no boot dentro do `<dialog>`
+    /// fechado de `App.tsx`) apagava a pasta aberta, e TODO comando que passa
+    /// por `ipc::backup_commands::require_config` — importar/abrir/excluir
+    /// livro, restaurar backup — falhava com "nenhuma conexão configurada"
+    /// pelo resto da sessão.
+    ///
+    /// Agora o cache só pode ser preenchido ou substituído, nunca esvaziado.
+    /// O único estado em que `cached_config()` é `None` é o inicial, antes da
+    /// primeira abertura de pasta — e aí `pool()` também falha, com a
+    /// mensagem certa ("banco de dados ainda não conectado"), em vez de o app
+    /// ficar num meio-termo com banco aberto e configuração ausente.
+    pub fn set_cached_config(&self, config: AppConfig) {
         if let Ok(mut guard) = self.config_cache.write() {
-            *guard = config;
+            *guard = Some(config);
         }
     }
 
@@ -121,12 +173,7 @@ mod tests {
     use super::*;
 
     fn sample_config() -> AppConfig {
-        AppConfig {
-            host: "localhost".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "postgres".into(),
-        }
+        AppConfig::new(r"C:\Users\alguem\Learno")
     }
 
     #[test]
@@ -138,16 +185,19 @@ mod tests {
     #[test]
     fn round_trips_a_cached_config() {
         let state = AppState::new();
-        state.set_cached_config(Some(sample_config()));
+        state.set_cached_config(sample_config());
         assert_eq!(state.cached_config(), Some(sample_config()));
     }
 
+    /// O teste que substituiu `can_clear_the_cache_back_to_none`: esvaziar o
+    /// cache deixou de ser possível de propósito (ver `set_cached_config`).
+    /// Trocar de pasta continua sendo — é o que `save_data_dir` faz.
     #[test]
-    fn can_clear_the_cache_back_to_none() {
+    fn a_second_open_replaces_the_cached_config_instead_of_clearing_it() {
         let state = AppState::new();
-        state.set_cached_config(Some(sample_config()));
-        state.set_cached_config(None);
-        assert_eq!(state.cached_config(), None);
+        state.set_cached_config(sample_config());
+        state.set_cached_config(AppConfig::new(r"D:\Estudos"));
+        assert_eq!(state.cached_config(), Some(AppConfig::new(r"D:\Estudos")));
     }
 
     #[test]
@@ -165,14 +215,27 @@ mod tests {
     // contexto sem abrir conexão nenhuma com o banco.
     #[tokio::test]
     async fn set_pool_makes_pool_return_it() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("postgres://user:pass@localhost/learno_test")
-            .unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_lazy("sqlite::memory:").unwrap();
 
         let state = AppState::new();
         state.set_pool(pool);
 
         assert!(state.pool().is_ok());
+    }
+
+    /// O contrato que `restore_backup` depende: depois de tirar o pool, o
+    /// app fica sem conexão — e é justamente por isso que a troca do arquivo
+    /// pode acontecer com segurança.
+    #[tokio::test]
+    async fn take_pool_hands_it_over_and_leaves_the_slot_empty() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_lazy("sqlite::memory:").unwrap();
+
+        let state = AppState::new();
+        state.set_pool(pool);
+
+        assert!(state.take_pool().is_some());
+        assert!(matches!(state.pool(), Err(Error::Config(_))));
+        assert!(state.take_pool().is_none(), "tirar de novo não pode ressuscitar um pool");
     }
 
     #[test]

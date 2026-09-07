@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>De onde vem um cartão</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #f3ebdb;
+      --color-ink:    #1e150c;
+      --color-muted:  #5c4a35;
+      --color-accent: #b5771c;
+      --color-rule:   #d9cbae;
+      --font-sans:  'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono:  'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .wrap { width: 100%; max-width: 1040px; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 { font-family: var(--font-serif); font-size: 1.75rem; font-weight: 400; line-height: 1.15; }
+    .sub { color: var(--color-muted); font-size: 0.875rem; margin-top: 0.5rem; max-width: 64ch; }
+    svg { display: block; width: 100%; height: auto; margin-top: 1.75rem; }
+    footer {
+      margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid var(--color-rule);
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--color-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="eyebrow">Learno · Repetição espaçada</p>
+    <h1>De onde vem um cartão de memória</h1>
+    <p class="sub">
+      Três lugares diferentes do app criam cartão, e os três passam pelo mesmo formulário. O trecho
+      que originou o cartão é congelado junto com ele — se a página de origem for apagada depois, o
+      cartão continua dizendo de onde veio.
+    </p>
+
+    <svg viewBox="0 0 1000 520" role="img" aria-labelledby="origem-title origem-desc"
+         xmlns="http://www.w3.org/2000/svg">
+      <title id="origem-title">As três origens de um cartão de memória no Learno</title>
+      <desc id="origem-desc">Trecho selecionado no editor de blocos, nó do mapa mental e trecho do leitor de PDF ou EPUB convergem para um formulário único, que cria uma nota com o texto de origem congelado. A nota gera cartões que entram no agendador SM-2, e responder um cartão grava a revisão e credita XP na mesma transação.</desc>
+
+      <defs>
+        <marker id="f-seta" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#5c4a35"/>
+        </marker>
+        <marker id="f-seta-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#b5771c"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f3ebdb"/>
+
+      <text x="32" y="56" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">AS TRÊS ORIGENS</text>
+
+      <!-- conectores primeiro, para ficarem atrás das caixas -->
+      <!-- origem 1 (y=104) desce e entra no formulário pela esquerda (y=228) -->
+      <path d="M 280 104 H 348 Q 356 104 356 112 V 220 Q 356 228 364 228 H 396"
+            fill="none" stroke="#5c4a35" stroke-width="1" marker-end="url(#f-seta)"/>
+      <!-- origem 2 (y=228) entra reto -->
+      <line x1="280" y1="228" x2="396" y2="228" stroke="#5c4a35" stroke-width="1" marker-end="url(#f-seta)"/>
+      <!-- origem 3 (y=352) sobe e entra -->
+      <path d="M 280 352 H 348 Q 356 352 356 344 V 236 Q 356 228 364 228 H 396"
+            fill="none" stroke="#5c4a35" stroke-width="1" marker-end="url(#f-seta)"/>
+
+      <!-- formulário -> nota -->
+      <line x1="588" y1="228" x2="644" y2="228" stroke="#b5771c" stroke-width="1" marker-end="url(#f-seta-accent)"/>
+      <!-- nota -> cartões -->
+      <path d="M 836 228 H 892 Q 900 228 900 236 V 300 Q 900 308 892 308 H 836"
+            fill="none" stroke="#5c4a35" stroke-width="1" marker-end="url(#f-seta)"/>
+      <!-- cartões -> agendador -->
+      <line x1="644" y1="308" x2="588" y2="308" stroke="#5c4a35" stroke-width="1" marker-end="url(#f-seta)"/>
+      <!-- agendador -> xp -->
+      <path d="M 492 340 V 396 Q 492 404 500 404 H 556"
+            fill="none" stroke="#b5771c" stroke-width="1" marker-end="url(#f-seta-accent)"/>
+
+      <!-- rótulos de aresta, com folga de 8px acima do traço -->
+      <rect x="466" y="200" width="52" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="492" y="209" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">CONGELA</text>
+
+      <rect x="590" y="280" width="48" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="614" y="289" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">GERA</text>
+
+      <rect x="504" y="376" width="80" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="544" y="385" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">MESMA TRANSAÇÃO</text>
+
+      <!-- origens -->
+      <rect x="120" y="80" width="160" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="120" y="80" width="160" height="48" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="200" y="102" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Trecho da nota</text>
+      <text x="200" y="118" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">editor de blocos</text>
+
+      <rect x="120" y="204" width="160" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="120" y="204" width="160" height="48" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="200" y="226" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Nó do mapa</text>
+      <text x="200" y="242" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">sem link de volta</text>
+
+      <rect x="120" y="328" width="160" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="120" y="328" width="160" height="48" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="200" y="350" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Trecho do livro</text>
+      <text x="200" y="366" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">PDF · EPUB</text>
+
+      <!-- formulário: focal -->
+      <rect x="396" y="204" width="192" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="396" y="204" width="192" height="48" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="492" y="226" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Um formulário só</text>
+      <text x="492" y="242" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">CriarCartaoDeOrigem</text>
+
+      <!-- nota -->
+      <rect x="644" y="204" width="192" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="644" y="204" width="192" height="48" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="740" y="226" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Nota com procedência</text>
+      <text x="740" y="242" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">sourceTextFrozen</text>
+
+      <!-- cartões -->
+      <rect x="644" y="284" width="192" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="644" y="284" width="192" height="48" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="740" y="306" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Cartões</text>
+      <text x="740" y="322" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">um por template</text>
+
+      <!-- agendador -->
+      <rect x="396" y="284" width="192" height="56" rx="6" fill="#f3ebdb"/>
+      <rect x="396" y="284" width="192" height="56" rx="6" fill="#e7dcc3" stroke="#5c4a35" stroke-width="1"/>
+      <text x="492" y="308" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Agendador SM-2</text>
+      <text x="492" y="324" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">cards · review_log</text>
+
+      <!-- xp -->
+      <rect x="556" y="380" width="192" height="48" rx="6" fill="#f3ebdb"/>
+      <rect x="556" y="380" width="192" height="48" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="652" y="402" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">XP creditada</text>
+      <text x="652" y="418" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">xp_events</text>
+
+      <!-- legenda -->
+      <line x1="32" y1="464" x2="968" y2="464" stroke="#d9cbae" stroke-width="0.8"/>
+      <text x="32" y="482" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">LEGENDA</text>
+      <rect x="128" y="472" width="10" height="10" rx="2" fill="#f7e9cf" stroke="#b5771c"/>
+      <text x="146" y="481" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">o que faz a integração existir</text>
+      <rect x="392" y="472" width="10" height="10" rx="2" fill="#fcf8ef" stroke="#1e150c"/>
+      <text x="410" y="481" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">passo do fluxo</text>
+      <rect x="560" y="472" width="10" height="10" rx="2" fill="#e7dcc3" stroke="#5c4a35"/>
+      <text x="578" y="481" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">estado durável</text>
+    </svg>
+
+    <footer>Learno · paleta do tema Papel · docs/diagrams/</footer>
+  </div>
+</body>
+</html>

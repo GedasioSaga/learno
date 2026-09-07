@@ -1,0 +1,147 @@
+<title>Fases do agendador SRS</title>
+<style>
+  :root{
+    --paper:#f5f5f5; --paper-2:#ececec; --ink:#2d3142; --muted:#4f5d75; --soft:#7a8399;
+    --rule:rgba(45,49,66,0.12); --rule-solid:#bfc0c0;
+    --accent:#eb6c36; --accent-tint:rgba(235,108,54,0.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#2d3142; --paper-2:#393e53; --ink:#f5f5f5; --muted:#bfc0c0; --soft:#8e98ac;
+      --rule:rgba(245,245,245,0.12); --rule-solid:rgba(191,192,192,0.25);
+      --accent:#f08a59; --accent-tint:rgba(240,138,89,0.10);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#2d3142; --paper-2:#393e53; --ink:#f5f5f5; --muted:#bfc0c0; --soft:#8e98ac;
+    --rule:rgba(245,245,245,0.12); --rule-solid:rgba(191,192,192,0.25);
+    --accent:#f08a59; --accent-tint:rgba(240,138,89,0.10);
+  }
+  body{background:var(--paper); color:var(--ink); font-family:'Geist',sans-serif;}
+  .wrap{max-width:940px; margin:0 auto; padding:40px 24px 56px;}
+  .eyebrow{font-family:'Geist Mono',monospace; font-size:8px; letter-spacing:0.18em; text-transform:uppercase; color:var(--soft); margin:0 0 8px;}
+  h1{font-family:'Instrument Serif',serif; font-weight:400; font-size:1.75rem; margin:0 0 6px;}
+  .subtitle{font-family:'Geist',sans-serif; font-size:13px; color:var(--muted); margin:0 0 28px; max-width:640px;}
+  .diagram{overflow-x:auto;}
+  svg{display:block; width:100%; height:auto;}
+  footer{margin-top:20px; padding-top:12px; border-top:1px solid var(--rule); font-family:'Geist Mono',monospace; font-size:8px; color:var(--soft); letter-spacing:0.06em;}
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<div class="wrap">
+  <p class="eyebrow">Learno — src-tauri/src/srs/mod.rs</p>
+  <h1>A máquina de estados do agendar()</h1>
+  <p class="subtitle">Fase::New e Fase::Learning correm o mesmo código (agendar_em_aprendizagem) — um cartão novo é, para o agendador, um cartão de aprendizagem parado no passo 0. Rótulos usam os nomes que o próprio código usa: Gradua, Lapso.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 880 552" role="img" aria-labelledby="srs-title srs-desc">
+      <title id="srs-title">Máquina de estados do agendador SM-2 do Learno</title>
+      <desc id="srs-desc">Diagrama de estados mostrando um cartão novo entrando em Aprendizagem, ciclando ali até graduar para Revisão, um lapso em Revisão levando a Reaprendizagem, e Reaprendizagem graduando de volta para Revisão.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="var(--muted)"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="var(--accent)"/>
+        </marker>
+      </defs>
+
+      <rect width="880" height="552" fill="var(--paper)"/>
+
+      <!-- ============ ARROWS (before boxes) ============ -->
+
+      <!-- start dot -> New -->
+      <circle cx="64" cy="200" r="6" fill="var(--ink)"/>
+      <path d="M 70,200 H 100" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- New -> Learning -->
+      <path d="M 220,200 H 320" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="226" y="180" width="88" height="12" rx="2" fill="var(--paper)"/>
+      <text x="270" y="189" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">QUALQUER NOTA</text>
+
+      <!-- Learning self-loop (above) -->
+      <path d="M 368,168 C 368,116 432,116 432,168" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="336" y="108" width="128" height="12" rx="2" fill="var(--paper)"/>
+      <text x="400" y="117" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">AGAIN/HARD/GOOD</text>
+
+      <!-- Learning -> Review -->
+      <path d="M 480,200 H 580" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="504" y="180" width="52" height="12" rx="2" fill="var(--paper)"/>
+      <text x="530" y="189" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">GRADUA</text>
+
+      <!-- Review self-loop (above) -->
+      <path d="M 628,168 C 628,116 692,116 692,168" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="596" y="108" width="128" height="12" rx="2" fill="var(--paper)"/>
+      <text x="660" y="117" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">HARD/GOOD/EASY</text>
+
+      <!-- Review -> Relearning (down, accent — the lapse) -->
+      <path d="M 620,232 V 360" fill="none" stroke="var(--accent)" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="524" y="284" width="88" height="12" rx="2" fill="var(--paper)"/>
+      <text x="568" y="293" fill="var(--accent)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">AGAIN — LAPSO</text>
+
+      <!-- Relearning -> Review (up) -->
+      <path d="M 700,360 V 232" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="704" y="284" width="52" height="12" rx="2" fill="var(--paper)"/>
+      <text x="730" y="293" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">GRADUA</text>
+
+      <!-- Relearning self-loop (below) -->
+      <path d="M 628,424 C 628,476 692,476 692,424" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="596" y="480" width="128" height="12" rx="2" fill="var(--paper)"/>
+      <text x="660" y="489" fill="var(--soft)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">AGAIN/HARD</text>
+
+      <!-- ============ NODES ============ -->
+
+      <!-- New -->
+      <rect x="100" y="168" width="120" height="64" rx="8" fill="var(--paper)"/>
+      <rect x="100" y="168" width="120" height="64" rx="8" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="112" y="176" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="129" y="185" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">NEW</text>
+      <text x="160" y="206" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Novo</text>
+      <text x="160" y="222" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">passo 0, mesmo código</text>
+
+      <!-- Learning -->
+      <rect x="320" y="168" width="160" height="64" rx="8" fill="var(--paper)"/>
+      <rect x="320" y="168" width="160" height="64" rx="8" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="332" y="176" width="60" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="362" y="185" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">LEARNING</text>
+      <text x="400" y="206" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Aprendizagem</text>
+      <text x="400" y="222" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">learning_steps_min</text>
+
+      <!-- Review — FOCAL -->
+      <rect x="580" y="168" width="160" height="64" rx="8" fill="var(--paper)"/>
+      <rect x="580" y="168" width="160" height="64" rx="8" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.2"/>
+      <rect x="592" y="176" width="52" height="12" rx="2" fill="transparent" stroke="var(--accent)" stroke-opacity="0.5" stroke-width="0.8"/>
+      <text x="618" y="185" fill="var(--accent)" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">REVIEW</text>
+      <text x="660" y="206" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Revisão</text>
+      <text x="660" y="222" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">intervalo × ease</text>
+
+      <!-- Relearning -->
+      <rect x="580" y="360" width="160" height="64" rx="8" fill="var(--paper)"/>
+      <rect x="580" y="360" width="160" height="64" rx="8" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <rect x="592" y="368" width="80" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="632" y="377" fill="var(--ink)" fill-opacity="0.8" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">RELEARNING</text>
+      <text x="660" y="398" fill="var(--ink)" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Reaprendizagem</text>
+      <text x="660" y="414" fill="var(--muted)" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">intervalo-alvo fixo</text>
+
+      <!-- ============ CALLOUT ============ -->
+      <path d="M 252,278 Q 396,284 516,290" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="620" cy="288" r="2" fill="var(--accent)"/>
+      <text x="40" y="272" fill="var(--accent)" font-size="14" font-style="italic" font-family="'Instrument Serif',serif">todo múltiplo do limiar vira leech</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="30" y1="504" x2="820" y2="504" stroke="var(--rule)" stroke-width="0.8"/>
+      <text x="30" y="520" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <rect x="140" y="512" width="16" height="10" rx="2" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+      <text x="164" y="520" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">FASE</text>
+
+      <rect x="260" y="512" width="16" height="10" rx="2" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.2"/>
+      <text x="284" y="520" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">FASE DE REGIME (REVIEW)</text>
+
+      <line x1="480" y1="517" x2="510" y2="517" stroke="var(--accent)" stroke-width="1.2"/>
+      <text x="518" y="520" fill="var(--muted)" font-size="8" font-family="'Geist Mono',monospace">LAPSO (AGAIN EM REVIEW)</text>
+    </svg>
+  </div>
+
+  <footer>docs/diagrams/agendador-srs.html — estados e transições lidos de src-tauri/src/srs/mod.rs (enum Fase, enum Avaliacao, fn agendar) — não editado</footer>
+</div>

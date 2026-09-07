@@ -1,0 +1,30 @@
+-- Fase 4, FSRS: fonte de verdade DEDICADA para "quando foi a última revisão
+-- de verdade deste cartão sob FSRS" — não reaproveita `cards.updated_at`
+-- (achado de revisão adversarial sobre `db::cards::CardRepository::answer_card`).
+--
+-- `updated_at` é escrito pelo trigger `cards_set_updated_at` (0011) em
+-- QUALQUER `UPDATE` na tabela `cards`, sem filtro de qual coluna mudou. Hoje
+-- só dois caminhos tocam uma linha respondível (`answer_card` e o
+-- soft-delete de `NoteRepository::delete`), então a leitura de `updated_at`
+-- como "instante da última revisão" ainda não corrompe nada NA PRÁTICA — mas
+-- `cards.buried_until` já é LIDO por `next_card`/`deck_counts`/`deck_forecast`
+-- sem nenhum comando ainda escrevendo nele, e no dia em que "enterrar
+-- cartão" (ou mover cartão de baralho, ou qualquer outro `UPDATE`) existir e
+-- tocar um cartão FSRS por fora de `answer_card`, `elapsed_days` passaria a
+-- contar a partir daquele toque em vez da última revisão real — sem erro,
+-- sem exceção, só uma estabilidade/dificuldade errada calculada na resposta
+-- seguinte. Uma coluna que só `answer_card` escreve (junto com
+-- `fsrs_stability`/`fsrs_difficulty`, os outros dois campos de
+-- `crate::srs::fsrs::Memoria`) fecha essa fonte de verdade sem depender de
+-- NENHUM outro caminho de escrita nunca tocar a linha.
+--
+-- `ADD COLUMN` nullable simples, mesmo padrão e mesma justificativa de
+-- `0032_mindmap_node_image.sql`: SQLite aplica isto como operação de
+-- metadado (não reescreve nenhuma linha existente), então é seguro rodar
+-- sobre um banco que já tem cartões — `NULL` é o valor certo para todo
+-- cartão hoje existente, porque nenhum tem uma "última revisão sob FSRS"
+-- registrada ainda (a coluna não existia até agora). Junto de
+-- `fsrs_stability`/`fsrs_difficulty` (ambos já `NULL` para o mesmo cartão),
+-- mantém o invariante de `crate::srs::fsrs::Memoria`: os três campos
+-- nascem juntos, e continuam juntos aqui.
+ALTER TABLE cards ADD COLUMN fsrs_last_review_at TEXT;

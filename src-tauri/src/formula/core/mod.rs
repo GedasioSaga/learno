@@ -1,6 +1,6 @@
 //! O núcleo da linguagem de fórmula (arquitetura §4/§9) — léxico, sintaxe,
 //! sistema de tipos, checagem estática, avaliador e a tabela de funções como
-//! ponto de extensão. Nada aqui faz I/O: quem lê Postgres é o adaptador de
+//! ponto de extensão. Nada aqui faz I/O: quem lê SQLite é o adaptador de
 //! [`eval::ValueSource`] que `ipc::formula_commands` monta.
 //!
 //! Um arquivo por responsabilidade, na ordem em que os dados fluem:
@@ -282,18 +282,6 @@ mod tests {
         let mut ctx = EvalCtx::new(&schema, Uuid::new_v4(), chrono::Utc::now());
         let result = eval(&compiled.expr, &mut ctx);
         assert_eq!(result, Value::List(vec![Value::Number(10.0), Value::Number(20.0)]));
-    }
-
-    #[test]
-    fn TEMP_equality_of_two_list_relations_should_be_true_but_is_it() {
-        register_test_functions();
-        let schema = RelationSchema { page_a: Uuid::new_v4(), page_b: Uuid::new_v4() };
-        let compiled = compile("prop("Relação") == prop("Relação")", &schema).expect("deveria tipar: List<Page> == List<Page>");
-        assert_eq!(compiled.return_type, Type::Boolean);
-        let mut ctx = EvalCtx::new(&schema, Uuid::new_v4(), chrono::Utc::now());
-        let result = eval(&compiled.expr, &mut ctx);
-        println!("TEMP RESULT: {:?}", result);
-        assert_eq!(result, Value::Boolean(true), "a MESMA relação comparada a si mesma deveria ser igual");
     }
 
     #[test]

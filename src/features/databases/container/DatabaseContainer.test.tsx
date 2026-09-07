@@ -7,7 +7,8 @@
  * nunca recebe nem propaga `isLocked` — o que garante, estruturalmente, que
  * bloquear estrutura nunca trava edição de valor.
  */
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { listFormulaFunctions, validateFormula } from "../../../lib/ipc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "../contract";
 import { registerViewSpec, resetViewSpecRegistryForTests } from "../core/view-spec";
@@ -51,7 +52,7 @@ function makeSchema(overrides: Partial<DatabaseSchema> = {}): DatabaseSchema {
 }
 
 function readyState(schema: DatabaseSchema = makeSchema()): DatabaseContainerState {
-  return { status: "ready", schema };
+  return { status: "ready", schema, records: [] };
 }
 
 /** O que a view "renderiza": um marcador de linhas e um input que simula edição de célula — o corpo nunca sabe (nem precisa saber) se a database está bloqueada. */
@@ -145,8 +146,12 @@ describe("DBS-002: bloqueio de estrutura nunca trava edição de valor", () => {
 
     const addProperty = screen.getByRole("button", { name: "+ Propriedade" });
     expect(addProperty).not.toBeDisabled();
+    // "+ Propriedade" abre o menu de TIPO (registro real de `properties/`,
+    // descoberto por `DatabaseContainer`); escolher um tipo é o que chama o
+    // callback — com o tipo e o nome inicial.
     fireEvent.click(addProperty);
-    expect(actions.onAddProperty).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Texto" }));
+    expect(actions.onAddProperty).toHaveBeenCalledWith("text", "Texto");
   });
 
   it("em página inteira a barra de ações fica sempre visível, sem precisar de hover", () => {
@@ -212,5 +217,51 @@ describe("DatabaseContainerBody: fallback sem quebrar quando não há view desen
     const schema = makeSchema({ views: [makeView({ type: "board_de_versao_futura", name: "Board" })] });
     render(<DatabaseContainer state={readyState(schema)} mode="fullPage" />);
     expect(screen.getByText('Tipo de view "board_de_versao_futura" desconhecido')).toBeInTheDocument();
+  });
+});
+
+vi.mock("../../../lib/ipc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../lib/ipc")>();
+  return { ...actual, listFormulaFunctions: vi.fn(), validateFormula: vi.fn(), previewFormula: vi.fn() };
+});
+
+describe("propriedade que pede configuração antes de nascer (Fórmula)", () => {
+  it("escolher 'Fórmula' abre o editor em vez de criar na hora; criar com expressão válida entrega nome e config ao callback", async () => {
+    vi.mocked(listFormulaFunctions).mockResolvedValue([]);
+    vi.mocked(validateFormula).mockResolvedValue({ valid: true, returnType: "número", diagnostics: [], dependsOn: [] });
+    const actions: DatabaseContainerActions = { onAddProperty: vi.fn() };
+    render(<DatabaseContainer state={readyState()} mode="fullPage" actions={actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Propriedade" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fórmula" }));
+
+    // Nada foi criado ainda: o diálogo é quem decide.
+    expect(actions.onAddProperty).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Nova propriedade: Fórmula" });
+    fireEvent.change(within(dialog).getByLabelText("Nome"), { target: { value: "Dobro" } });
+    fireEvent.change(within(dialog).getByLabelText("Expressão"), { target: { value: "2 * 2" } });
+    const create = await within(dialog).findByRole("button", { name: "Criar propriedade" });
+    await waitFor(() => expect(create).not.toBeDisabled());
+    fireEvent.click(create);
+
+    expect(actions.onAddProperty).toHaveBeenCalledWith("formula", "Dobro", { expression: "2 * 2" });
+    // O diálogo fecha DEPOIS de o `onAddProperty` resolver, não no clique: se
+    // `create_property` falhar, ele precisa continuar aberto com a expressão
+    // digitada, em vez de sumir e deixar o erro aparecer solto ao lado da
+    // tabela. Por isso a espera — a asserção é a mesma, só aguardada.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("Escape fecha o editor sem criar nada", () => {
+    vi.mocked(listFormulaFunctions).mockResolvedValue([]);
+    const actions: DatabaseContainerActions = { onAddProperty: vi.fn() };
+    render(<DatabaseContainer state={readyState()} mode="fullPage" actions={actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Propriedade" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fórmula" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(actions.onAddProperty).not.toHaveBeenCalled();
   });
 });

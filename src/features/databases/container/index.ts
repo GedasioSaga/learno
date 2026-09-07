@@ -8,6 +8,7 @@ export { DatabaseContainerBody } from "./DatabaseContainerBody";
 export { DatabaseContainerHeader } from "./DatabaseContainerHeader";
 export { ExpandedDatabaseOverlay } from "./ExpandedDatabaseOverlay";
 export type {
+  AddPropertyResult,
   DatabaseContainerActions,
   DatabaseContainerMode,
   DatabaseContainerState,

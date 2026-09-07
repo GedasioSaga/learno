@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camadas do Learno</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #f3ebdb;
+      --color-ink:    #1e150c;
+      --color-muted:  #5c4a35;
+      --color-accent: #b5771c;
+      --color-rule:   #d9cbae;
+      --font-sans:  'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono:  'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .wrap { width: 100%; max-width: 1040px; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 { font-family: var(--font-serif); font-size: 1.75rem; font-weight: 400; line-height: 1.15; }
+    .sub { color: var(--color-muted); font-size: 0.875rem; margin-top: 0.5rem; max-width: 62ch; }
+    svg { display: block; width: 100%; height: auto; margin-top: 1.75rem; }
+    footer {
+      margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid var(--color-rule);
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--color-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="eyebrow">Learno · Arquitetura</p>
+    <h1>As camadas, e onde cada trava vigia</h1>
+    <p class="sub">
+      Três travas de teste guardam as costuras entre camadas. Elas existem porque este projeto
+      entregou treze vezes código pronto, testado e que nenhum caminho do usuário alcançava — e
+      nenhuma suíte de unidade pegou, porque cada uma provava uma peça e o que faltava era a ligação.
+    </p>
+
+    <svg viewBox="0 0 1000 560" role="img" aria-labelledby="camadas-title camadas-desc"
+         xmlns="http://www.w3.org/2000/svg">
+      <title id="camadas-title">Camadas do Learno e as três travas de contrato</title>
+      <desc id="camadas-desc">Pilha de cinco camadas — as sete seções da interface, o contrato TypeScript, o IPC do Tauri, os repositórios Rust e o banco SQLite. Três travas de teste marcam as costuras: uma exige que toda tela esteja montada, outra que todo comando esteja registrado e chamado, e a terceira que os campos do Rust batam com os do TypeScript.</desc>
+
+      <defs>
+        <marker id="seta" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#5c4a35"/>
+        </marker>
+        <marker id="seta-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#b5771c"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f3ebdb"/>
+
+      <!-- indicador de direção, à esquerda e fora da pilha -->
+      <text x="32" y="120" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">O QUE O</text>
+      <text x="32" y="132" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">USUÁRIO VÊ</text>
+      <line x1="60" y1="152" x2="60" y2="404" stroke="#d9cbae" stroke-width="0.8"/>
+      <polygon points="56 404, 64 404, 60 412" fill="#5c4a35"/>
+      <text x="32" y="436" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">O QUE FICA</text>
+      <text x="32" y="448" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">GRAVADO</text>
+
+      <!-- L1 -->
+      <rect x="120" y="88" width="640" height="64" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="136" y="110" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.10em">L1</text>
+      <text x="136" y="128" fill="#1e150c" font-size="14" font-weight="600"
+            font-family="'Geist', sans-serif">As sete seções</text>
+      <text x="744" y="124" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="end">Hoje · Notas · Cartões · Mapa · Trilha · Cronograma · Biblioteca</text>
+
+      <!-- L2 — focal: o contrato único -->
+      <rect x="120" y="176" width="640" height="64" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="136" y="198" fill="#8a6a2a" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.10em">L2</text>
+      <text x="136" y="216" fill="#1e150c" font-size="14" font-weight="600"
+            font-family="'Geist', sans-serif">O contrato único</text>
+      <text x="744" y="212" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="end">src/lib/ipc.ts</text>
+
+      <!-- L3 -->
+      <rect x="120" y="264" width="640" height="64" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="136" y="286" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.10em">L3</text>
+      <text x="136" y="304" fill="#1e150c" font-size="14" font-weight="600"
+            font-family="'Geist', sans-serif">O fio do Tauri</text>
+      <text x="744" y="300" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="end">generate_handler! · serde_json</text>
+
+      <!-- L4 -->
+      <rect x="120" y="352" width="640" height="64" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="136" y="374" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.10em">L4</text>
+      <text x="136" y="392" fill="#1e150c" font-size="14" font-weight="600"
+            font-family="'Geist', sans-serif">Os repositórios</text>
+      <text x="744" y="388" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="end">src-tauri/src/db/</text>
+
+      <!-- L5 -->
+      <rect x="120" y="440" width="640" height="64" rx="6" fill="#e7dcc3" stroke="#5c4a35" stroke-width="1"/>
+      <text x="136" y="462" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.10em">L5</text>
+      <text x="136" y="480" fill="#1e150c" font-size="14" font-weight="600"
+            font-family="'Geist', sans-serif">O arquivo do banco</text>
+      <text x="744" y="476" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="end">SQLite · STRICT · 33 migrações</text>
+
+      <!-- travas, à direita, apontando para a costura que cada uma guarda -->
+      <line x1="800" y1="164" x2="772" y2="164" stroke="#b5771c" stroke-width="1" marker-end="url(#seta-accent)"/>
+      <rect x="800" y="140" width="176" height="48" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="812" y="158" fill="#1e150c" font-size="11" font-weight="600"
+            font-family="'Geist', sans-serif">Toda tela alcançável</text>
+      <text x="812" y="176" fill="#8a6a2a" font-size="8" font-family="'Geist Mono', monospace">montada em App.tsx</text>
+
+      <line x1="800" y1="252" x2="772" y2="252" stroke="#b5771c" stroke-width="1" marker-end="url(#seta-accent)"/>
+      <rect x="800" y="228" width="176" height="48" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="812" y="246" fill="#1e150c" font-size="11" font-weight="600"
+            font-family="'Geist', sans-serif">Todo comando ligado</text>
+      <text x="812" y="264" fill="#8a6a2a" font-size="8" font-family="'Geist Mono', monospace">registrado E chamado</text>
+
+      <line x1="800" y1="340" x2="772" y2="340" stroke="#b5771c" stroke-width="1" marker-end="url(#seta-accent)"/>
+      <rect x="800" y="316" width="176" height="48" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="812" y="334" fill="#1e150c" font-size="11" font-weight="600"
+            font-family="'Geist', sans-serif">Campos batem</text>
+      <text x="812" y="352" fill="#8a6a2a" font-size="8" font-family="'Geist Mono', monospace">Rust ↔ TypeScript</text>
+
+      <!-- legenda -->
+      <line x1="32" y1="524" x2="968" y2="524" stroke="#d9cbae" stroke-width="0.8"/>
+      <text x="32" y="542" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">LEGENDA</text>
+      <rect x="128" y="532" width="10" height="10" rx="2" fill="#f7e9cf" stroke="#b5771c"/>
+      <text x="146" y="541" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">trava de teste, e a costura que ela vigia</text>
+      <rect x="424" y="532" width="10" height="10" rx="2" fill="#fcf8ef" stroke="#1e150c"/>
+      <text x="442" y="541" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">camada de código</text>
+      <rect x="600" y="532" width="10" height="10" rx="2" fill="#e7dcc3" stroke="#5c4a35"/>
+      <text x="618" y="541" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">estado durável</text>
+    </svg>
+
+    <footer>Learno · paleta do tema Papel · docs/diagrams/</footer>
+  </div>
+</body>
+</html>
