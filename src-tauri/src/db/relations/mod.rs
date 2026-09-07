@@ -12,7 +12,7 @@
 //! - `database_relations` / `database_relation_edges`
 //!   (`0018_database_relations.sql`), including the
 //!   `database_properties_cleanup_relation` trigger this piece ADDED to
-//!   that migration — see its comment for why a Postgres trigger, not
+//!   that migration — see its comment for why a SQLite trigger, not
 //!   application code, is what keeps "deleting the last relation property
 //!   deletes the relation" true no matter which code path issues the
 //!   `DELETE`.

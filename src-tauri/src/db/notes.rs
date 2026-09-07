@@ -23,6 +23,25 @@
 //! escopo em vez de implementado pela metade contra uma superfície que ainda
 //! não existe.
 //!
+//! ## Cloze — a exceção a "um cartão por template"
+//!
+//! [`CLOZE_NOTE_TYPE_NAME`] quebra a premissa acima: o NÚMERO DE CARTÕES de
+//! uma nota cloze depende do CONTEÚDO do campo (quantas lacunas
+//! `{{cN::texto}}` o texto tem — sintaxe e semântica em `db::cloze`), não da
+//! contagem de `note_types.templates`. `note_types.kind` (`cloze` |
+//! `standard`, `0040_note_types_kind.sql`) é o discriminador que decide qual
+//! das duas regras vale para uma nota — ver o comentário de
+//! [`CLOZE_NOTE_TYPE_NAME`] para por que é uma COLUNA, não uma comparação de
+//! `name`.
+//!
+//! [`NoteRepository::create_with_source`] gera um cartão por número de
+//! lacuna encontrado. [`NoteRepository::update`] — que continua sem tocar em
+//! `cards` para todo tipo PADRÃO — abre uma exceção MÍNIMA só para cloze:
+//! reconcilia o conjunto de cartões com o conjunto de lacunas que o texto
+//! editado tem AGORA (lacuna nova → cartão novo; lacuna que sumiu → cartão
+//! ORFANIZADO, suspenso, nunca apagado; lacuna que continua → cartão
+//! intocado). Ver [`sync_cloze_cards`] para a decisão completa e o porquê.
+//!
 //! ## Origem de um cartão (INT-003 / INT-009)
 //!
 //! `notes.source_block_id` (um ponteiro vivo, `ON DELETE SET NULL`) e
@@ -40,6 +59,7 @@ use serde_json::Value as JsonValue;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
+use crate::db::cloze::parse_cloze_numbers;
 use crate::db::ids::{DbId, DbIdOpt, IdBind};
 use crate::error::{Error, Result};
 
@@ -96,7 +116,53 @@ const DIGITAR_RESPOSTA_NOTE_TYPE_NAME: &str = "Digitar a resposta";
 /// dado nenhum aqui que decida por ela.
 const MULTIPLA_ESCOLHA_NOTE_TYPE_NAME: &str = "Múltipla escolha";
 
-const NOTE_TYPE_COLUMNS: &str = "id, name, fields, templates, created_at, updated_at";
+/// "Cloze" (lacuna): o tipo mais usado do Anki, e o único cujo NÚMERO DE
+/// CARTÕES depende do CONTEÚDO do campo, não da contagem de `templates` —
+/// ver "Cloze — a exceção..." no comentário de módulo (topo do arquivo) e
+/// `db::cloze` para a sintaxe/semântica (`{{c1::texto}}`,
+/// `{{c1::texto::dica}}`) e o porquê de cada regra do parser.
+///
+/// Dois campos: `Texto` (a marcação `{{cN::...}}` mora aqui) e `Extra`
+/// (mostrado só depois de revelar a lacuna — convenção do próprio Anki,
+/// "Back Extra"). `Texto` é sempre o PRIMEIRO campo declarado — a mesma
+/// convenção "campo 0 é o especial" que `EstudoSessao.tsx` já usa para achar
+/// a frente de um cartão Básico — então [`cloze_card_numbers`] lê
+/// `field_names[0]`, nunca o literal `"Texto"`: continuaria funcionando se
+/// `Extra` ganhasse outro nome no futuro, contanto que `Texto` continue
+/// primeiro.
+///
+/// `templates` grava um único template (`front: "{{cloze:Texto}}"`, a mesma
+/// convenção `{{cloze:Campo}}` do próprio Anki, pela mesma razão de
+/// [`DIGITAR_RESPOSTA_NOTE_TYPE_NAME`] registrar `{{type:Verso}}`: paridade
+/// de import/export de `.apkg`, texto inerte até um leitor de `.apkg`
+/// existir) — mas esse array NUNCA decide quantos cartões uma nota cloze
+/// tem. Só `note_types.kind == "cloze"` decide isso, desviando inteiramente
+/// de [`template_count`] (ver [`NoteRepository::create_with_source`] e
+/// [`NoteRepository::update`]).
+///
+/// `kind` — POR QUE UMA COLUNA NOVA, NÃO SÓ COMPARAR `name` (decisão que
+/// `0040_note_types_kind.sql` grava): os três tipos embutidos anteriores já
+/// são distinguidos por NOME, mas só para SEMEAR (`ensure_default`) — nenhum
+/// deles muda COMO `create`/`update` escrevem `cards`. Cloze muda: o caminho
+/// de geração de cartão inteiro bifurca. Comparar `note_type.name ==
+/// "Cloze"` para essa bifurcação amarraria comportamento de escrita ao
+/// RÓTULO DE EXIBIÇÃO — o dia em que existir uma tela de renomear tipo de
+/// nota (não existe hoje, mesmo motivo citado no comentário de módulo sobre
+/// não haver comando de edição de `note_types`), renomear "Cloze" quebraria
+/// a geração de cartão em silêncio. `kind` é a mesma escolha que o próprio
+/// Anki faz internamente (`notetypes.config.kind`: Normal | Cloze) — um
+/// discriminador que sobrevive a qualquer nome de exibição.
+const CLOZE_NOTE_TYPE_NAME: &str = "Cloze";
+
+/// Valores de `note_types.kind` (`0040_note_types_kind.sql`) — ver o
+/// comentário de [`CLOZE_NOTE_TYPE_NAME`] para a decisão completa.
+const NOTE_TYPE_KIND_STANDARD: &str = "standard";
+/// `pub(crate)`: `db::cards::CardRepository::montar_card_to_study` compara o
+/// `kind` da nota com este valor para decidir se renderiza a lacuna — a
+/// mesma constante, para os dois lados nunca discordarem sobre a grafia.
+pub(crate) const NOTE_TYPE_KIND_CLOZE: &str = "cloze";
+
+const NOTE_TYPE_COLUMNS: &str = "id, name, kind, fields, templates, created_at, updated_at";
 const NOTE_COLUMNS: &str =
     "id, note_type_id, deck_id, field_values, tags, source_block_id, source_text_frozen, deleted_at, created_at, updated_at";
 
@@ -113,6 +179,10 @@ pub struct NoteTypeRow {
     #[sqlx(try_from = "DbId")]
     pub id: Uuid,
     pub name: String,
+    /// `"standard"` | `"cloze"` — ver o comentário de
+    /// [`CLOZE_NOTE_TYPE_NAME`] para o porquê deste campo existir e não ser
+    /// só uma comparação de `name`.
+    pub kind: String,
     pub fields: JsonValue,
     pub templates: JsonValue,
     pub created_at: DateTime<Utc>,
@@ -160,9 +230,9 @@ impl NoteTypeRepository {
         Self { pool }
     }
 
-    /// Every note type, oldest first. Seeds the three built-in note types —
-    /// "Básico", "Digitar a resposta", "Múltipla escolha" — the first time
-    /// each is missing: a fresh install has no `note_types` row at all
+    /// Every note type, oldest first. Seeds the four built-in note types —
+    /// "Básico", "Digitar a resposta", "Múltipla escolha", "Cloze" — the
+    /// first time each is missing: a fresh install has no `note_types` row at all
     /// (nothing in `migrations/` seeds one, by this piece's own instruction:
     /// the schema is owned by another workflow), and without at least one,
     /// `create_note` could never produce a card.
@@ -197,13 +267,15 @@ impl NoteTypeRepository {
         Ok(rows)
     }
 
-    /// Semeia os três tipos de nota embutidos — ver o comentário de
+    /// Semeia os quatro tipos de nota embutidos — ver o comentário de
     /// [`list`](Self::list) para por que cada um é checado por NOME, não pelo
     /// total da tabela, e os comentários de [`DIGITAR_RESPOSTA_NOTE_TYPE_NAME`]
-    /// / [`MULTIPLA_ESCOLHA_NOTE_TYPE_NAME`] para a forma dos campos.
+    /// / [`MULTIPLA_ESCOLHA_NOTE_TYPE_NAME`] / [`CLOZE_NOTE_TYPE_NAME`] para a
+    /// forma dos campos.
     async fn ensure_default(&self) -> Result<()> {
         self.ensure_note_type_seeded(
             BASICO_NOTE_TYPE_NAME,
+            NOTE_TYPE_KIND_STANDARD,
             serde_json::json!(["Frente", "Verso"]),
             serde_json::json!([{ "name": "Cartão 1", "front": "{{Frente}}", "back": "{{Verso}}" }]),
         )
@@ -211,6 +283,7 @@ impl NoteTypeRepository {
 
         self.ensure_note_type_seeded(
             DIGITAR_RESPOSTA_NOTE_TYPE_NAME,
+            NOTE_TYPE_KIND_STANDARD,
             serde_json::json!(["Frente", "Verso"]),
             serde_json::json!([{
                 "name": "Cartão 1",
@@ -222,8 +295,17 @@ impl NoteTypeRepository {
 
         self.ensure_note_type_seeded(
             MULTIPLA_ESCOLHA_NOTE_TYPE_NAME,
+            NOTE_TYPE_KIND_STANDARD,
             serde_json::json!(["Pergunta", "Correta", "Errada 1", "Errada 2", "Errada 3"]),
             serde_json::json!([{ "name": "Cartão 1", "front": "{{Pergunta}}", "back": "{{Correta}}" }]),
+        )
+        .await?;
+
+        self.ensure_note_type_seeded(
+            CLOZE_NOTE_TYPE_NAME,
+            NOTE_TYPE_KIND_CLOZE,
+            serde_json::json!(["Texto", "Extra"]),
+            serde_json::json!([{ "name": "Cloze", "front": "{{cloze:Texto}}", "back": "{{cloze:Texto}}\n\n{{Extra}}" }]),
         )
         .await?;
 
@@ -239,13 +321,20 @@ impl NoteTypeRepository {
     /// `WHERE NOT EXISTS`) e é ligado uma vez só — mesma convenção já usada
     /// em `db::blocks`/`db::cards`/`db::trilha` para um parâmetro reaparecer
     /// numa query SQLite.
-    async fn ensure_note_type_seeded(&self, nome: &str, fields: JsonValue, templates: JsonValue) -> Result<()> {
+    async fn ensure_note_type_seeded(
+        &self,
+        nome: &str,
+        kind: &str,
+        fields: JsonValue,
+        templates: JsonValue,
+    ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO note_types (id, name, fields, templates) \
-             SELECT $1, $2, $3, $4 WHERE NOT EXISTS (SELECT 1 FROM note_types WHERE name = $2)",
+            "INSERT INTO note_types (id, name, kind, fields, templates) \
+             SELECT $1, $2, $3, $4, $5 WHERE NOT EXISTS (SELECT 1 FROM note_types WHERE name = $2)",
         )
         .bind(Uuid::now_v7().db())
         .bind(nome)
+        .bind(kind)
         .bind(&fields)
         .bind(&templates)
         .execute(&self.pool)
@@ -356,13 +445,37 @@ impl NoteRepository {
         let field_values_json = build_field_values_json(&field_names, &field_values)?;
         let tags_json = JsonValue::Array(tags.into_iter().map(JsonValue::String).collect());
 
-        let template_total = template_count(&note_type.templates)?;
-        if template_total == 0 {
-            return Err(Error::Invalid(format!(
-                "tipo de nota \"{}\" não tem nenhum modelo de cartão; não é possível criar cartões",
-                note_type.name
-            )));
-        }
+        // Cloze desvia inteiramente de `template_count` — ver "Cloze — a
+        // exceção..." no comentário de módulo e o comentário de
+        // `CLOZE_NOTE_TYPE_NAME`. Todo `ordinal` já sai convertido para `i64`
+        // daqui, então `insert_card` não precisa mais fazer conversão
+        // nenhuma.
+        let ordinais: Vec<i64> = if note_type.kind == NOTE_TYPE_KIND_CLOZE {
+            let numeros = cloze_card_numbers(&field_names, &field_values_json)?;
+            if numeros.is_empty() {
+                return Err(Error::Invalid(
+                    "nota cloze precisa de pelo menos uma lacuna {{c1::...}} no primeiro campo; \
+                     nenhuma foi encontrada"
+                        .into(),
+                ));
+            }
+            numeros.into_iter().map(i64::from).collect()
+        } else {
+            let template_total = template_count(&note_type.templates)?;
+            if template_total == 0 {
+                return Err(Error::Invalid(format!(
+                    "tipo de nota \"{}\" não tem nenhum modelo de cartão; não é possível criar cartões",
+                    note_type.name
+                )));
+            }
+            (0..template_total)
+                .map(|ordinal| {
+                    i64::try_from(ordinal).map_err(|_| {
+                        Error::Invalid("tipo de nota tem modelos demais para caber num contador de 64 bits".into())
+                    })
+                })
+                .collect::<Result<Vec<i64>>>()?
+        };
 
         let mut tx = self.pool.begin().await?;
 
@@ -382,7 +495,7 @@ impl NoteRepository {
         .fetch_one(&mut *tx)
         .await?;
 
-        for ordinal in 0..template_total {
+        for ordinal in ordinais {
             insert_card(&mut tx, note_id, ordinal, deck_id, &scheduler).await?;
         }
 
@@ -474,11 +587,20 @@ impl NoteRepository {
             .ok_or_else(|| Error::NotFound(format!("bloco ativo {block_id}")))
     }
 
-    /// Updates a note's field values and tags. Never touches `cards` — see
-    /// this module's doc comment. Rejects a note that is in the trash (an
-    /// update would otherwise silently resurrect its content without
-    /// resurrecting `deleted_at`) and a field-count mismatch, exactly like
-    /// [`create`](Self::create).
+    /// Updates a note's field values and tags. Never touches `cards` FOR UM
+    /// TIPO PADRÃO — ver este módulo's doc comment. Rejects a note that is
+    /// in the trash (an update would otherwise silently resurrect its
+    /// content without resurrecting `deleted_at`) and a field-count
+    /// mismatch, exactly like [`create`](Self::create).
+    ///
+    /// Para um tipo CLOZE, a exceção mínima descrita em "Cloze — a exceção..."
+    /// (comentário de módulo): depois de gravar o novo `field_values`, chama
+    /// [`sync_cloze_cards`] para reconciliar os cartões com as lacunas que o
+    /// texto editado tem agora. `deck_scheduler` é lido ANTES de abrir a
+    /// transação, mesmo padrão de
+    /// [`create_with_source`](Self::create_with_source): um erro de
+    /// validação (nenhuma lacuna no texto editado) precisa acontecer antes de
+    /// qualquer escrita, nunca no meio de uma transação já aberta.
     pub async fn update(&self, note_id: Uuid, field_values: FieldValues, tags: Vec<String>) -> Result<NoteRow> {
         let existing = self.get_active(note_id).await?;
         let note_type = NoteTypeRepository::new(self.pool.clone()).get(existing.note_type_id).await?;
@@ -487,16 +609,38 @@ impl NoteRepository {
         let field_values_json = build_field_values_json(&field_names, &field_values)?;
         let tags_json = JsonValue::Array(tags.into_iter().map(JsonValue::String).collect());
 
+        let cloze_sync = if note_type.kind == NOTE_TYPE_KIND_CLOZE {
+            let numeros = cloze_card_numbers(&field_names, &field_values_json)?;
+            if numeros.is_empty() {
+                return Err(Error::Invalid(
+                    "nota cloze precisa de pelo menos uma lacuna {{c1::...}} no primeiro campo; \
+                     nenhuma foi encontrada"
+                        .into(),
+                ));
+            }
+            let scheduler = self.deck_scheduler(existing.deck_id).await?;
+            Some((numeros, scheduler))
+        } else {
+            None
+        };
+
+        let mut tx = self.pool.begin().await?;
+
         let row = sqlx::query_as::<_, NoteRow>(&format!(
             "UPDATE notes SET field_values = $2, tags = $3 WHERE id = $1 AND deleted_at IS NULL RETURNING {NOTE_COLUMNS}"
         ))
         .bind(note_id.db())
         .bind(&field_values_json)
         .bind(&tags_json)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| Error::NotFound(format!("nota {note_id}")))?;
 
+        if let Some((numeros, scheduler)) = cloze_sync {
+            sync_cloze_cards(&mut tx, note_id, existing.deck_id, &scheduler, &numeros).await?;
+        }
+
+        tx.commit().await?;
         Ok(row)
     }
 
@@ -683,30 +827,25 @@ fn build_field_values_json(field_names: &[String], field_values: &FieldValues) -
     Ok(JsonValue::Object(map))
 }
 
-/// One card for `note_id`'s `ordinal`-th template. Every other column
-/// (`state`, `interval_days`, `ease_factor`, ...) keeps the table's own
-/// `DEFAULT` — a brand-new card always starts in the same "never studied"
-/// state regardless of which template produced it. `scheduler` is the ONE
-/// exception: it is passed in explicitly, already resolved from the deck's
-/// `decks.options` by the caller (`Self::deck_scheduler`), instead of
-/// falling through to the column's own `DEFAULT 'sm2'` — a card created
-/// under a deck configured for FSRS must be born `'fsrs'`, not silently
-/// `'sm2'` until someone remembers to flip it later.
-async fn insert_card(
-    tx: &mut Transaction<'_, Sqlite>,
-    note_id: Uuid,
-    ordinal: usize,
-    deck_id: Uuid,
-    scheduler: &str,
-) -> Result<()> {
-    // `ordinal` never exceeds the note type's own template count (checked by
-    // `template_count` above, and that array's length is bounded by what a
-    // human hand-authors), but rule 3 treats every narrowing numeric
-    // conversion the same regardless of how unlikely overflow is — this
-    // propagates rather than truncating in silence.
-    let ordinal = i64::try_from(ordinal)
-        .map_err(|_| Error::Invalid("tipo de nota tem modelos demais para caber num contador de 64 bits".into()))?;
-
+/// One card for `note_id`'s `ordinal`. O SIGNIFICADO de `ordinal` depende do
+/// `kind` do tipo de nota da nota — índice em `templates` para um tipo
+/// PADRÃO, número de lacuna `cN` para um tipo CLOZE (ver o comentário de
+/// campo de `db::cards::CardRow::template_ordinal` para a decisão completa
+/// de reusar esta coluna em vez de abrir uma nova). Quem chama já converteu
+/// e validou para `i64` ([`NoteRepository::create_with_source`] a partir de
+/// `usize`/`u32`, [`sync_cloze_cards`] a partir de `u32`) — este ponto não
+/// faz mais nenhuma conversão numérica, só grava.
+///
+/// Every other column (`state`, `interval_days`, `ease_factor`, ...) keeps
+/// the table's own `DEFAULT` — a brand-new card always starts in the same
+/// "never studied" state regardless of which template/lacuna produced it.
+/// `scheduler` is the ONE exception: it is passed in explicitly, already
+/// resolved from the deck's `decks.options` by the caller
+/// (`Self::deck_scheduler`), instead of falling through to the column's own
+/// `DEFAULT 'sm2'` — a card created under a deck configured for FSRS must be
+/// born `'fsrs'`, not silently `'sm2'` until someone remembers to flip it
+/// later.
+async fn insert_card(tx: &mut Transaction<'_, Sqlite>, note_id: Uuid, ordinal: i64, deck_id: Uuid, scheduler: &str) -> Result<()> {
     sqlx::query("INSERT INTO cards (id, note_id, template_ordinal, deck_id, scheduler) VALUES ($1, $2, $3, $4, $5)")
         .bind(Uuid::now_v7().db())
         .bind(note_id.db())
@@ -715,6 +854,86 @@ async fn insert_card(
         .bind(scheduler)
         .execute(&mut **tx)
         .await?;
+
+    Ok(())
+}
+
+/// Os números de lacuna do texto de uma nota CLOZE — sempre lidos do
+/// PRIMEIRO campo declarado (ver o comentário de [`CLOZE_NOTE_TYPE_NAME`]
+/// para o porquê de ser por posição, não pelo literal `"Texto"`).
+/// `field_values_json` já passou por [`build_field_values_json`] (toda chave
+/// de `field_names` presente, mesmo que vazia), então não há campo ausente a
+/// tratar aqui — só o caso degenerado de um tipo de nota cloze sem NENHUM
+/// campo declarado, que só um `note_types` corrompido por fora deste crate
+/// produziria.
+fn cloze_card_numbers(field_names: &[String], field_values_json: &JsonValue) -> Result<Vec<u32>> {
+    let Some(primeiro_campo) = field_names.first() else {
+        return Err(Error::Invalid("tipo de nota cloze corrompido: nenhum campo declarado".into()));
+    };
+    let texto = field_values_json.get(primeiro_campo).and_then(JsonValue::as_str).unwrap_or_default();
+    Ok(parse_cloze_numbers(texto))
+}
+
+/// Reconcilia os cartões de uma nota CLOZE com `desejados` — o conjunto de
+/// números de lacuna que o texto editado tem AGORA ([`cloze_card_numbers`]) —
+/// as três perguntas da bar desta peça, nesta ordem:
+///
+/// 1. **lacuna nova** (em `desejados`, sem cartão em `cards` ainda) → cria um
+///    cartão ([`insert_card`], o mesmo caminho que a criação da nota usa —
+///    nasce com o mesmo estado "nunca estudado" e o `scheduler` do baralho
+///    AGORA);
+/// 2. **lacuna que sumiu** (tinha cartão, não está mais em `desejados`) →
+///    SUSPENDE o cartão (`state <> 'suspended'`, mesmo idioma de
+///    [`NoteRepository::delete`]), nunca apaga: apagar cascatearia
+///    `review_log` (`ON DELETE CASCADE`) — a mesma razão pela qual `delete`
+///    já suspende em vez de apagar. Decisão espelhando o próprio Anki, que
+///    avisa em vez de apagar em silêncio ao remover uma lacuna: este
+///    contrato é só backend (sem UI para avisar), então suspender é o
+///    equivalente mudo — o cartão sai da fila de estudo em vez de continuar
+///    perguntando um texto que não existe mais, mas `review_log`,
+///    `interval_days`, `ease_factor` e o estado FSRS continuam intactos;
+/// 3. **lacuna que já tinha cartão E continua em `desejados`** → INTOCADA.
+///    Nem aparece em `novos` nem em `orfaos` abaixo — nenhuma das duas
+///    diferenças de conjunto a contém — e é assim que esta função garante,
+///    POR CONSTRUÇÃO, que um cartão sobrevivente nunca sofre um `UPDATE`
+///    aqui (a prova de que `interval_days`/`ease_factor`/`fsrs_*`/`lapses`/
+///    `reps`/`due` saem idênticos é um teste de banco, não uma inspeção de
+///    código: `update_note_cloze_cartao_que_sobrevive_mantem_agendamento_identico`).
+///
+/// Deliberadamente NÃO reativa um cartão suspenso cujo número reaparece numa
+/// edição seguinte: a suspensão (como a de [`NoteRepository::delete`])
+/// SOBRESCREVE `state` sem guardar o valor anterior (`review`? `learning`?),
+/// então não há para que estado voltar sem inventar um valor. Reativação
+/// fica para quando existir uma tela de edição de cartão — fora do escopo
+/// desta peça.
+async fn sync_cloze_cards(
+    tx: &mut Transaction<'_, Sqlite>,
+    note_id: Uuid,
+    deck_id: Uuid,
+    scheduler: &str,
+    desejados: &[u32],
+) -> Result<()> {
+    let ordinais_existentes: Vec<i64> = sqlx::query_scalar("SELECT template_ordinal FROM cards WHERE note_id = $1")
+        .bind(note_id.db())
+        .fetch_all(&mut **tx)
+        .await?;
+    let existentes: std::collections::HashSet<i64> = ordinais_existentes.into_iter().collect();
+    let desejados: std::collections::HashSet<i64> = desejados.iter().map(|&numero| i64::from(numero)).collect();
+
+    for ordinal in desejados.difference(&existentes) {
+        insert_card(tx, note_id, *ordinal, deck_id, scheduler).await?;
+    }
+
+    for ordinal in existentes.difference(&desejados) {
+        sqlx::query(
+            "UPDATE cards SET state = 'suspended', suspended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+             WHERE note_id = $1 AND template_ordinal = $2 AND state <> 'suspended'",
+        )
+        .bind(note_id.db())
+        .bind(*ordinal)
+        .execute(&mut **tx)
+        .await?;
+    }
 
     Ok(())
 }
@@ -789,7 +1008,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_note_types_seeds_the_three_built_ins_exactly_once() {
+    async fn list_note_types_seeds_the_four_built_ins_exactly_once() {
         let db_path = temp_database_path("seed-default");
         let pool = connect_and_migrate(&db_path).await.unwrap();
         let repo = NoteTypeRepository::new(pool.clone());
@@ -799,18 +1018,28 @@ mod tests {
         nomes.sort_unstable();
         assert_eq!(
             nomes,
-            vec![BASICO_NOTE_TYPE_NAME, DIGITAR_RESPOSTA_NOTE_TYPE_NAME, MULTIPLA_ESCOLHA_NOTE_TYPE_NAME],
-            "instalação nova devia semear os três tipos embutidos"
+            vec![
+                BASICO_NOTE_TYPE_NAME,
+                CLOZE_NOTE_TYPE_NAME,
+                DIGITAR_RESPOSTA_NOTE_TYPE_NAME,
+                MULTIPLA_ESCOLHA_NOTE_TYPE_NAME,
+            ],
+            "instalação nova devia semear os quatro tipos embutidos"
         );
 
-        // Segunda chamada — nenhum `WHERE NOT EXISTS` pode duplicar nenhum dos três.
+        let cloze = first_call.iter().find(|tipo| tipo.name == CLOZE_NOTE_TYPE_NAME).unwrap();
+        assert_eq!(cloze.kind, NOTE_TYPE_KIND_CLOZE, "o tipo Cloze precisa nascer com kind = 'cloze'");
+        let basico = first_call.iter().find(|tipo| tipo.name == BASICO_NOTE_TYPE_NAME).unwrap();
+        assert_eq!(basico.kind, NOTE_TYPE_KIND_STANDARD, "um tipo padrão precisa nascer com kind = 'standard'");
+
+        // Segunda chamada — nenhum `WHERE NOT EXISTS` pode duplicar nenhum dos quatro.
         let second_call = repo.list().await.unwrap();
-        assert_eq!(second_call.len(), 3, "chamar de novo não pode semear nenhum tipo em duplicidade");
+        assert_eq!(second_call.len(), 4, "chamar de novo não pode semear nenhum tipo em duplicidade");
         let mut ids_primeira: Vec<Uuid> = first_call.iter().map(|tipo| tipo.id).collect();
         let mut ids_segunda: Vec<Uuid> = second_call.iter().map(|tipo| tipo.id).collect();
         ids_primeira.sort_unstable();
         ids_segunda.sort_unstable();
-        assert_eq!(ids_primeira, ids_segunda, "os mesmos três ids, não substitutos");
+        assert_eq!(ids_primeira, ids_segunda, "os mesmos quatro ids, não substitutos");
 
         pool.close().await;
         cleanup(&db_path);
@@ -842,11 +1071,13 @@ mod tests {
         let repo = NoteTypeRepository::new(pool.clone());
         let tipos = repo.list().await.unwrap();
 
-        assert_eq!(tipos.len(), 3, "os dois tipos novos precisam ser somados ao Básico legado, não substituí-lo");
+        assert_eq!(tipos.len(), 4, "os três tipos novos precisam ser somados ao Básico legado, não substituí-lo");
         let basico = tipos.iter().find(|tipo| tipo.name == BASICO_NOTE_TYPE_NAME).unwrap();
         assert_eq!(basico.id, id_legado, "o Básico existente não pode ser recriado com um id novo");
+        assert_eq!(basico.kind, NOTE_TYPE_KIND_STANDARD, "kind precisa vir do DEFAULT da coluna para uma linha legada");
         assert!(tipos.iter().any(|tipo| tipo.name == DIGITAR_RESPOSTA_NOTE_TYPE_NAME));
         assert!(tipos.iter().any(|tipo| tipo.name == MULTIPLA_ESCOLHA_NOTE_TYPE_NAME));
+        assert!(tipos.iter().any(|tipo| tipo.name == CLOZE_NOTE_TYPE_NAME));
 
         pool.close().await;
         cleanup(&db_path);
@@ -1154,6 +1385,185 @@ mod tests {
 
         assert!(matches!(repo.list(None, -1, 0).await, Err(Error::Invalid(_))));
         assert!(matches!(repo.list(None, 0, -1).await, Err(Error::Invalid(_))));
+
+        pool.close().await;
+        cleanup(&db_path);
+    }
+
+    // ======================================================================
+    // Cloze — as três perguntas da bar desta peça, cada uma com teste.
+    // ======================================================================
+
+    /// Açúcar de teste: monta `FieldValues` para o tipo "Cloze" (campo
+    /// `Texto`, `Extra` fica vazio).
+    fn cloze_campos(texto: &str) -> FieldValues {
+        campos(&[("Texto", texto)])
+    }
+
+    async fn setup_deck_and_cloze_note_type(pool: &SqlitePool) -> (Uuid, Uuid) {
+        let deck = DeckRepository::new(pool.clone()).create(None, "Cloze").await.unwrap();
+        let cloze = NoteTypeRepository::new(pool.clone())
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|tipo| tipo.name == CLOZE_NOTE_TYPE_NAME)
+            .unwrap();
+        (deck.id, cloze.id)
+    }
+
+    /// Números de lacuna não-contíguos (`c1` e `c5`, sem os do meio) geram
+    /// exatamente dois cartões, um por número — nunca cinco.
+    #[tokio::test]
+    async fn create_note_cloze_gera_um_cartao_por_numero_de_lacuna_e_ordinais_nao_precisam_ser_contiguos() {
+        let db_path = temp_database_path("cloze-create");
+        let pool = connect_and_migrate(&db_path).await.unwrap();
+        let (deck_id, note_type_id) = setup_deck_and_cloze_note_type(&pool).await;
+        let repo = NoteRepository::new(pool.clone());
+
+        let note = repo
+            .create(deck_id, note_type_id, cloze_campos("{{c1::Paris}} é a capital da {{c5::França}}"), vec![])
+            .await
+            .unwrap();
+
+        let mut ordinais: Vec<i64> =
+            sqlx::query_scalar("SELECT template_ordinal FROM cards WHERE note_id = ?").bind(note.id.db()).fetch_all(&pool).await.unwrap();
+        ordinais.sort_unstable();
+        assert_eq!(ordinais, vec![1, 5], "c1 e c5 sem os do meio geram dois cartões, não cinco");
+
+        pool.close().await;
+        cleanup(&db_path);
+    }
+
+    #[tokio::test]
+    async fn create_note_cloze_rejects_texto_sem_nenhuma_lacuna_sem_escrever_nada() {
+        let db_path = temp_database_path("cloze-sem-lacuna");
+        let pool = connect_and_migrate(&db_path).await.unwrap();
+        let (deck_id, note_type_id) = setup_deck_and_cloze_note_type(&pool).await;
+        let repo = NoteRepository::new(pool.clone());
+
+        let result = repo.create(deck_id, note_type_id, cloze_campos("nada de lacuna aqui"), vec![]).await;
+        assert!(matches!(result, Err(Error::Invalid(_))));
+
+        let note_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notes").fetch_one(&pool).await.unwrap();
+        assert_eq!(note_count, 0, "a rejeição precisa acontecer antes de qualquer escrita");
+
+        pool.close().await;
+        cleanup(&db_path);
+    }
+
+    /// Bar, pergunta 1: acrescentar uma lacuna nova numa edição precisa criar
+    /// o cartão correspondente.
+    #[tokio::test]
+    async fn update_note_cloze_acrescentar_lacuna_cria_o_cartao_correspondente() {
+        let db_path = temp_database_path("cloze-update-add");
+        let pool = connect_and_migrate(&db_path).await.unwrap();
+        let (deck_id, note_type_id) = setup_deck_and_cloze_note_type(&pool).await;
+        let repo = NoteRepository::new(pool.clone());
+
+        let note = repo.create(deck_id, note_type_id, cloze_campos("{{c1::a}} e {{c2::b}}"), vec![]).await.unwrap();
+
+        repo.update(note.id, cloze_campos("{{c1::a}} e {{c2::b}} e agora {{c3::c}}"), vec![]).await.unwrap();
+
+        let mut ordinais: Vec<i64> =
+            sqlx::query_scalar("SELECT template_ordinal FROM cards WHERE note_id = ?").bind(note.id.db()).fetch_all(&pool).await.unwrap();
+        ordinais.sort_unstable();
+        assert_eq!(ordinais, vec![1, 2, 3], "a lacuna nova (c3) precisa ganhar um cartão");
+
+        pool.close().await;
+        cleanup(&db_path);
+    }
+
+    /// Bar, pergunta 2: remover uma lacuna orfaniza o cartão — decisão desta
+    /// peça é SUSPENDER (mesmo idioma de `NoteRepository::delete`), nunca
+    /// apagar (apagar cascatearia `review_log`).
+    #[tokio::test]
+    async fn update_note_cloze_remover_lacuna_suspende_o_cartao_orfao_sem_apagar() {
+        let db_path = temp_database_path("cloze-update-remove");
+        let pool = connect_and_migrate(&db_path).await.unwrap();
+        let (deck_id, note_type_id) = setup_deck_and_cloze_note_type(&pool).await;
+        let repo = NoteRepository::new(pool.clone());
+
+        let note = repo.create(deck_id, note_type_id, cloze_campos("{{c1::a}} e {{c2::b}}"), vec![]).await.unwrap();
+
+        repo.update(note.id, cloze_campos("{{c1::a}} só, a segunda lacuna sumiu"), vec![]).await.unwrap();
+
+        let card_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE note_id = ?").bind(note.id.db()).fetch_one(&pool).await.unwrap();
+        assert_eq!(card_count, 2, "o cartão órfão continua existindo — suspender não é apagar");
+
+        let (estado_c2, suspenso_em_c2): (String, Option<String>) = sqlx::query_as(
+            "SELECT state, suspended_at FROM cards WHERE note_id = ? AND template_ordinal = 2",
+        )
+        .bind(note.id.db())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(estado_c2, "suspended", "a lacuna que sumiu do texto precisa sair da fila de estudo");
+        assert!(suspenso_em_c2.is_some());
+
+        let estado_c1: String = sqlx::query_scalar("SELECT state FROM cards WHERE note_id = ? AND template_ordinal = 1")
+            .bind(note.id.db())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(estado_c1, "new", "a lacuna que sobreviveu não pode ser tocada");
+
+        pool.close().await;
+        cleanup(&db_path);
+    }
+
+    /// Bar, pergunta 3 — A NÃO NEGOCIÁVEL: um cartão que sobrevive a uma
+    /// edição mantém `interval_days`/`ease_factor`/`fsrs_stability`/
+    /// `fsrs_difficulty`/`fsrs_last_review_at`/`lapses`/`reps`/`due`
+    /// IDÊNTICOS — relidos direto do banco (não da struct devolvida por
+    /// `update`), exatamente como a bar exige.
+    #[tokio::test]
+    async fn update_note_cloze_cartao_que_sobrevive_mantem_agendamento_identico() {
+        let db_path = temp_database_path("cloze-update-preserves-scheduling");
+        let pool = connect_and_migrate(&db_path).await.unwrap();
+        let (deck_id, note_type_id) = setup_deck_and_cloze_note_type(&pool).await;
+        let repo = NoteRepository::new(pool.clone());
+
+        let note = repo.create(deck_id, note_type_id, cloze_campos("{{c1::a}} e {{c2::b}}"), vec![]).await.unwrap();
+
+        // Simula um cartão já estudado sob FSRS — os mesmos oito campos que a
+        // bar desta peça proíbe uma edição de tocar.
+        sqlx::query(
+            "UPDATE cards SET state = 'review', due = '2026-10-01T00:00:00.000Z', interval_days = 7, \
+                    ease_factor = 260, fsrs_stability = 12.5, fsrs_difficulty = 4.2, \
+                    fsrs_last_review_at = '2026-09-01T00:00:00.000Z', lapses = 1, reps = 3 \
+             WHERE note_id = ? AND template_ordinal = 1",
+        )
+        .bind(note.id.db())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        type ColunasDeAgendamento = (String, Option<String>, i64, i64, Option<f64>, Option<f64>, Option<String>, i64, i64);
+        let consulta_agendamento = "SELECT state, due, interval_days, ease_factor, fsrs_stability, fsrs_difficulty, \
+                    fsrs_last_review_at, lapses, reps \
+             FROM cards WHERE note_id = ? AND template_ordinal = 1";
+
+        let antes: ColunasDeAgendamento =
+            sqlx::query_as(consulta_agendamento).bind(note.id.db()).fetch_one(&pool).await.unwrap();
+
+        // Edição de verdade: troca o conteúdo de c1, ACRESCENTA c3, mantém c2
+        // — não um no-op.
+        repo.update(note.id, cloze_campos("{{c1::a-editado}} e {{c2::b}} e {{c3::c}}"), vec![]).await.unwrap();
+
+        let depois: ColunasDeAgendamento =
+            sqlx::query_as(consulta_agendamento).bind(note.id.db()).fetch_one(&pool).await.unwrap();
+
+        assert_eq!(antes, depois, "editar a nota não pode tocar o agendamento de um cartão que sobrevive");
+
+        // E o cartão novo (c3) nasce com o estado "nunca estudado" de sempre.
+        let estado_c3: String = sqlx::query_scalar("SELECT state FROM cards WHERE note_id = ? AND template_ordinal = 3")
+            .bind(note.id.db())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(estado_c3, "new");
 
         pool.close().await;
         cleanup(&db_path);

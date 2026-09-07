@@ -60,7 +60,7 @@
 //!   row and is untouched, so the relation is a one-way relation from that
 //!   point on with no further write.
 //! - **The last property referencing a relation deleted** — the relation
-//!   and its edges are deleted. Implemented as a Postgres trigger
+//!   and its edges are deleted. Implemented as a SQLite trigger
 //!   (`database_properties_cleanup_relation`, added to
 //!   `0018_database_relations.sql` by this piece) rather than Rust,
 //!   deliberately: `database_properties` has no single owning file the way
@@ -85,6 +85,7 @@ use fractional_index::FractionalIndex;
 use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
 use crate::db::position;
 use crate::error::{Error, Result};
 
@@ -116,8 +117,8 @@ const SYMMETRIC_MAX_POSITION_SQL: &str = "\
 
 const INSERT_EDGE_SQL: &str = "\
     INSERT INTO database_relation_edges \
-        (relation_id, source_record_id, target_record_id, source_position, target_position, is_symmetric) \
-    VALUES ($1, $2, $3, $4, $5, $6)";
+        (id, relation_id, source_record_id, target_record_id, source_position, target_position, is_symmetric) \
+    VALUES ($1, $2, $3, $4, $5, $6, $7)";
 
 const FORWARD_ITEMS_SQL: &str = "\
     SELECT p.id AS record_id, p.title, p.icon \
@@ -173,7 +174,9 @@ const SYMMETRIC_COUNT_SQL: &str = "\
 /// answers both "the page" and "the total" for every owner at once.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct BulkTargetRow {
+    #[sqlx(try_from = "DbId")]
     owner_id: Uuid,
+    #[sqlx(try_from = "DbId")]
     record_id: Uuid,
     title: String,
     icon: Option<String>,
@@ -193,9 +196,9 @@ const FORWARD_BULK_SQL: &str = "\
                count(*) OVER (PARTITION BY e.source_record_id) AS owner_total \
         FROM database_relation_edges e \
         JOIN pages p ON p.id = e.target_record_id \
-        WHERE e.relation_id = $1 AND e.source_record_id = ANY($2) AND p.deleted_at IS NULL \
+        WHERE e.relation_id = ? AND e.source_record_id IN ({ids}) AND p.deleted_at IS NULL \
     ) \
-    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= $3 ORDER BY owner_id, rn";
+    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= ? ORDER BY owner_id, rn";
 
 const REVERSE_BULK_SQL: &str = "\
     WITH ranked AS ( \
@@ -204,28 +207,28 @@ const REVERSE_BULK_SQL: &str = "\
                count(*) OVER (PARTITION BY e.target_record_id) AS owner_total \
         FROM database_relation_edges e \
         JOIN pages p ON p.id = e.source_record_id \
-        WHERE e.relation_id = $1 AND e.target_record_id = ANY($2) AND p.deleted_at IS NULL \
+        WHERE e.relation_id = ? AND e.target_record_id IN ({ids}) AND p.deleted_at IS NULL \
     ) \
-    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= $3 ORDER BY owner_id, rn";
+    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= ? ORDER BY owner_id, rn";
 
 const SYMMETRIC_BULK_SQL: &str = "\
     WITH combined AS ( \
         SELECT e.source_record_id AS owner_id, p.id AS record_id, p.title, p.icon, e.source_position AS ord \
         FROM database_relation_edges e \
         JOIN pages p ON p.id = e.target_record_id \
-        WHERE e.relation_id = $1 AND e.source_record_id = ANY($2) AND p.deleted_at IS NULL \
+        WHERE e.relation_id = ? AND e.source_record_id IN ({ids}) AND p.deleted_at IS NULL \
         UNION ALL \
         SELECT e.target_record_id AS owner_id, p.id AS record_id, p.title, p.icon, e.target_position AS ord \
         FROM database_relation_edges e \
         JOIN pages p ON p.id = e.source_record_id \
-        WHERE e.relation_id = $1 AND e.target_record_id = ANY($2) AND p.deleted_at IS NULL \
+        WHERE e.relation_id = ? AND e.target_record_id IN ({ids}) AND p.deleted_at IS NULL \
     ), ranked AS ( \
         SELECT owner_id, record_id, title, icon, \
                row_number() OVER (PARTITION BY owner_id ORDER BY ord) AS rn, \
                count(*) OVER (PARTITION BY owner_id) AS owner_total \
         FROM combined \
     ) \
-    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= $3 ORDER BY owner_id, rn";
+    SELECT owner_id, record_id, title, icon, owner_total FROM ranked WHERE rn <= ? ORDER BY owner_id, rn";
 
 pub struct RelationRepository {
     pool: SqlitePool,
@@ -256,15 +259,21 @@ impl RelationRepository {
 
         let mut tx = self.pool.begin().await?;
 
+        // O id vem daqui, e não de um default da coluna: a migração para
+        // SQLite tirou `DEFAULT gen_random_uuid()` de toda coluna de id (ver a
+        // tabela de equivalências em `docs/MIGRACAO-SQLITE.md`), então quem
+        // insere é quem gera. `now_v7` mantém a ordenação temporal que o v4
+        // não tinha.
         let relation = sqlx::query_as::<_, RelationDefinitionRow>(
             "INSERT INTO database_relations \
-                 (source_database_id, target_database_id, is_symmetric, source_max_targets, target_max_sources) \
-             VALUES ($1, $2, $3, $4, $5) \
+                 (id, source_database_id, target_database_id, is_symmetric, source_max_targets, target_max_sources) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
              RETURNING id, source_database_id, target_database_id, is_symmetric, \
                        source_max_targets, target_max_sources, created_at, updated_at",
         )
-        .bind(input.source_database_id)
-        .bind(input.target_database_id)
+        .bind(Uuid::now_v7().db())
+        .bind(input.source_database_id.db())
+        .bind(input.target_database_id.db())
         .bind(input.is_symmetric)
         .bind(input.source_max_targets)
         .bind(input.target_max_sources)
@@ -327,7 +336,7 @@ impl RelationRepository {
                 Some(id) => {
                     if let Some(name) = &reciprocal_name {
                         sqlx::query("UPDATE database_properties SET name = $2 WHERE id = $1")
-                            .bind(id)
+                            .bind(id.db())
                             .bind(name)
                             .execute(&mut *tx)
                             .await?;
@@ -393,7 +402,7 @@ impl RelationRepository {
              RETURNING id, source_database_id, target_database_id, is_symmetric, \
                        source_max_targets, target_max_sources, created_at, updated_at",
         )
-        .bind(relation_id)
+        .bind(relation_id.db())
         .bind(source_max_targets)
         .bind(target_max_sources)
         .fetch_one(&self.pool)
@@ -423,15 +432,15 @@ impl RelationRepository {
         };
 
         let items = sqlx::query_as::<_, RelationTargetRow>(items_sql)
-            .bind(relation_id)
-            .bind(record_id)
+            .bind(relation_id.db())
+            .bind(record_id.db())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
             .await?;
 
         let total: i64 =
-            sqlx::query_scalar(count_sql).bind(relation_id).bind(record_id).fetch_one(&self.pool).await?;
+            sqlx::query_scalar(count_sql).bind(relation_id.db()).bind(record_id.db()).fetch_one(&self.pool).await?;
 
         Ok(RelationTargetPage { items, total })
     }
@@ -463,12 +472,26 @@ impl RelationRepository {
             RelationEnd::Symmetric => SYMMETRIC_BULK_SQL,
         };
 
-        let rows = sqlx::query_as::<_, BulkTargetRow>(sql)
-            .bind(relation_id)
-            .bind(&record_ids)
-            .bind(per_record_limit)
-            .fetch_all(&self.pool)
-            .await?;
+        // `= ANY($2)` do Postgres vira `IN (?, ?, ?)`, e com isso os
+        // parâmetros passam a ser posicionais: a ordem de `bind` abaixo é a
+        // ordem em que os `?` aparecem no texto do SQL, não uma numeração.
+        //
+        // O SQL simétrico repete o bloco inteiro num `UNION ALL` (uma aresta
+        // simétrica é gravada uma vez só, com o menor id na origem, então
+        // achá-la exige olhar as duas pontas) — por isso `relation_id` e a
+        // lista de ids são ligados DUAS vezes ali, e uma só nos outros dois.
+        let lista = crate::db::sql::in_placeholders(record_ids.len());
+        let sql = sql.replace("{ids}", &lista);
+        let repeticoes = if matches!(end, RelationEnd::Symmetric) { 2 } else { 1 };
+
+        let mut query = sqlx::query_as::<_, BulkTargetRow>(&sql);
+        for _ in 0..repeticoes {
+            query = query.bind(relation_id.db());
+            for id in &record_ids {
+                query = query.bind(id.db());
+            }
+        }
+        let rows = query.bind(per_record_limit).fetch_all(&self.pool).await?;
 
         let mut by_owner: HashMap<Uuid, (Vec<RelationTargetRow>, i64)> = HashMap::new();
         for row in rows {
@@ -586,29 +609,40 @@ impl RelationRepository {
         }
         let (relation_id, end) = self.property_relation_ref(property_id).await?;
 
+        let lista = crate::db::sql::in_placeholders(dedup_ids.len());
         let sql = match end {
-            RelationEnd::Source => {
+            RelationEnd::Source => format!(
                 "DELETE FROM database_relation_edges \
-                 WHERE relation_id = $1 AND source_record_id = $2 AND target_record_id = ANY($3)"
-            }
-            RelationEnd::Target => {
+                 WHERE relation_id = ? AND source_record_id = ? AND target_record_id IN ({lista})"
+            ),
+            RelationEnd::Target => format!(
                 "DELETE FROM database_relation_edges \
-                 WHERE relation_id = $1 AND target_record_id = $2 AND source_record_id = ANY($3)"
-            }
+                 WHERE relation_id = ? AND target_record_id = ? AND source_record_id IN ({lista})"
+            ),
             // DBS-088: `record_id` may be stored as either end of a
             // normalised edge depending on which uuid is smaller, so both
             // directions have to be tried — exactly one ever matches a
             // given pair, since a symmetric edge is never stored twice.
-            RelationEnd::Symmetric => {
+            RelationEnd::Symmetric => format!(
                 "DELETE FROM database_relation_edges \
-                 WHERE relation_id = $1 AND ( \
-                     (source_record_id = $2 AND target_record_id = ANY($3)) \
-                     OR (target_record_id = $2 AND source_record_id = ANY($3)) \
+                 WHERE relation_id = ? AND ( \
+                     (source_record_id = ? AND target_record_id IN ({lista})) \
+                     OR (target_record_id = ? AND source_record_id IN ({lista})) \
                  )"
-            }
+            ),
         };
 
-        sqlx::query(sql).bind(relation_id).bind(record_id).bind(&dedup_ids).execute(&self.pool).await?;
+        // Ordem posicional, na ordem textual dos `?`: o caso simétrico repete
+        // `record_id` e a lista de ids, porque o SQL dele testa as duas pontas.
+        let mut query = sqlx::query(&sql).bind(relation_id.db());
+        let repeticoes = if matches!(end, RelationEnd::Symmetric) { 2 } else { 1 };
+        for _ in 0..repeticoes {
+            query = query.bind(record_id.db());
+            for id in &dedup_ids {
+                query = query.bind(id.db());
+            }
+        }
+        query.execute(&self.pool).await?;
 
         self.list_relation_targets(record_id, property_id, MAX_PAGE_SIZE, 0).await
     }
@@ -618,7 +652,7 @@ impl RelationRepository {
             "SELECT config ->> 'relationId', config ->> 'end' FROM database_properties \
              WHERE id = $1 AND property_type = 'relation'",
         )
-        .bind(property_id)
+        .bind(property_id.db())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -642,14 +676,16 @@ impl RelationRepository {
                     source_max_targets, target_max_sources, created_at, updated_at \
              FROM database_relations WHERE id = $1",
         )
-        .bind(relation_id)
+        .bind(relation_id.db())
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| Error::NotFound(format!("relação {relation_id}")))
     }
 
     async fn find_property(&self, relation_id: Uuid, end: RelationEnd) -> Result<Option<Uuid>> {
-        sqlx::query_scalar(
+        // Leitura escalar de id: `DbId` primeiro, `Uuid::from` depois (a
+        // ponte de src/db/ids.rs — ver comentário no topo do arquivo).
+        let id: Option<DbId> = sqlx::query_scalar(
             "SELECT id FROM database_properties \
              WHERE property_type = 'relation' AND config ->> 'relationId' = $1 AND config ->> 'end' = $2",
         )
@@ -657,7 +693,8 @@ impl RelationRepository {
         .bind(end.as_str())
         .fetch_optional(&self.pool)
         .await
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+        Ok(id.map(Uuid::from))
     }
 }
 
@@ -720,7 +757,7 @@ fn normalize_pair(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
 async fn next_property_position(tx: &mut Transaction<'_, Sqlite>, database_id: Uuid) -> Result<String> {
     let last: Option<String> =
         sqlx::query_scalar("SELECT position FROM database_properties WHERE database_id = $1 ORDER BY position DESC LIMIT 1")
-            .bind(database_id)
+            .bind(database_id.db())
             .fetch_optional(&mut **tx)
             .await?;
     let last_index = last.as_deref().map(position::parse).transpose()?;
@@ -736,21 +773,26 @@ async fn insert_relation_property(
 ) -> Result<Uuid> {
     let position = next_property_position(tx, database_id).await?;
     let config = serde_json::json!({ "relationId": relation_id, "end": end.as_str() });
-    sqlx::query_scalar(
-        "INSERT INTO database_properties (database_id, name, property_type, config, position) \
-         VALUES ($1, $2, 'relation', $3, $4) RETURNING id",
+    // Id gerado aqui, pelo mesmo motivo do `INSERT` em `create`: nenhuma
+    // coluna de id tem default depois da migração para SQLite.
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO database_properties (id, database_id, name, property_type, config, position) \
+         VALUES ($1, $2, $3, 'relation', $4, $5)",
     )
-    .bind(database_id)
+    .bind(id.db())
+    .bind(database_id.db())
     .bind(name)
     .bind(&config)
     .bind(&position)
-    .fetch_one(&mut **tx)
+    .execute(&mut **tx)
     .await
-    .map_err(Error::from)
+    .map_err(Error::from)?;
+    Ok(id)
 }
 
 async fn delete_property_row(tx: &mut Transaction<'_, Sqlite>, property_id: Uuid) -> Result<()> {
-    sqlx::query("DELETE FROM database_properties WHERE id = $1").bind(property_id).execute(&mut **tx).await?;
+    sqlx::query("DELETE FROM database_properties WHERE id = $1").bind(property_id.db()).execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -767,7 +809,7 @@ async fn delete_my_side(
             "DELETE FROM database_relation_edges WHERE relation_id = $1 AND (source_record_id = $2 OR target_record_id = $2)"
         }
     };
-    sqlx::query(sql).bind(relation_id).bind(record_id).execute(&mut **tx).await?;
+    sqlx::query(sql).bind(relation_id.db()).bind(record_id.db()).execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -777,7 +819,7 @@ async fn next_position(
     relation_id: Uuid,
     record_id: Uuid,
 ) -> Result<String> {
-    let max: Option<String> = sqlx::query_scalar(sql).bind(relation_id).bind(record_id).fetch_one(&mut **tx).await?;
+    let max: Option<String> = sqlx::query_scalar(sql).bind(relation_id.db()).bind(record_id.db()).fetch_one(&mut **tx).await?;
     let parsed = max.as_deref().map(position::parse).transpose()?;
     position::between(parsed.as_ref(), None)
 }
@@ -792,18 +834,20 @@ async fn existing_side_ids(
     record_id: Uuid,
     end: RelationEnd,
 ) -> Result<HashSet<Uuid>> {
-    let rows: Vec<Uuid> = match end {
+    // Leitura escalar de id: `Vec<DbId>` primeiro, `Uuid::from` mapeado
+    // depois (a ponte de src/db/ids.rs — ver comentário no topo do arquivo).
+    let rows: Vec<DbId> = match end {
         RelationEnd::Source => {
             sqlx::query_scalar("SELECT target_record_id FROM database_relation_edges WHERE relation_id = $1 AND source_record_id = $2")
-                .bind(relation_id)
-                .bind(record_id)
+                .bind(relation_id.db())
+                .bind(record_id.db())
                 .fetch_all(&mut **tx)
                 .await?
         }
         RelationEnd::Target => {
             sqlx::query_scalar("SELECT source_record_id FROM database_relation_edges WHERE relation_id = $1 AND target_record_id = $2")
-                .bind(relation_id)
-                .bind(record_id)
+                .bind(relation_id.db())
+                .bind(record_id.db())
                 .fetch_all(&mut **tx)
                 .await?
         }
@@ -811,12 +855,12 @@ async fn existing_side_ids(
             "SELECT CASE WHEN source_record_id = $2 THEN target_record_id ELSE source_record_id END \
              FROM database_relation_edges WHERE relation_id = $1 AND (source_record_id = $2 OR target_record_id = $2)",
         )
-        .bind(relation_id)
-        .bind(record_id)
+        .bind(relation_id.db())
+        .bind(record_id.db())
         .fetch_all(&mut **tx)
         .await?,
     };
-    Ok(rows.into_iter().collect())
+    Ok(rows.into_iter().map(Uuid::from).collect())
 }
 
 /// `record_id`'s current max position on its own side, to resume the
@@ -834,7 +878,7 @@ async fn existing_own_max_index(
         RelationEnd::Target => REVERSE_MAX_POSITION_SQL,
         RelationEnd::Symmetric => SYMMETRIC_MAX_POSITION_SQL,
     };
-    let max: Option<String> = sqlx::query_scalar(sql).bind(relation_id).bind(record_id).fetch_one(&mut **tx).await?;
+    let max: Option<String> = sqlx::query_scalar(sql).bind(relation_id.db()).bind(record_id.db()).fetch_one(&mut **tx).await?;
     max.as_deref().map(position::parse).transpose()
 }
 
@@ -848,9 +892,12 @@ async fn insert_edge(
     is_symmetric: bool,
 ) -> Result<()> {
     sqlx::query(INSERT_EDGE_SQL)
-        .bind(relation_id)
-        .bind(source_record_id)
-        .bind(target_record_id)
+        // Id gerado no Rust: nenhuma coluna de id tem default depois da
+        // migração para SQLite (docs/MIGRACAO-SQLITE.md).
+        .bind(Uuid::now_v7().db())
+        .bind(relation_id.db())
+        .bind(source_record_id.db())
+        .bind(target_record_id.db())
         .bind(source_position)
         .bind(target_position)
         .bind(is_symmetric)

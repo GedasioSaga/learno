@@ -6,6 +6,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db::ids::DbId;
+
 /// A `database_relations` row (`0018_database_relations.sql`) — the vínculo
 /// itself, independent of how many `database_properties` windows currently
 /// show it. `is_symmetric` is DBS-088 (only ever true when
@@ -14,8 +16,11 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationDefinitionRow {
+    #[sqlx(try_from = "DbId")]
     pub id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub source_database_id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub target_database_id: Uuid,
     pub is_symmetric: bool,
     pub source_max_targets: Option<i32>,
@@ -105,6 +110,7 @@ pub struct CreateRelationResult {
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationTargetRow {
+    #[sqlx(try_from = "DbId")]
     pub record_id: Uuid,
     pub title: String,
     pub icon: Option<String>,

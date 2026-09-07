@@ -59,10 +59,14 @@ use serde_json::Value as JsonValue;
 use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
 use crate::error::{Error, Result};
 
-const RECORD_VALUE_COLUMNS: &str =
-    "record_id, property_id, value, sort_num::float8 AS sort_num, sort_text, updated_at";
+// Sem `::float8` no `sort_num`: aquele cast existia porque o Postgres
+// guardava a coluna gerada como `numeric`, e `sqlx` não mapeia `numeric` para
+// `f64` sozinho. No SQLite a coluna já é REAL, então o cast não só é
+// desnecessário como é sintaxe que o SQLite não entende.
+const RECORD_VALUE_COLUMNS: &str = "record_id, property_id, value, sort_num, sort_text, updated_at";
 
 /// One requested write. `value` is exactly what a caller (a cell editor, a
 /// formula cascade, a CSV importer, the future `set_relation_targets`
@@ -79,16 +83,21 @@ pub struct RecordValueChangeInput {
 }
 
 /// Mirrors `RecordValue` in `src/features/databases/contract.ts` field for
-/// field. `sort_num`/`sort_text` are read back through `::float8` in the
-/// query rather than decoded as Postgres `NUMERIC`: the crate has no
-/// `bigdecimal`/`rust_decimal` sqlx feature (rule 2 forbids adding one on a
-/// hunch), and every legitimate `sort_num` value already fits `f64` — it is
-/// either a `boolean` cast to `1`/`0` or a JSON number, never a value wide
-/// enough for the double-precision cast to matter.
+/// field. `sort_num`/`sort_text` are read back as `f64` directly in the
+/// query — SQLite's `REAL` column type maps directly to `f64` without casting,
+/// which explains the comment above (lines 65-68) about why `::float8` was
+/// needed in the Postgres version (numeric type) but is not in SQLite. Every
+/// legitimate `sort_num` value already fits `f64` — it is either a `boolean`
+/// cast to `1`/`0` or a JSON number, never a value wide enough for the
+/// double-precision representation to matter.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordValueRow {
+    // Ponte src/db/ids.rs: colunas TEXT, `Uuid` cru quebraria o decode
+    // contra SQLite (ver o comentário do módulo `ids`).
+    #[sqlx(try_from = "DbId")]
     pub record_id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub property_id: Uuid,
     pub value: JsonValue,
     pub sort_num: Option<f64>,
@@ -222,7 +231,7 @@ fn is_generically_empty(value: &JsonValue) -> bool {
 
 async fn fetch_property_type(tx: &mut Transaction<'_, Sqlite>, property_id: Uuid) -> Result<String> {
     sqlx::query_scalar("SELECT property_type FROM database_properties WHERE id = $1")
-        .bind(property_id)
+        .bind(property_id.db())
         .fetch_optional(&mut **tx)
         .await?
         .ok_or_else(|| Error::NotFound(format!("propriedade {property_id}")))
@@ -235,8 +244,8 @@ async fn fetch_value_row(
 ) -> Result<Option<RecordValueRow>> {
     let sql = format!("SELECT {RECORD_VALUE_COLUMNS} FROM database_record_values WHERE record_id = $1 AND property_id = $2");
     let row = sqlx::query_as::<_, RecordValueRow>(&sql)
-        .bind(record_id)
-        .bind(property_id)
+        .bind(record_id.db())
+        .bind(property_id.db())
         .fetch_optional(&mut **tx)
         .await?;
     Ok(row)
@@ -248,8 +257,8 @@ async fn fetch_value_row(
 /// leans on for its own "maybe already in this state" writes.
 async fn delete_value_row(tx: &mut Transaction<'_, Sqlite>, record_id: Uuid, property_id: Uuid) -> Result<()> {
     sqlx::query("DELETE FROM database_record_values WHERE record_id = $1 AND property_id = $2")
-        .bind(record_id)
-        .bind(property_id)
+        .bind(record_id.db())
+        .bind(property_id.db())
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -271,12 +280,12 @@ async fn upsert_value_row(
 ) -> Result<RecordValueRow> {
     let sql = format!(
         "INSERT INTO database_record_values (record_id, property_id, value) VALUES ($1, $2, $3) \
-         ON CONFLICT ON CONSTRAINT database_record_values_pkey DO UPDATE SET value = EXCLUDED.value \
+         ON CONFLICT (record_id, property_id) DO UPDATE SET value = excluded.value \
          RETURNING {RECORD_VALUE_COLUMNS}"
     );
     let row = sqlx::query_as::<_, RecordValueRow>(&sql)
-        .bind(record_id)
-        .bind(property_id)
+        .bind(record_id.db())
+        .bind(property_id.db())
         .bind(value)
         .fetch_one(&mut **tx)
         .await?;

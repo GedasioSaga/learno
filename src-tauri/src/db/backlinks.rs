@@ -1,5 +1,5 @@
 //! Read side of FUN-044's backlink graph. The graph itself
-//! (`block_page_links`) is a table Postgres keeps in sync via the trigger in
+//! (`block_page_links`) is a table SQLite keeps in sync via the trigger in
 //! `0016_block_page_links.sql`, not something this repository derives or
 //! writes — see that migration's comment for why a trigger, not a step
 //! `db::blocks::BlockRepository` has to remember to run, is what keeps it
@@ -16,6 +16,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
 use crate::error::Result;
 
 /// Max length, in **characters** (not bytes — the text is Portuguese, and a
@@ -55,10 +56,13 @@ pub struct BacklinkRow {
 /// [`truncate_snippet`]) as Rust than as a `substring`/`regexp` expression.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct BacklinkRowRaw {
+    #[sqlx(try_from = "DbId")]
     source_block_id: Uuid,
+    #[sqlx(try_from = "DbId")]
     source_page_id: Uuid,
     source_page_title: String,
     source_plain_text: String,
+    #[sqlx(try_from = "DbId")]
     target_page_id: Uuid,
 }
 
@@ -107,7 +111,9 @@ fn truncate_snippet(text: &str, max_chars: usize) -> String {
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutgoingLinkRow {
+    #[sqlx(try_from = "DbId")]
     pub source_block_id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub target_page_id: Uuid,
     pub target_page_title: String,
 }
@@ -138,7 +144,7 @@ impl BacklinkRepository {
              WHERE l.target_page_id = $1 AND p.deleted_at IS NULL \
              ORDER BY p.title, l.source_block_id",
         )
-        .bind(target_page_id)
+        .bind(target_page_id.db())
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(BacklinkRow::from).collect())
@@ -153,7 +159,7 @@ impl BacklinkRepository {
              WHERE l.source_page_id = $1 AND p.deleted_at IS NULL \
              ORDER BY p.title, l.source_block_id",
         )
-        .bind(source_page_id)
+        .bind(source_page_id.db())
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)

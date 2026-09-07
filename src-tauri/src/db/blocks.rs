@@ -8,7 +8,7 @@
 //! - **Batching** (`apply_changes`): the editor's autosave produces many small
 //!   changes per second while someone types, so every mutating method here
 //!   also has a batch form that runs inside one transaction — one round trip
-//!   to Postgres per keystroke burst, not per keystroke.
+//!   to SQLite per keystroke burst, not per keystroke.
 //! - **Synced blocks** (EDT-073..078): `update` never special-cases this — a
 //!   plain block's `synced_source_id` is `NULL`, so "propagate the patch to
 //!   `synced_source_id`'s copies too" is a no-op update touching zero rows.
@@ -18,7 +18,7 @@
 //!
 //! Backlinks (FUN-044) are deliberately not this file's job — see
 //! `db::backlinks` and `0016_block_page_links.sql`'s trigger for why an edge
-//! table populated by Postgres itself, not a step this repository has to
+//! table populated by SQLite itself, not a step this repository has to
 //! remember to run, is what keeps them correct no matter which code path
 //! writes a block's `content` (this repository's, or `db::pages::duplicate`'s
 //! raw `INSERT`).
@@ -31,6 +31,7 @@ use serde_json::Value as JsonValue;
 use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, DbIdOpt, IdBind};
 use crate::db::position;
 use crate::error::{Error, Result};
 
@@ -52,12 +53,16 @@ const BLOCK_COLUMNS: &str = "id, page_id, parent_block_id, block_type, content, 
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockRow {
+    #[sqlx(try_from = "DbId")]
     pub id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub page_id: Uuid,
+    #[sqlx(try_from = "DbIdOpt")]
     pub parent_block_id: Option<Uuid>,
     pub block_type: String,
     pub content: JsonValue,
     pub plain_text: String,
+    #[sqlx(try_from = "DbIdOpt")]
     pub synced_source_id: Option<Uuid>,
     pub position: String,
     pub created_at: DateTime<Utc>,
@@ -135,26 +140,44 @@ impl BlockRepository {
     /// `PageRepository::list_tree` sorts pages, since sibling `position`
     /// values are only comparable within their own `(page_id,
     /// parent_block_id)` scope and a page can have many separate scopes at
-    /// the same depth. `sort_path`, a materialized array of every ancestor's
-    /// own position down to this block, restores a single total order: array
-    /// comparison in Postgres treats a shorter array that is a prefix of a
-    /// longer one as smaller, so a block's row always sorts immediately
-    /// before its own children.
+    /// the same depth. `sort_path`, o caminho de posições de todo ancestral
+    /// até este bloco, restaura uma ordem total única.
+    ///
+    /// Na versão Postgres o caminho era um ARRAY de texto, e a comparação de
+    /// array trata um array mais curto que é prefixo de outro como menor —
+    /// o que põe o pai imediatamente antes dos filhos dele. SQLite não tem
+    /// array: o caminho vira TEXTO concatenado, e para a comparação de texto
+    /// preservar a mesma ordem o separador precisa ordenar ABAIXO de qualquer
+    /// caractere que possa aparecer numa posição.
+    ///
+    /// Por isso `char(1)` (U+0001) e não `'/'` ou `'.'`: o índice fracionário
+    /// é gerado pelo crate `fractional_index` e este código não deve depender
+    /// de qual alfabeto ele usa hoje. Com U+0001, que é menor que todo
+    /// caractere imprimível, a propriedade vale para qualquer alfabeto que
+    /// ele venha a usar.
+    ///
+    /// O caso que isso protege, e que uma escolha ingênua de separador
+    /// quebraria em silêncio: um bloco de posição "a" com um filho, ao lado
+    /// de um irmão de posição "ab". O filho tem caminho "a\x01…", o irmão tem
+    /// "ab"; como \x01 < 'b', o filho vem antes do irmão — que é a ordem de
+    /// documento correta. Com um separador maior que 'b', o filho apareceria
+    /// DEPOIS do irmão, e o documento do usuário sairia reordenado sem erro
+    /// nenhum.
     pub async fn list_page_blocks(&self, page_id: Uuid) -> Result<Vec<BlockRow>> {
         let sql = format!(
             "WITH RECURSIVE tree AS ( \
-                 SELECT {BLOCK_COLUMNS}, ARRAY[position] AS sort_path \
+                 SELECT {BLOCK_COLUMNS}, position AS sort_path \
                  FROM blocks WHERE page_id = $1 AND parent_block_id IS NULL AND deleted_at IS NULL \
                  UNION ALL \
                  SELECT b.id, b.page_id, b.parent_block_id, b.block_type, b.content, b.plain_text, b.synced_source_id, b.position, b.created_at, b.updated_at, \
-                        t.sort_path || b.position \
+                        t.sort_path || char(1) || b.position \
                  FROM blocks b JOIN tree t ON b.parent_block_id = t.id \
                  WHERE b.deleted_at IS NULL \
              ) \
              SELECT {BLOCK_COLUMNS} FROM tree ORDER BY sort_path"
         );
 
-        let rows = sqlx::query_as::<_, BlockRow>(&sql).bind(page_id).fetch_all(&self.pool).await?;
+        let rows = sqlx::query_as::<_, BlockRow>(&sql).bind(page_id.db()).fetch_all(&self.pool).await?;
         Ok(rows)
     }
 
@@ -175,9 +198,9 @@ impl BlockRepository {
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {BLOCK_COLUMNS}"
         );
         let row = sqlx::query_as::<_, BlockRow>(&sql)
-            .bind(id)
-            .bind(input.placement.page_id)
-            .bind(input.placement.parent_block_id)
+            .bind(id.db())
+            .bind(input.placement.page_id.db())
+            .bind(input.placement.parent_block_id.db())
             .bind(&input.block_type)
             .bind(&input.content)
             .bind(&input.plain_text)
@@ -233,10 +256,7 @@ impl BlockRepository {
         let closure = descendant_closure(&mut tx, &unique_ids).await?;
         reject_synced_originals_with_copies(&mut tx, &closure).await?;
 
-        sqlx::query("UPDATE blocks SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL")
-            .bind(&closure)
-            .execute(&mut *tx)
-            .await?;
+        soft_delete_ids(&mut tx, &closure).await?;
 
         tx.commit().await?;
         Ok(())
@@ -269,9 +289,9 @@ impl BlockRepository {
 
         let sql = format!("UPDATE blocks SET page_id = $2, parent_block_id = $3, position = $4 WHERE id = $1 RETURNING {BLOCK_COLUMNS}");
         let row = sqlx::query_as::<_, BlockRow>(&sql)
-            .bind(id)
-            .bind(placement.page_id)
-            .bind(placement.parent_block_id)
+            .bind(id.db())
+            .bind(placement.page_id.db())
+            .bind(placement.parent_block_id.db())
             .bind(&new_position)
             .fetch_one(&mut *tx)
             .await?;
@@ -319,10 +339,7 @@ impl BlockRepository {
                     ensure_all_active(&mut tx, std::slice::from_ref(&id)).await?;
                     let closure = descendant_closure(&mut tx, std::slice::from_ref(&id)).await?;
                     reject_synced_originals_with_copies(&mut tx, &closure).await?;
-                    sqlx::query("UPDATE blocks SET deleted_at = now() WHERE id = ANY($1) AND deleted_at IS NULL")
-                        .bind(&closure)
-                        .execute(&mut *tx)
-                        .await?;
+                    soft_delete_ids(&mut tx, &closure).await?;
                 }
                 BlockChangeInput::Move { id, placement } => {
                     let current = fetch_active_tx(&mut tx, id).await?;
@@ -339,9 +356,9 @@ impl BlockRepository {
 
                     let sql = format!("UPDATE blocks SET page_id = $2, parent_block_id = $3, position = $4 WHERE id = $1 RETURNING {BLOCK_COLUMNS}");
                     let row = sqlx::query_as::<_, BlockRow>(&sql)
-                        .bind(id)
-                        .bind(placement.page_id)
-                        .bind(placement.parent_block_id)
+                        .bind(id.db())
+                        .bind(placement.page_id.db())
+                        .bind(placement.parent_block_id.db())
                         .bind(&new_position)
                         .fetch_one(&mut *tx)
                         .await?;
@@ -382,13 +399,13 @@ impl BlockRepository {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {BLOCK_COLUMNS}"
         );
         let row = sqlx::query_as::<_, BlockRow>(&sql)
-            .bind(id)
-            .bind(placement.page_id)
-            .bind(placement.parent_block_id)
+            .bind(id.db())
+            .bind(placement.page_id.db())
+            .bind(placement.parent_block_id.db())
             .bind(&canonical.block_type)
             .bind(&canonical.content)
             .bind(&canonical.plain_text)
-            .bind(canonical_id)
+            .bind(canonical_id.db())
             .bind(&new_position)
             .fetch_one(&self.pool)
             .await?;
@@ -403,7 +420,7 @@ impl BlockRepository {
         let row = fetch_active_pool(&self.pool, id).await?;
         let canonical = row.synced_source_id.unwrap_or(row.id);
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM blocks WHERE synced_source_id = $1 AND deleted_at IS NULL")
-            .bind(canonical)
+            .bind(canonical.db())
             .fetch_one(&self.pool)
             .await?;
         Ok(count)
@@ -416,7 +433,7 @@ impl BlockRepository {
             "UPDATE blocks SET synced_source_id = NULL \
              WHERE id = $1 AND deleted_at IS NULL AND synced_source_id IS NOT NULL RETURNING {BLOCK_COLUMNS}"
         );
-        let row = sqlx::query_as::<_, BlockRow>(&sql).bind(id).fetch_optional(&self.pool).await?;
+        let row = sqlx::query_as::<_, BlockRow>(&sql).bind(id.db()).fetch_optional(&self.pool).await?;
 
         match row {
             Some(row) => Ok(row),
@@ -443,7 +460,7 @@ impl BlockRepository {
         let sql = format!(
             "UPDATE blocks SET synced_source_id = NULL WHERE synced_source_id = $1 AND deleted_at IS NULL RETURNING {BLOCK_COLUMNS}"
         );
-        let rows = sqlx::query_as::<_, BlockRow>(&sql).bind(id).fetch_all(&self.pool).await?;
+        let rows = sqlx::query_as::<_, BlockRow>(&sql).bind(id.db()).fetch_all(&self.pool).await?;
         Ok(rows)
     }
 
@@ -463,7 +480,7 @@ impl BlockRepository {
         }
 
         let copy_count: i64 = sqlx::query_scalar("SELECT count(*) FROM blocks WHERE synced_source_id = $1 AND deleted_at IS NULL")
-            .bind(id)
+            .bind(id.db())
             .fetch_one(&self.pool)
             .await?;
 
@@ -473,8 +490,12 @@ impl BlockRepository {
             )));
         }
 
-        sqlx::query("UPDATE blocks SET deleted_at = now() WHERE (id = $1 OR synced_source_id = $1) AND deleted_at IS NULL")
-            .bind(id)
+        sqlx::query(// `$1` aparece duas vezes de propósito: SQLite trata `$1` como parâmetro
+        // NOMEADO, então as duas ocorrências são o mesmo parâmetro e consomem um
+        // único `bind` — verificado, não suposto. É o único lugar do projeto que
+        // reusa um placeholder.
+        "UPDATE blocks SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')          WHERE (id = $1 OR synced_source_id = $1) AND deleted_at IS NULL")
+            .bind(id.db())
             .execute(&self.pool)
             .await?;
 
@@ -517,17 +538,19 @@ async fn active_siblings(
     parent_block_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<(Uuid, String)>> {
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+    // Leitura escalar de par (id, position): DbId no lugar de Uuid, convertido
+    // de volta ao devolver — ver src/db/ids.rs.
+    let rows: Vec<(DbId, String)> = sqlx::query_as(
         "SELECT id, position FROM blocks \
          WHERE page_id = $1 AND parent_block_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL AND id IS DISTINCT FROM $3 \
          ORDER BY position",
     )
-    .bind(page_id)
-    .bind(parent_block_id)
-    .bind(exclude_id)
+    .bind(page_id.db())
+    .bind(parent_block_id.db())
+    .bind(exclude_id.db())
     .fetch_all(pool)
     .await?;
-    Ok(rows)
+    Ok(rows.into_iter().map(|(id, position)| (Uuid::from(id), position)).collect())
 }
 
 async fn active_siblings_tx(
@@ -536,17 +559,17 @@ async fn active_siblings_tx(
     parent_block_id: Option<Uuid>,
     exclude_id: Option<Uuid>,
 ) -> Result<Vec<(Uuid, String)>> {
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+    let rows: Vec<(DbId, String)> = sqlx::query_as(
         "SELECT id, position FROM blocks \
          WHERE page_id = $1 AND parent_block_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL AND id IS DISTINCT FROM $3 \
          ORDER BY position",
     )
-    .bind(page_id)
-    .bind(parent_block_id)
-    .bind(exclude_id)
+    .bind(page_id.db())
+    .bind(parent_block_id.db())
+    .bind(exclude_id.db())
     .fetch_all(&mut **tx)
     .await?;
-    Ok(rows)
+    Ok(rows.into_iter().map(|(id, position)| (Uuid::from(id), position)).collect())
 }
 
 /// A placement's `parent_block_id`, when given, must name a block that is
@@ -557,10 +580,11 @@ async fn validate_parent(pool: &SqlitePool, page_id: Uuid, parent_block_id: Opti
     let Some(parent_id) = parent_block_id else {
         return Ok(());
     };
-    let parent_page: Option<Uuid> = sqlx::query_scalar("SELECT page_id FROM blocks WHERE id = $1 AND deleted_at IS NULL")
-        .bind(parent_id)
+    let parent_page: Option<DbId> = sqlx::query_scalar("SELECT page_id FROM blocks WHERE id = $1 AND deleted_at IS NULL")
+        .bind(parent_id.db())
         .fetch_optional(pool)
         .await?;
+    let parent_page = parent_page.map(Uuid::from);
     match parent_page {
         Some(found) if found == page_id => Ok(()),
         Some(_) => Err(Error::Invalid("bloco pai pertence a outra página".into())),
@@ -572,10 +596,11 @@ async fn validate_parent_tx(tx: &mut Transaction<'_, Sqlite>, page_id: Uuid, par
     let Some(parent_id) = parent_block_id else {
         return Ok(());
     };
-    let parent_page: Option<Uuid> = sqlx::query_scalar("SELECT page_id FROM blocks WHERE id = $1 AND deleted_at IS NULL")
-        .bind(parent_id)
+    let parent_page: Option<DbId> = sqlx::query_scalar("SELECT page_id FROM blocks WHERE id = $1 AND deleted_at IS NULL")
+        .bind(parent_id.db())
         .fetch_optional(&mut **tx)
         .await?;
+    let parent_page = parent_page.map(Uuid::from);
     match parent_page {
         Some(found) if found == page_id => Ok(()),
         Some(_) => Err(Error::Invalid("bloco pai pertence a outra página".into())),
@@ -586,7 +611,7 @@ async fn validate_parent_tx(tx: &mut Transaction<'_, Sqlite>, page_id: Uuid, par
 async fn fetch_active_pool(pool: &SqlitePool, id: Uuid) -> Result<BlockRow> {
     let sql = format!("SELECT {BLOCK_COLUMNS} FROM blocks WHERE id = $1 AND deleted_at IS NULL");
     sqlx::query_as::<_, BlockRow>(&sql)
-        .bind(id)
+        .bind(id.db())
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| Error::NotFound(format!("bloco ativo {id}")))
@@ -595,7 +620,7 @@ async fn fetch_active_pool(pool: &SqlitePool, id: Uuid) -> Result<BlockRow> {
 async fn fetch_active_tx(tx: &mut Transaction<'_, Sqlite>, id: Uuid) -> Result<BlockRow> {
     let sql = format!("SELECT {BLOCK_COLUMNS} FROM blocks WHERE id = $1 AND deleted_at IS NULL");
     sqlx::query_as::<_, BlockRow>(&sql)
-        .bind(id)
+        .bind(id.db())
         .fetch_optional(&mut **tx)
         .await?
         .ok_or_else(|| Error::NotFound(format!("bloco ativo {id}")))
@@ -605,10 +630,17 @@ async fn fetch_active_tx(tx: &mut Transaction<'_, Sqlite>, id: Uuid) -> Result<B
 /// (a bulk delete, a batch change) fails before it changes anything instead
 /// of silently skipping the ones that don't qualify.
 async fn ensure_all_active(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Result<()> {
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM blocks WHERE id = ANY($1) AND deleted_at IS NULL")
-        .bind(ids)
-        .fetch_one(&mut **tx)
-        .await?;
+    // `= ANY($1)` do Postgres vira `IN (?, ?, ?)`: SQLite não tem array, então
+    // a lista é um placeholder por elemento. Ver `db::sql`.
+    let sql = format!(
+        "SELECT count(*) FROM blocks WHERE id IN ({}) AND deleted_at IS NULL",
+        crate::db::sql::in_placeholders(ids.len())
+    );
+    let mut query = sqlx::query_scalar::<_, i64>(&sql);
+    for id in ids {
+        query = query.bind(id.db());
+    }
+    let count: i64 = query.fetch_one(&mut **tx).await?;
     // Widening, not narrowing: `ids.len()` is an in-memory Vec built from one
     // IPC call's payload, so it fits `i64` with enormous room to spare (an
     // actual `usize` that large would have already failed to allocate long
@@ -623,17 +655,44 @@ async fn ensure_all_active(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Re
 /// `ids` plus every live descendant of each, reachable through
 /// `parent_block_id` at any depth.
 async fn descendant_closure(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Result<Vec<Uuid>> {
-    let rows: Vec<(Uuid,)> = sqlx::query_as(
+    let sql = format!(
         "WITH RECURSIVE d AS ( \
-             SELECT id FROM blocks WHERE id = ANY($1) AND deleted_at IS NULL \
+             SELECT id FROM blocks WHERE id IN ({}) AND deleted_at IS NULL \
              UNION ALL \
              SELECT b.id FROM blocks b JOIN d ON b.parent_block_id = d.id WHERE b.deleted_at IS NULL \
          ) SELECT id FROM d",
-    )
-    .bind(ids)
-    .fetch_all(&mut **tx)
-    .await?;
-    Ok(rows.into_iter().map(|(id,)| id).collect())
+        crate::db::sql::in_placeholders(ids.len())
+    );
+    let mut query = sqlx::query_as::<_, (DbId,)>(&sql);
+    for id in ids {
+        query = query.bind(id.db());
+    }
+    let rows = query.fetch_all(&mut **tx).await?;
+    Ok(rows.into_iter().map(|(id,)| Uuid::from(id)).collect())
+}
+
+/// Exclusão lógica de um conjunto de ids, fatiada para caber no teto de
+/// parâmetros de uma consulta SQLite.
+///
+/// Existe porque o mesmo `UPDATE` aparecia em dois lugares e porque a lista
+/// aqui é uma *subárvore* (`descendant_closure`), não a lista que o usuário
+/// mandou: apagar um bloco com muitos descendentes gera facilmente mais ids
+/// do que cabe num statement. No Postgres isso era invisível — um array é um
+/// parâmetro só, de qualquer tamanho.
+async fn soft_delete_ids(tx: &mut Transaction<'_, Sqlite>, ids: &[Uuid]) -> Result<()> {
+    for pedaco in ids.chunks(crate::db::sql::MAX_BIND_PARAMS) {
+        let sql = format!(
+            "UPDATE blocks SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+             WHERE id IN ({}) AND deleted_at IS NULL",
+            crate::db::sql::in_placeholders(pedaco.len())
+        );
+        let mut query = sqlx::query(&sql);
+        for id in pedaco {
+            query = query.bind(id.db());
+        }
+        query.execute(&mut **tx).await?;
+    }
+    Ok(())
 }
 
 /// True when `candidate` is `ancestor` itself or lies anywhere in its live
@@ -648,8 +707,8 @@ async fn is_within_subtree(tx: &mut Transaction<'_, Sqlite>, ancestor: Uuid, can
          ) \
          SELECT EXISTS (SELECT 1 FROM descendants WHERE id = $2)",
     )
-    .bind(ancestor)
-    .bind(candidate)
+    .bind(ancestor.db())
+    .bind(candidate.db())
     .fetch_one(&mut **tx)
     .await?;
     Ok(exists)
@@ -660,15 +719,18 @@ async fn is_within_subtree(tx: &mut Transaction<'_, Sqlite>, ancestor: Uuid, can
 /// that path exists (`delete_synced_original`) instead of this one silently
 /// orphaning copies elsewhere on the workspace.
 async fn reject_synced_originals_with_copies(tx: &mut Transaction<'_, Sqlite>, closure: &[Uuid]) -> Result<()> {
-    let has_offender: bool = sqlx::query_scalar(
+    let sql = format!(
         "SELECT EXISTS ( \
-             SELECT 1 FROM blocks o WHERE o.id = ANY($1) AND o.deleted_at IS NULL \
+             SELECT 1 FROM blocks o WHERE o.id IN ({}) AND o.deleted_at IS NULL \
                AND EXISTS (SELECT 1 FROM blocks c WHERE c.synced_source_id = o.id AND c.deleted_at IS NULL) \
          )",
-    )
-    .bind(closure)
-    .fetch_one(&mut **tx)
-    .await?;
+        crate::db::sql::in_placeholders(closure.len())
+    );
+    let mut query = sqlx::query_scalar::<_, bool>(&sql);
+    for id in closure {
+        query = query.bind(id.db());
+    }
+    let has_offender: bool = query.fetch_one(&mut **tx).await?;
 
     if has_offender {
         return Err(Error::Invalid(
@@ -691,8 +753,8 @@ async fn cascade_page_id(tx: &mut Transaction<'_, Sqlite>, moved_block_id: Uuid,
          ) \
          UPDATE blocks SET page_id = $2 WHERE id IN (SELECT id FROM d)",
     )
-    .bind(moved_block_id)
-    .bind(new_page_id)
+    .bind(moved_block_id.db())
+    .bind(new_page_id.db())
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -707,7 +769,7 @@ async fn apply_patch(tx: &mut Transaction<'_, Sqlite>, id: Uuid, patch: &BlockPa
         "UPDATE blocks SET block_type = COALESCE($2, block_type), content = COALESCE($3, content), plain_text = COALESCE($4, plain_text) \
          WHERE id = $1 AND deleted_at IS NULL",
     )
-    .bind(id)
+    .bind(id.db())
     .bind(&patch.block_type)
     .bind(&patch.content)
     .bind(&patch.plain_text)
@@ -724,7 +786,7 @@ async fn apply_patch_to_copies(tx: &mut Transaction<'_, Sqlite>, canonical_id: U
         "UPDATE blocks SET block_type = COALESCE($2, block_type), content = COALESCE($3, content), plain_text = COALESCE($4, plain_text) \
          WHERE synced_source_id = $1 AND deleted_at IS NULL",
     )
-    .bind(canonical_id)
+    .bind(canonical_id.db())
     .bind(&patch.block_type)
     .bind(&patch.content)
     .bind(&patch.plain_text)
@@ -745,9 +807,9 @@ async fn create_in_tx(tx: &mut Transaction<'_, Sqlite>, input: NewBlockInput) ->
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {BLOCK_COLUMNS}"
     );
     let row = sqlx::query_as::<_, BlockRow>(&sql)
-        .bind(id)
-        .bind(input.placement.page_id)
-        .bind(input.placement.parent_block_id)
+        .bind(id.db())
+        .bind(input.placement.page_id.db())
+        .bind(input.placement.parent_block_id.db())
         .bind(&input.block_type)
         .bind(&input.content)
         .bind(&input.plain_text)

@@ -12,6 +12,7 @@ use serde::Serialize;
 use sqlx::{SqlitePool, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
 use crate::error::{Error, Result};
 
 /// Why a given [`PageVersionRow`] was captured — matches the `reason` CHECK
@@ -38,7 +39,9 @@ impl SnapshotReason {
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct PageVersionRow {
+    #[sqlx(try_from = "DbId")]
     pub id: Uuid,
+    #[sqlx(try_from = "DbId")]
     pub page_id: Uuid,
     pub title: String,
     pub content: serde_json::Value,
@@ -71,12 +74,21 @@ impl PageVersionRepository {
     }
 
     /// FUN-035: newest snapshot first.
+    ///
+    /// `rowid` como desempate não é enfeite: `created_at` é TEXT com precisão
+    /// de milissegundo (`strftime('%Y-%m-%dT%H:%M:%fZ')`), e dois snapshots do
+    /// mesmo milissegundo — um autosave logo antes de um "restaurar", por
+    /// exemplo — empatam. Sem desempate, "mais novo primeiro" vira ordem
+    /// indefinida justamente no par que o usuário mais olha. `rowid` é a ordem
+    /// de inserção do SQLite, monotônica e nunca reutilizada dentro da tabela,
+    /// então empate resolve pelo que entrou depois. No Postgres o problema não
+    /// aparecia: `now()` tem precisão de microssegundo.
     pub async fn list(&self, page_id: Uuid) -> Result<Vec<PageVersionRow>> {
         let rows = sqlx::query_as::<_, PageVersionRow>(
             "SELECT id, page_id, title, content, reason, created_at \
-             FROM page_versions WHERE page_id = $1 ORDER BY created_at DESC",
+             FROM page_versions WHERE page_id = $1 ORDER BY created_at DESC, rowid DESC",
         )
-        .bind(page_id)
+        .bind(page_id.db())
         .fetch_all(&self.pool)
         .await?;
 
@@ -99,14 +111,14 @@ impl PageVersionRepository {
             "SELECT id, page_id, title, content, reason, created_at \
              FROM page_versions WHERE id = $1 AND page_id = $2",
         )
-        .bind(version_id)
-        .bind(page_id)
+        .bind(version_id.db())
+        .bind(page_id.db())
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| Error::NotFound(format!("versão {version_id} da página {page_id}")))?;
 
         let updated = sqlx::query("UPDATE pages SET title = $2 WHERE id = $1 AND deleted_at IS NULL")
-            .bind(page_id)
+            .bind(page_id.db())
             .bind(&version.title)
             .execute(&mut *tx)
             .await?;
@@ -146,8 +158,8 @@ async fn insert_snapshot(
         "INSERT INTO page_versions (id, page_id, title, content, reason) VALUES ($1, $2, $3, $4, $5) \
          RETURNING id, page_id, title, content, reason, created_at",
     )
-    .bind(id)
-    .bind(page_id)
+    .bind(id.db())
+    .bind(page_id.db())
     .bind(title)
     .bind(content)
     .bind(reason.as_db_str())

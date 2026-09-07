@@ -6,6 +6,7 @@ import { formatarIntervalo, preverIntervaloDias } from "./previsao";
 import { ProcedenciaDoCartao } from "./ProcedenciaDoCartao";
 import { RespostaDigitada } from "./RespostaDigitada";
 import { useCartoesStore } from "./store";
+import { TextoComLacuna, textoDaLacunaParaVoz } from "./TextoComLacuna";
 
 /** Nomes exatos semeados em `src-tauri/src/db/notes.rs` — comparação por nome, nunca por posição. */
 const NOME_TIPO_DIGITAR_RESPOSTA = "Digitar a resposta";
@@ -215,7 +216,26 @@ export function EstudoSessao() {
   const verso = ehMultiplaEscolha
     ? [{ nome: "Correta", valor: correta }]
     : camposRestantes.map((nome) => ({ nome, valor: atual.fields[nome] ?? "" }));
-  const versoTexto = verso.map(({ valor }) => valor).join(". ");
+
+  // Cloze é o primeiro tipo em que o CONTEÚDO do campo decide o que aparece,
+  // e o discriminador é `atual.cloze`, não o nome nem o `kind` da store: o
+  // backend só preenche esse campo quando `note_types.kind = 'cloze'` — a
+  // mesma coluna que `NoteTypeRow.kind` espelha — e ele chega JUNTO com o
+  // cartão, então não existe a janela de corrida que os dois tipos acima
+  // tiveram. O parser de `{{cN::...}}` mora só no Rust (`db::cloze`); aqui
+  // ninguém interpreta marcação, só percorre a lista pronta.
+  //
+  // O "Extra" é o resto da ordem (tudo depois do primeiro campo), por posição,
+  // como `notes.rs` documenta — o nome pode mudar, a posição não.
+  const segmentosCloze = atual.cloze;
+  const extraCloze = camposRestantes
+    .map((nome) => atual.fields[nome] ?? "")
+    .filter((valor) => valor.trim() !== "")
+    .join("\n");
+  const frenteFalada = segmentosCloze ? textoDaLacunaParaVoz(segmentosCloze, false) : frente;
+  const versoTexto = segmentosCloze
+    ? [textoDaLacunaParaVoz(segmentosCloze, true), extraCloze].filter((texto) => texto !== "").join(". ")
+    : verso.map(({ valor }) => valor).join(". ");
 
   return (
     <div className="flex h-full flex-col">
@@ -230,13 +250,22 @@ export function EstudoSessao() {
 
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-6 py-8">
         <div className="w-full max-w-2xl rounded-md border border-border bg-surface p-8 text-center shadow-hard-sm">
-          <p className="whitespace-pre-wrap text-lg text-ink">{frente || "(sem conteúdo)"}</p>
+          {segmentosCloze ? (
+            <TextoComLacuna
+              segmentos={segmentosCloze}
+              numeroDaLacuna={atual.card.templateOrdinal}
+              revelado={revelado}
+              extra={extraCloze}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap text-lg text-ink">{frente || "(sem conteúdo)"}</p>
+          )}
 
           <div className="mt-3">
             <ProcedenciaDoCartao note={atual.note} />
           </div>
 
-          {revelado ? (
+          {revelado && !segmentosCloze ? (
             <div className="mt-6 border-t border-hairline pt-6 text-left">
               {verso.map(({ nome, valor }) => (
                 <div key={nome} className="mb-3 last:mb-0">
@@ -248,7 +277,7 @@ export function EstudoSessao() {
           ) : null}
         </div>
 
-        <LeitorDeVoz deckId={atual.note.deckId} cartaoId={atual.card.id} frente={frente} verso={versoTexto} revelado={revelado} />
+        <LeitorDeVoz deckId={atual.note.deckId} cartaoId={atual.card.id} frente={frenteFalada} verso={versoTexto} revelado={revelado} />
 
         {ehDigitarResposta ? (
           <div className="w-full max-w-2xl">

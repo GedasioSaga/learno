@@ -214,6 +214,105 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Cloze (07/09/2026) — o tipo de cartão que a tese do produto exige
+
+A tese, no topo deste documento: *"o flashcard nasce dentro da nota. Selecionar um trecho
+cria um card"*. Cloze é **exatamente** o tipo que nasce desse gesto — o usuário marca a parte
+que quer esconder, no lugar onde ela já está escrita. Sem cloze, o gesto central do produto
+só produzia frente/verso. E é o tipo mais usado do Anki: quem vem de lá e não o encontra
+conclui que o app não serve para o que ele faz.
+
+Bar: Anki. `{{c1::texto}}` e `{{c1::texto::dica}}`; números diferentes geram cartões
+diferentes; o mesmo número duas vezes esconde as duas ocorrências **no mesmo cartão**;
+números não precisam ser contíguos; lacunas não precisam cair em fronteira de palavra.
+
+**O trabalho de verdade não foi o parser — foi que cloze briga com o modelo de cartões
+deste projeto.** Cada entrada de `note_types.templates` gerava exatamente um cartão, na
+criação, e `NoteRepository::update` **nunca** tocava `cards`, deliberadamente, para não
+apagar intervalo, ease e estado FSRS que o `review_log` construiu. Cloze inverte isso: o
+número de cartões depende do **conteúdo do campo**, e editar o texto muda esse número nos
+dois sentidos.
+
+As três respostas, cada uma com teste:
+
+- **Acrescentar** uma lacuna cria o cartão correspondente — senão ela existe no texto e nunca
+  é estudada.
+- **Remover** uma lacuna **suspende** o cartão órfão, nunca apaga. É o mesmo idioma que
+  `NoteRepository::delete` já usa (`state = 'suspended'`), e preserva `review_log` e FSRS.
+  Documentado que não reativa sozinho se a lacuna voltar: a suspensão sobrescreve `state` sem
+  guardar o valor anterior, então não há para onde voltar sem inventar.
+- **Sobreviver** a uma edição mantém `interval_days`, `ease_factor`, `fsrs_stability`,
+  `fsrs_difficulty`, `fsrs_last_review_at`, `lapses`, `reps` e `due` **idênticos** — provado
+  por teste que edita a nota de verdade (troca o conteúdo de `c1`, acrescenta `c3`, mantém
+  `c2`) e **relê as colunas do banco**, não a struct devolvida.
+
+Duas decisões de modelagem, ambas com o porquê no código:
+
+- **`note_types.kind`** (migração `0040`, `"standard"` | `"cloze"`) em vez de comparar
+  `name == "Cloze"`. Os três tipos antigos são distinguidos por nome só para **semear**;
+  cloze precisa disso para decidir **comportamento de escrita** — todo o caminho de geração
+  de cartão bifurca ali. Amarrar isso ao rótulo de exibição quebraria em silêncio no dia em
+  que renomear tipo de nota existir. É onde o próprio Anki guarda (`notetypes.config.kind`).
+- **`cards.template_ordinal` reusado** para carregar o número da lacuna, em vez de coluna
+  nova. O `UNIQUE (note_id, template_ordinal)` que já existe é exatamente a garantia que
+  cloze precisa — a lacuna N não pode ter dois cartões — e uma coluna dedicada teria que
+  reconstruir essa restrição do zero. O campo em `CardRow` documenta os dois significados.
+
+O parser (`src-tauri/src/db/cloze.rs`) é **total**: qualquer desvio de gramática recua um
+caractere e trata como literal, o que garante terminação. Testado contra `{{c1::` sem fechar,
+`{{c0::}}`, número grande demais para caber, texto vazio, `::` sobrando, chaves
+desbalanceadas dos dois lados, aninhamento, e 200 aberturas seguidas sem fechar — este
+último é regressão de laço infinito. Uma nota malformada não pode derrubar a sessão de
+estudo.
+
+A trava de contrato fez o trabalho dela: `NoteTypeRow` ganhou `kind` no Rust e
+`contrato-ipc.test.ts` ficou vermelha com `enviados pelo Rust e ausentes de ipc.ts: kind`.
+Depois de declarar o campo, o `tsc` apontou **nove fixtures de teste** que montavam
+`NoteTypeRow` sem ele. Vale registrar que o **vitest passou verde durante todo esse
+intervalo** — ele não faz checagem de tipo. É a razão de o portão ter os dois.
+
+Portão desta rodada:
+
+- `cargo clippy --all-targets --all-features -- -D warnings -W clippy::unwrap_used
+  -W clippy::expect_used`: **exit 0**.
+- `cargo test --jobs 2`: **853 testes, 0 falhas**, sem quebrar nada de `notes`, `cards` ou
+  `srs`.
+- `rtk proxy npx tsc --noEmit`: **exit 0**.
+- `rtk proxy npx vitest run`: **2011 testes em 212 arquivos**, três travas verdes.
+
+**Cloze aparece na tela, e a decisão de onde mora o parser tem argumento melhor do que o
+que eu tinha.** A pergunta era: reimplementar a gramática em TypeScript (duas gramáticas
+divergindo em silêncio) ou o backend mandar a string já renderizada? Ambas foram rejeitadas,
+e a segunda pelo motivo que só aparece quando se pensa no que a TELA precisa fazer: para
+**destacar** a lacuna, o TypeScript teria que procurar `[...]` dentro do texto — uma segunda
+gramática disfarçada, e ambígua, porque colchete é texto legítimo numa nota.
+
+A saída adotada: o backend manda **`Vec<ClozeSegment { text, hidden, hint }>`**, e o
+TypeScript só percorre a lista escolhendo o `<span>`. Zero interpretação do lado da tela. E
+`render_cloze` foi reescrita **por cima** de `segment_cloze`, com um teste que cruza as duas
+em todos os casos hostis — então elas não podem discordar.
+
+`CardToStudy` ganhou `cloze: Option<Vec<ClozeSegment>>`, e a trava de contrato cobrou o
+campo novo na fixture de `EstudoSessao.test.tsx`, como deveria.
+
+Na tela: a lacuna é um campo âmbar com linha de base, largura mínima para não sumir quando
+vazia, e a dica em itálico dentro dela quando existe. **O texto escondido não entra no
+DOM** — não é escondido por CSS, e há teste para isso. Um cartão que aponta para uma lacuna
+que o texto não tem mostra o texto inteiro mais um aviso, com os botões ainda funcionando:
+uma nota quebrada faz perder o cartão, não o app. Âmbar foi a única família que passou nos
+cinco temas em texto corrido.
+
+Sem animação ao revelar, por regra: é ação de alta frequência e, pelo espaço, iniciada por
+teclado.
+
+**Contexto sobre importação, verificado:** `sidecar/learno_sidecar/handlers/apkg.py` é um
+**stub declarado** — ele confirma que o arquivo é um zip válido e devolve
+`notes_imported: 0`, sempre, para qualquer `.apkg`. Isso está escrito no docstring do
+próprio arquivo, num comentário de `ImportApkgSection.tsx`, e chega ao usuário como
+`"arquivo.apkg": 0 nota(s) importada(s)`. É dívida honesta, não engano. A consequência para
+cloze é que **não existe caminho de importação nenhum**: o tipo serve só para notas criadas
+dentro do Learno.
+
 ### Menu de coluna (07/09/2026) — cinco comandos saem da dívida de uma vez
 
 O cabeçalho de coluna de uma database **não tinha menu nenhum**, e era só por isso que

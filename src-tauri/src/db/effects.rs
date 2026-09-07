@@ -52,6 +52,7 @@ use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, IdBind};
 use crate::db::position;
 use crate::db::record_values::{AppliedRecordValue, RecordValueChangeInput, RecordValueRepository};
 use crate::error::{Error, Result};
@@ -232,6 +233,9 @@ pub struct EffectOutcome {
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct PropertyMeta {
+    // Ponte src/db/ids.rs: coluna TEXT, `Uuid` cru quebraria o bind/decode
+    // contra SQLite (ver o comentário do módulo `ids`).
+    #[sqlx(try_from = "DbId")]
     id: Uuid,
     property_type: String,
     config: JsonValue,
@@ -320,7 +324,7 @@ impl EffectRepository {
 
         if let Some(database_id) = effect.create_in {
             let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM databases WHERE id = $1)")
-                .bind(database_id)
+                .bind(database_id.db())
                 .fetch_one(&self.pool)
                 .await?;
             if !exists {
@@ -338,7 +342,7 @@ impl EffectRepository {
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM pages WHERE id = $1 AND is_template = true AND deleted_at IS NULL)",
             )
-            .bind(template_id)
+            .bind(template_id.db())
             .fetch_one(&self.pool)
             .await?;
             if !exists {
@@ -458,7 +462,7 @@ impl EffectRepository {
             "SELECT position FROM pages WHERE database_id = $1 AND parent_id IS NULL AND deleted_at IS NULL \
              ORDER BY position DESC LIMIT 1",
         )
-        .bind(database_id)
+        .bind(database_id.db())
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -472,8 +476,8 @@ impl EffectRepository {
 
         let id = Uuid::now_v7();
         sqlx::query("INSERT INTO pages (id, database_id, parent_id, title, position) VALUES ($1, $2, NULL, '', $3)")
-            .bind(id)
-            .bind(database_id)
+            .bind(id.db())
+            .bind(database_id.db())
             .bind(&new_position)
             .execute(&mut *tx)
             .await?;
@@ -643,11 +647,15 @@ impl EffectRepository {
         if property_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows: Vec<PropertyMeta> =
-            sqlx::query_as("SELECT id, property_type, config FROM database_properties WHERE id = ANY($1)")
-                .bind(property_ids)
-                .fetch_all(&self.pool)
-                .await?;
+        let sql = format!(
+            "SELECT id, property_type, config FROM database_properties WHERE id IN ({})",
+            crate::db::sql::in_placeholders(property_ids.len())
+        );
+        let mut query = sqlx::query_as::<_, PropertyMeta>(&sql);
+        for id in property_ids {
+            query = query.bind(id.db());
+        }
+        let rows: Vec<PropertyMeta> = query.fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|row| (row.id, row)).collect())
     }
 
@@ -665,14 +673,19 @@ impl EffectRepository {
         if property_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows: Vec<(Uuid, JsonValue)> = sqlx::query_as(
-            "SELECT property_id, value FROM database_record_values WHERE record_id = $1 AND property_id = ANY($2)",
-        )
-        .bind(record_id)
-        .bind(property_ids)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows.into_iter().collect())
+        let sql = format!(
+            "SELECT property_id, value FROM database_record_values WHERE record_id = ? AND property_id IN ({})",
+            crate::db::sql::in_placeholders(property_ids.len())
+        );
+        // Ponte src/db/ids.rs: lê como `DbId` (TEXT) e converte para `Uuid`
+        // depois — a coluna `property_id` é TEXT, e `Uuid` cru quebraria o
+        // decode.
+        let mut query = sqlx::query_as::<_, (DbId, JsonValue)>(&sql).bind(record_id.db());
+        for id in property_ids {
+            query = query.bind(id.db());
+        }
+        let rows: Vec<(DbId, JsonValue)> = query.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(id, value)| (Uuid::from(id), value)).collect())
     }
 }
 

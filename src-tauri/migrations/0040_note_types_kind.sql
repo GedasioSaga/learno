@@ -1,0 +1,25 @@
+-- Cloze (cartão de lacuna) precisa de um discriminador real de tipo de nota:
+-- ao contrário dos três tipos embutidos anteriores (Básico, Digitar a
+-- resposta, Múltipla escolha), o NÚMERO DE CARTÕES de uma nota cloze depende
+-- do CONTEÚDO do campo (quantas lacunas {{cN::...}} o texto tem), não da
+-- contagem de `note_types.templates` — ver o comentário de módulo de
+-- `db::notes` e `db::cloze`.
+--
+-- Por que uma COLUNA, e não só comparar `note_types.name = 'Cloze'`: os três
+-- tipos embutidos já são distinguidos por NOME, mas só para SEMEAR
+-- (`NoteTypeRepository::ensure_default`) — nenhum deles muda como
+-- `create`/`update` escrevem `cards`. Cloze muda: o caminho de geração de
+-- cartão inteiro bifurca com base nisso. Decidir essa bifurcação comparando
+-- `name` amarraria COMPORTAMENTO DE ESCRITA a RÓTULO DE EXIBIÇÃO — o dia em
+-- que existir uma tela de renomear tipo de nota, renomear "Cloze" quebraria
+-- a geração de cartão em silêncio. `kind` é a mesma escolha que o próprio
+-- Anki faz internamente (`notetypes.config.kind`: Normal | Cloze) — um
+-- discriminador que sobrevive a qualquer nome de exibição.
+--
+-- `NOT NULL DEFAULT 'standard'` com literal constante (não uma expressão)
+-- satisfaz a exigência do SQLite para `ADD COLUMN ... NOT NULL` sem
+-- reconstruir a tabela (mesma técnica de `library_books.position` em
+-- `0037_livro_titulo_autor_ordem.sql`) — e 'standard' é o valor CORRETO para
+-- todo tipo de nota que já existe hoje: nenhum banco tinha tipo cloze antes
+-- desta peça, então toda linha existente é, de fato, um tipo padrão.
+ALTER TABLE note_types ADD COLUMN kind TEXT NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard', 'cloze'));

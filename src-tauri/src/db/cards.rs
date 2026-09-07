@@ -56,8 +56,9 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
 use crate::db::gamificacao::{GamificacaoRepository, XP_POR_REVISAO_CARTAO};
+use crate::db::cloze::{segment_cloze, ClozeSegment};
 use crate::db::ids::{DbId, IdBind};
-use crate::db::notes::NoteRow;
+use crate::db::notes::{NoteRow, NOTE_TYPE_KIND_CLOZE};
 use crate::error::{Error, Result};
 use crate::srs::{fsrs, Agendador, Avaliacao, EstadoDoCartao, Fase, OpcoesDeDeck};
 
@@ -85,6 +86,28 @@ pub struct CardRow {
     pub id: Uuid,
     #[sqlx(try_from = "DbId")]
     pub note_id: Uuid,
+    /// Índice em `note_types.templates` para um tipo de nota PADRÃO
+    /// (`note_types.kind = 'standard'`); NÚMERO DE LACUNA `cN` para um tipo
+    /// CLOZE (`kind = 'cloze'`, `{{cN::texto}}` — ver `db::cloze`). O mesmo
+    /// campo, dois significados — nunca ambíguo por LINHA, porque todo
+    /// cartão pertence a exatamente uma nota, que pertence a exatamente um
+    /// tipo de nota, cujo `kind` é fixo: quem lê este valor sempre sabe qual
+    /// dos dois está vendo consultando `note_types.kind` daquela nota.
+    ///
+    /// DECISÃO — reusar em vez de abrir uma coluna nova
+    /// (`cloze_number`, digamos): `UNIQUE (note_id, template_ordinal)`
+    /// (`0011_notes_cards.sql`) já impede duas linhas para o mesmo (nota,
+    /// ordinal) — exatamente a garantia que cloze também precisa (a lacuna
+    /// número N nunca pode ter dois cartões). Uma coluna dedicada teria que
+    /// reconstruir essa MESMA restrição do zero (uma segunda `UNIQUE`
+    /// condicional, só quando o tipo é cloze); reusar herda a garantia de
+    /// graça, sem migração de schema nenhuma além de `note_types.kind`
+    /// (`0040_note_types_kind.sql`). O custo aceito: quem ler
+    /// `template_ordinal` sem ver este comentário vê só um inteiro sem
+    /// contexto — por isso ele mora aqui, no ÚNICO lugar onde toda leitura
+    /// de `CardRow` passa, e não só em `db::notes` (que grava, mas não é o
+    /// único módulo que lê este campo — este arquivo também lê, em
+    /// `CardToStudy`).
     pub template_ordinal: i64,
     #[sqlx(try_from = "DbId")]
     pub deck_id: Uuid,
@@ -127,6 +150,19 @@ pub struct CardToStudy {
     /// a ordem. Os dois vêm da mesma passada, então não podem discordar.
     pub field_names: Vec<String>,
     pub deck_name: String,
+    /// `Some` se e só se o tipo da nota é cloze (`note_types.kind =
+    /// 'cloze'`): o primeiro campo (`field_names[0]`, a marcação
+    /// `{{cN::...}}`) já quebrado em segmentos para a lacuna deste cartão
+    /// (`card.template_ordinal`, que para cloze É o número da lacuna — ver
+    /// [`CardRow::template_ordinal`]). `None` para todo tipo padrão.
+    ///
+    /// É o backend que renderiza, de propósito — a decisão "uma gramática
+    /// só" está documentada no topo de `db::cloze`. A tela não interpreta
+    /// `{{...}}`; ela lê esta lista. Para o TypeScript, `Some` é o
+    /// discriminador de "este cartão é cloze": vem da mesma coluna `kind`
+    /// que a store carrega, mas chega JUNTO com o cartão, sem a janela de
+    /// corrida entre `nextCard` e `listNoteTypes`.
+    pub cloze: Option<Vec<ClozeSegment>>,
 }
 
 /// `deck_counts()` do contrato de IPC.
@@ -695,11 +731,12 @@ impl CardRepository {
         .await?
         .ok_or_else(|| Error::NotFound(format!("nota {} do cartão {}", card.note_id, card.id)))?;
 
-        let nomes_dos_campos: serde_json::Value = sqlx::query_scalar("SELECT fields FROM note_types WHERE id = $1")
-            .bind(note.note_type_id.db())
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| Error::NotFound(format!("tipo de nota {}", note.note_type_id)))?;
+        let (nomes_dos_campos, kind): (serde_json::Value, String) =
+            sqlx::query_as("SELECT fields, kind FROM note_types WHERE id = $1")
+                .bind(note.note_type_id.db())
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| Error::NotFound(format!("tipo de nota {}", note.note_type_id)))?;
 
         let deck_name: String = sqlx::query_scalar("SELECT name FROM decks WHERE id = $1")
             .bind(card.deck_id.db())
@@ -708,8 +745,84 @@ impl CardRepository {
             .ok_or_else(|| Error::NotFound(format!("baralho {}", card.deck_id)))?;
 
         let (field_names, fields) = campos_ordenados(&nomes_dos_campos, &note.field_values);
+        let cloze = (kind == NOTE_TYPE_KIND_CLOZE).then(|| segmentos_cloze_do_cartao(&card, &field_names, &fields));
 
-        Ok(CardToStudy { card, note, fields, field_names, deck_name })
+        Ok(CardToStudy { card, note, fields, field_names, deck_name, cloze })
+    }
+}
+
+/// Os segmentos de `CardToStudy::cloze` para um cartão de tipo cloze: o
+/// PRIMEIRO campo da ordem (a marcação, por posição — a mesma convenção
+/// "`field_names[0]` é a frente" que o resto da struct segue; ver
+/// `db::notes::CLOZE_NOTE_TYPE_NAME`) resolvido para a lacuna
+/// `card.template_ordinal`.
+///
+/// Total, como `db::cloze`: um `template_ordinal` negativo ou acima de `u32`
+/// (linha corrompida) vira `0`, que nunca é lacuna válida — o resultado é
+/// "tudo visível, nenhuma lacuna", que a tela mostra como estado próprio, em
+/// vez de um erro que derrubaria a sessão inteira por causa de um cartão.
+fn segmentos_cloze_do_cartao(card: &CardRow, field_names: &[String], fields: &HashMap<String, String>) -> Vec<ClozeSegment> {
+    let texto = field_names.first().and_then(|nome| fields.get(nome)).map(String::as_str).unwrap_or_default();
+    let numero_da_lacuna = u32::try_from(card.template_ordinal).unwrap_or(0);
+    segment_cloze(texto, numero_da_lacuna)
+}
+
+#[cfg(test)]
+mod testes_de_cloze {
+    use super::*;
+
+    fn cartao_com_ordinal(template_ordinal: i64) -> CardRow {
+        let agora = Utc::now();
+        CardRow {
+            id: Uuid::new_v4(),
+            note_id: Uuid::new_v4(),
+            template_ordinal,
+            deck_id: Uuid::new_v4(),
+            state: "new".into(),
+            due: None,
+            scheduler: "sm2".into(),
+            interval_days: 0,
+            ease_factor: 2500,
+            fsrs_stability: None,
+            fsrs_difficulty: None,
+            fsrs_last_review_at: None,
+            learning_step: 0,
+            lapses: 0,
+            reps: 0,
+            is_leech: false,
+            flags: 0,
+            suspended_at: None,
+            buried_until: None,
+            created_at: agora,
+            updated_at: agora,
+        }
+    }
+
+    fn campos(texto: &str) -> (Vec<String>, HashMap<String, String>) {
+        let nomes = vec!["Texto".to_string(), "Extra".to_string()];
+        let mapa = HashMap::from([("Texto".to_string(), texto.to_string()), ("Extra".to_string(), String::new())]);
+        (nomes, mapa)
+    }
+
+    #[test]
+    fn usa_o_primeiro_campo_e_o_ordinal_como_numero_da_lacuna() {
+        let (nomes, mapa) = campos("{{c1::A}} e {{c2::B}}");
+        let segmentos = segmentos_cloze_do_cartao(&cartao_com_ordinal(2), &nomes, &mapa);
+        let escondidos: Vec<&str> = segmentos.iter().filter(|s| s.hidden).map(|s| s.text.as_str()).collect();
+        assert_eq!(escondidos, vec!["B"], "o cartão de ordinal 2 esconde a lacuna c2, não a c1");
+    }
+
+    #[test]
+    fn ordinal_negativo_nao_derruba_e_nao_esconde_nada() {
+        let (nomes, mapa) = campos("{{c1::A}}");
+        let segmentos = segmentos_cloze_do_cartao(&cartao_com_ordinal(-7), &nomes, &mapa);
+        assert!(segmentos.iter().all(|s| !s.hidden));
+    }
+
+    #[test]
+    fn tipo_sem_campo_nenhum_devolve_lista_vazia() {
+        let segmentos = segmentos_cloze_do_cartao(&cartao_com_ordinal(1), &[], &HashMap::new());
+        assert!(segmentos.is_empty());
     }
 }
 

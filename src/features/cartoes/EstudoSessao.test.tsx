@@ -86,8 +86,45 @@ function cardToStudy(overrides: Partial<CardToStudy> = {}): CardToStudy {
     // toda a construção da seção, o `fields` que viajava como lista.
     fieldNames: Object.keys(note.fieldValues),
     deckName: "Geografia",
+    // `null` é o que o backend manda para todo tipo padrão; um cartão cloze
+    // sobrescreve com a lista de segmentos (ver `cartaoCloze` abaixo).
+    cloze: null,
     ...overrides,
   };
+}
+
+const TIPO_CLOZE: NoteTypeRow = {
+  id: "tipo-4",
+  name: "Cloze",
+  fields: ["Texto", "Extra"],
+  templates: [{ name: "Cloze", front: "{{cloze:Texto}}", back: "{{cloze:Texto}}<br>{{Extra}}" }],
+  kind: "cloze",
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
+/**
+ * Um cartão cloze como o backend o entrega: a marcação crua fica em
+ * `fields.Texto` (a tela NUNCA a lê), e `cloze` traz os segmentos já
+ * resolvidos para a lacuna `templateOrdinal`. A fixture reproduz à mão o que
+ * `segment_cloze` faria — é exatamente o par que `contrato-ipc.test.ts`
+ * confere por nome.
+ */
+function cartaoCloze(overrides: Partial<CardToStudy> = {}): CardToStudy {
+  const note = noteRow({
+    noteTypeId: "tipo-4",
+    fieldValues: { Texto: "A capital da França é {{c1::Paris::cidade}}.", Extra: "Fica às margens do Sena." },
+  });
+  return cardToStudy({
+    card: cardRow({ templateOrdinal: 1 }),
+    note,
+    cloze: [
+      { text: "A capital da França é ", hidden: false, hint: null },
+      { text: "Paris", hidden: true, hint: "cidade" },
+      { text: ".", hidden: false, hint: null },
+    ],
+    ...overrides,
+  });
 }
 
 const TIPO_BASICO: NoteTypeRow = {
@@ -95,6 +132,7 @@ const TIPO_BASICO: NoteTypeRow = {
   name: "Básico",
   fields: ["Frente", "Verso"],
   templates: [{ name: "Cartão 1", front: "{{Frente}}", back: "{{Verso}}" }],
+  kind: "standard",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -104,6 +142,7 @@ const TIPO_DIGITAR_RESPOSTA: NoteTypeRow = {
   name: "Digitar a resposta",
   fields: ["Frente", "Verso"],
   templates: [{ name: "Cartão 1", front: "{{Frente}}", back: "{{type:Verso}}" }],
+  kind: "standard",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -113,6 +152,7 @@ const TIPO_MULTIPLA_ESCOLHA: NoteTypeRow = {
   name: "Múltipla escolha",
   fields: ["Pergunta", "Correta", "Errada 1", "Errada 2", "Errada 3"],
   templates: [{ name: "Cartão 1", front: "{{Pergunta}}", back: "{{Correta}}" }],
+  kind: "standard",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -144,6 +184,74 @@ beforeEach(() => {
     noteTypesStatus: "ready",
     tela: "estudo",
     contagens: new Map(),
+  });
+});
+
+describe("EstudoSessao com cartão cloze", () => {
+  beforeEach(() => {
+    useCartoesStore.setState({ noteTypes: [TIPO_BASICO, TIPO_CLOZE] });
+  });
+
+  it("na frente, a resposta da lacuna não existe no DOM e a dica aparece no lugar dela", async () => {
+    nextCardMock.mockResolvedValue(cartaoCloze());
+    render(<EstudoSessao />);
+
+    expect(await screen.findByText("A capital da França é", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("cidade")).toBeInTheDocument();
+    expect(screen.queryByText("Paris")).not.toBeInTheDocument();
+    // A marcação crua nunca chega à tela — nem na frente, nem depois.
+    expect(screen.queryByText(/\{\{c1::/)).not.toBeInTheDocument();
+    // O "Extra" é verso: não entra antes de revelar.
+    expect(screen.queryByText("Fica às margens do Sena.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mostrar resposta/ })).toBeInTheDocument();
+  });
+
+  it("revelar preenche a lacuna no lugar, mostra o Extra e os quatro botões — e a marcação crua continua fora", async () => {
+    nextCardMock.mockResolvedValue(cartaoCloze());
+    render(<EstudoSessao />);
+    await screen.findByText("A capital da França é", { exact: false });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mostrar resposta/ }));
+
+    expect(screen.getByText("Paris")).toBeInTheDocument();
+    expect(screen.queryByText("cidade")).not.toBeInTheDocument();
+    expect(screen.getByText("Fica às margens do Sena.")).toBeInTheDocument();
+    expect(screen.queryByText(/\{\{c1::/)).not.toBeInTheDocument();
+    for (const rotulo of [/Errei/, /Difícil/, /Bom/, /Fácil/]) {
+      expect(screen.getByRole("button", { name: rotulo })).toBeInTheDocument();
+    }
+  });
+
+  it("espaço revela um cartão cloze, como no Básico", async () => {
+    nextCardMock.mockResolvedValue(cartaoCloze());
+    render(<EstudoSessao />);
+    await screen.findByText("A capital da França é", { exact: false });
+
+    fireEvent.keyDown(window, { key: " " });
+
+    expect(screen.getByText("Paris")).toBeInTheDocument();
+  });
+
+  it("nota quebrada (cartão aponta para lacuna que o texto não tem) mostra o texto, avisa e deixa responder", async () => {
+    // O backend, para uma nota editada depois de o cartão nascer ou com a
+    // marcação corrompida, devolve tudo visível e nenhum `hidden` — nunca
+    // um erro. A sessão precisa seguir: o usuário perde o cartão, não o app.
+    nextCardMock.mockResolvedValue(
+      cartaoCloze({
+        card: cardRow({ templateOrdinal: 3 }),
+        cloze: [{ text: "Texto que perdeu a {{c3:: marcação", hidden: false, hint: null }],
+      }),
+    );
+    answerCardMock.mockResolvedValue({ proximaRevisao: "2026-09-08T12:00:00.000Z", intervaloDias: 3, estado: "review" });
+    render(<EstudoSessao />);
+
+    expect(await screen.findByText("Texto que perdeu a {{c3:: marcação")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("lacuna 3");
+
+    fireEvent.click(screen.getByRole("button", { name: /Mostrar resposta/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bom/ }));
+
+    await waitFor(() => expect(answerCardMock).toHaveBeenCalledWith("card-1", "good"));
   });
 });
 

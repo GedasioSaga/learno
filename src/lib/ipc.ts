@@ -655,6 +655,22 @@ export interface NoteTypeRow {
   /** Nomes dos campos, na ordem de exibição. */
   fields: string[];
   templates: NoteTypeTemplate[];
+  /**
+   * `note_types.kind` (migração `0040`): `"standard"` ou `"cloze"`.
+   *
+   * Existe porque cloze bifurca o **comportamento de escrita**, não só a
+   * aparência: um tipo `cloze` gera um cartão por número de lacuna encontrado
+   * no texto, e regenera esse conjunto quando a nota é editada — enquanto um
+   * tipo `standard` gera um cartão por entrada de `templates`, na criação, e
+   * nunca mais.
+   *
+   * É uma coluna e não uma comparação por nome de propósito. Os três tipos
+   * antigos (Básico, Digitar a resposta, Múltipla escolha) são distinguidos
+   * pelo nome só para SEMEAR; amarrar comportamento de escrita ao rótulo de
+   * exibição quebraria em silêncio no dia em que renomear tipo de nota
+   * existir. O próprio Anki guarda isso em `notetypes.config.kind`.
+   */
+  kind: "standard" | "cloze";
   createdAt: string;
   updatedAt: string;
 }
@@ -681,6 +697,33 @@ export interface CardToStudy {
   /** Nomes dos campos na ordem de `note_types.fields` — `fieldNames[0]` é a frente. */
   fieldNames: string[];
   deckName: string;
+  /**
+   * `null` para todo tipo padrão; para um tipo cloze (`NoteTypeRow.kind ===
+   * "cloze"`), o primeiro campo já quebrado em segmentos para a lacuna DESTE
+   * cartão — espelha `CardToStudy.cloze` em `src-tauri/src/db/cards.rs`.
+   *
+   * O parser de `{{cN::texto::dica}}` mora só no Rust (`db::cloze`), de
+   * propósito: a tela nunca interpreta a marcação, só percorre esta lista.
+   * A decisão inteira está no comentário de módulo de `db::cloze` ("Uma
+   * gramática só").
+   */
+  cloze: ClozeSegment[] | null;
+}
+
+/**
+ * Um trecho do texto de um cartão cloze, já resolvido — espelha
+ * `ClozeSegment` em `src-tauri/src/db/cloze.rs`.
+ *
+ * `hidden: true` é a lacuna deste cartão: `text` é a resposta (só entra no
+ * DOM depois de revelar) e `hint` o que aparece no lugar dela antes disso
+ * (`null` → reticências). `hidden: false` é texto visível desde a frente,
+ * literal ou lacuna de outro número já com o conteúdo dela. Concatenar
+ * `text` de todos, na ordem, dá o verso completo.
+ */
+export interface ClozeSegment {
+  text: string;
+  hidden: boolean;
+  hint: string | null;
 }
 
 /**

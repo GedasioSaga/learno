@@ -31,6 +31,7 @@ const TIPO_BASICO: NoteTypeRow = {
   name: "Básico",
   fields: ["Frente", "Verso"],
   templates: [{ name: "Cartão 1", front: "{{Frente}}", back: "{{Verso}}" }],
+  kind: "standard",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };

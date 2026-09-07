@@ -15,6 +15,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::db::ids::DbId;
 use crate::error::Result;
 
 /// What one run of [`IntegrityRepository::check_and_repair`] found and fixed.
@@ -41,10 +42,14 @@ impl IntegrityRepository {
     /// select-then-delete: nothing has to be true of the row set between the
     /// two steps for this to stay correct, because there is only one step.
     pub async fn check_and_repair(&self) -> Result<IntegrityReport> {
-        let orphaned_card_ids: Vec<Uuid> =
+        // Lido como `DbId` (TEXT) e convertido de volta para `Uuid` aqui dentro —
+        // ver `crate::db::ids` para o porquê: `sqlx-sqlite` decodifica `Uuid`
+        // como BLOB de 16 bytes, e a coluna é TEXT numa tabela `STRICT`.
+        let orphaned_card_ids: Vec<DbId> =
             sqlx::query_scalar("DELETE FROM cards WHERE note_id NOT IN (SELECT id FROM notes) RETURNING id")
                 .fetch_all(&self.pool)
                 .await?;
+        let orphaned_card_ids: Vec<Uuid> = orphaned_card_ids.into_iter().map(Uuid::from).collect();
 
         let total_repaired = orphaned_card_ids.len();
         Ok(IntegrityReport { orphaned_card_ids, total_repaired })
@@ -55,101 +60,80 @@ impl IntegrityRepository {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use sqlx::Connection;
+    use std::path::PathBuf;
 
     use super::*;
+    use crate::db::ids::IdBind;
 
-    /// A private, throwaway database on the same cluster as
-    /// `LEARNO_TEST_DATABASE_URL`, migrated and ready to use.
+    /// Um banco descartavel, migrado e pronto para usar, que nenhum outro
+    /// teste enxerga.
     ///
-    /// `check_and_repair` scans the *entire* `cards` table by design — a
-    /// consistency checker has no `WHERE` clause to scope itself behind, so
-    /// there's no way to make its tests deterministic on a database shared
-    /// with anything else that touches `cards`/`notes` while `cargo test`
-    /// runs everything in parallel by default. The two tests below used to
-    /// `DELETE FROM cards` and assert on the whole table, which only held up
-    /// when nothing else happened to be running at the same time (PLT-014's
-    /// own regression, caught by two runs of the full suite disagreeing on
-    /// pass/fail with no code change in between). Each test now gets a
-    /// database nothing else can see instead, the same pattern `db::pool`'s
-    /// PLT-020 test already uses for the same reason.
+    /// `check_and_repair` varre a tabela `cards` INTEIRA por desenho — um
+    /// verificador de consistencia nao tem `WHERE` para se limitar — entao
+    /// nao ha como deixar os testes deterministicos num banco compartilhado
+    /// com qualquer outra coisa que toque `cards`/`notes` enquanto o
+    /// `cargo test` roda tudo em paralelo. Antes isso exigia `CREATE
+    /// DATABASE` num cluster Postgres de pe (e, por isso, `#[ignore]`);
+    /// agora e um arquivo em pasta temporaria, e os dois testes rodam
+    /// sempre.
     struct IsolatedDatabase {
         pool: SqlitePool,
-        admin_conn: sqlx::PgConnection,
-        db_name: String,
+        path: PathBuf,
     }
 
     impl IsolatedDatabase {
         async fn setup() -> Self {
-            let cluster_url = std::env::var("LEARNO_TEST_DATABASE_URL")
-                .expect("LEARNO_TEST_DATABASE_URL must be set to run ignored DB tests");
-            let db_name = format!("learno_integrity_test_{}", Uuid::new_v4().simple());
-
-            let mut admin_conn = sqlx::PgConnection::connect(&cluster_url)
+            let path = std::env::temp_dir().join(format!("learno-integrity-test-{}.sqlite", Uuid::new_v4()));
+            let pool = crate::db::pool::connect_and_migrate(&path)
                 .await
-                .expect("failed to open an admin connection to the test cluster");
-            sqlx::query(&format!("CREATE DATABASE \"{db_name}\""))
-                .execute(&mut admin_conn)
-                .await
-                .expect("failed to create the isolated test database");
-
-            let mut database_url =
-                url::Url::parse(&cluster_url).expect("LEARNO_TEST_DATABASE_URL must be a valid URL");
-            // `postgres://` isn't one of the URL crate's "special" schemes,
-            // so `set_path` won't add the leading `/` on its own the way it
-            // would for `http://` — without it Postgres sees an empty
-            // database name and connects back to `cluster_url`'s own database.
-            database_url.set_path(&format!("/{db_name}"));
-
-            let pool = crate::db::pool::connect_and_migrate(database_url.as_str())
-                .await
-                .expect("failed to connect/migrate the isolated test database");
-
-            Self { pool, admin_conn, db_name }
+                .expect("falhou ao conectar/migrar o banco de teste isolado");
+            Self { pool, path }
         }
 
-        /// Drops the database this test created. Not a `Drop` impl: dropping
-        /// a Postgres database needs an `async` query and `Drop` can't run
-        /// one, so every test below calls this explicitly once it's done —
-        /// the same manual cleanup `db::pool`'s PLT-020 test already does
-        /// for its own scratch database.
-        async fn teardown(mut self) {
+        /// Fecha o pool e apaga o arquivo (e os sidecars de WAL). Nao e um
+        /// `Drop`: fechar o pool e `async`, e `Drop` nao roda `async`.
+        async fn teardown(self) {
             self.pool.close().await;
-            sqlx::query(&format!("DROP DATABASE \"{}\" WITH (FORCE)", self.db_name))
-                .execute(&mut self.admin_conn)
-                .await
-                .expect("failed to drop the isolated test database");
+            let _ = std::fs::remove_file(&self.path);
+            for sufixo in ["-wal", "-shm"] {
+                let mut com_sufixo = self.path.clone().into_os_string();
+                com_sufixo.push(sufixo);
+                let _ = std::fs::remove_file(PathBuf::from(com_sufixo));
+            }
         }
     }
 
-    /// Inserts a card whose `note_id` points at nothing, bypassing the
-    /// `cards.note_id` foreign key for this one session only
-    /// (`session_replication_role = replica`, the same mechanism Postgres's
-    /// own logical-replication apply process uses to skip trigger/FK checks
-    /// when it knows a row is already valid on the source). This is the only
-    /// way to reproduce PLT-014's "inconsistência introduzida artificialmente"
-    /// scenario at all, given the constraint that prevents it through every
-    /// normal write path — and it leaves no lasting change: the setting is
-    /// per-connection, reset before the connection is returned.
+    /// Insere um cartao cujo `note_id` nao aponta para nota nenhuma,
+    /// desligando a checagem de chave estrangeira nesta conexao so.
+    ///
+    /// E o equivalente SQLite do `session_replication_role = replica` que a
+    /// versao Postgres usava, e continua sendo a unica forma de reproduzir a
+    /// "inconsistencia introduzida artificialmente" do PLT-014, dado que a
+    /// constraint impede isso por todo caminho de escrita normal. `PRAGMA
+    /// foreign_keys` e por conexao: religar antes de devolver a conexao ao
+    /// pool nao deixa rastro.
+    ///
+    /// `.db()` em todo id nao e enfeite: `sqlx` codifica `Uuid` como BLOB por
+    /// padrao, e a coluna e `TEXT` numa tabela `STRICT` — sem a ponte de
+    /// `db::ids` o INSERT falha com "cannot store BLOB value in TEXT column".
     async fn insert_orphaned_card(pool: &SqlitePool) -> Uuid {
         let mut conn = pool.acquire().await.unwrap();
-        sqlx::query("SET session_replication_role = replica").execute(&mut *conn).await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = OFF").execute(&mut *conn).await.unwrap();
 
         let card_id = Uuid::now_v7();
-        sqlx::query("INSERT INTO cards (id, note_id, deck_id) VALUES ($1, $2, $3)")
-            .bind(card_id)
-            .bind(Uuid::now_v7())
-            .bind(Uuid::now_v7())
+        sqlx::query("INSERT INTO cards (id, note_id, deck_id) VALUES (?, ?, ?)")
+            .bind(card_id.db())
+            .bind(Uuid::now_v7().db())
+            .bind(Uuid::now_v7().db())
             .execute(&mut *conn)
             .await
             .unwrap();
 
-        sqlx::query("SET session_replication_role = origin").execute(&mut *conn).await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *conn).await.unwrap();
         card_id
     }
 
     #[tokio::test]
-    #[ignore = "requires LEARNO_TEST_DATABASE_URL"]
     async fn plt_014_an_orphaned_card_is_detected_and_deleted() {
         let db = IsolatedDatabase::setup().await;
 
@@ -161,8 +145,8 @@ mod tests {
         assert_eq!(report.total_repaired, 1);
         assert_eq!(report.orphaned_card_ids, vec![orphan_id]);
 
-        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE id = $1")
-            .bind(orphan_id)
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE id = ?")
+            .bind(orphan_id.db())
             .fetch_one(&db.pool)
             .await
             .unwrap();
@@ -172,7 +156,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires LEARNO_TEST_DATABASE_URL"]
     async fn plt_014_a_database_with_no_orphans_reports_nothing_repaired() {
         let db = IsolatedDatabase::setup().await;
 
