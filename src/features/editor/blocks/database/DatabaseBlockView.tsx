@@ -8,8 +8,9 @@
  * é a costura — não desenha nada por conta própria.
  *
  * `errorMessage` é erro de ESCRITA (célula que não salvou, registro que não
- * nasceu): aparece abaixo da database, sem derrubar a tabela, porque o
- * carregador já recarregou a verdade do banco antes de avisar.
+ * nasceu, coluna que não renomeou): aparece abaixo da database, sem
+ * derrubar a tabela, porque o carregador já recarregou a verdade do banco
+ * antes de avisar.
  */
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { DatabaseContainer } from "../../../databases/container";
@@ -19,7 +20,7 @@ import { NODE_NAME } from "./node";
 
 export function DatabaseBlockView({ node, ref }: ReactNodeViewProps<HTMLDivElement>) {
   const databaseId = typeof node.attrs.databaseId === "string" ? node.attrs.databaseId : null;
-  const { state, mutations, errorMessage, addProperty } = useDatabase(databaseId);
+  const { state, mutations, propertyMutations, errorMessage, addProperty } = useDatabase(databaseId);
 
   const actions: DatabaseContainerActions = mutations
     ? {
@@ -38,7 +39,7 @@ export function DatabaseBlockView({ node, ref }: ReactNodeViewProps<HTMLDivEleme
       data-block-id={typeof node.attrs.id === "string" ? node.attrs.id : undefined}
       contentEditable={false}
     >
-      <DatabaseContainer state={state} mode="inline" actions={actions} mutations={mutations} />
+      <DatabaseContainer state={state} mode="inline" actions={actions} mutations={mutations} propertyMutations={propertyMutations} />
       {errorMessage ? (
         <p role="alert" className="px-2 py-1 text-xs text-terracotta-ink">
           {errorMessage}

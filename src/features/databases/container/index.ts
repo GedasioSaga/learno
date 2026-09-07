@@ -13,4 +13,5 @@ export type {
   DatabaseContainerMode,
   DatabaseContainerState,
   DatabaseSchema,
+  PropertyMutations,
 } from "./types";

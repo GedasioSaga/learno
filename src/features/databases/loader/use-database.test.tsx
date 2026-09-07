@@ -5,12 +5,14 @@
  * recarga em erro (o banco é a verdade).
  */
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AppError,
   applyRecordValueChanges,
+  changePropertyType,
   createProperty,
   createRecord,
+  deleteProperty,
   evaluateFormulaColumn,
   validateFormula,
   getDatabase,
@@ -18,9 +20,13 @@ import {
   listRecords,
   listViews,
   renamePage,
+  renameProperty,
+  reorderProperty,
+  setPropertyConfig,
   type DatabaseRow,
   type PageRow,
 } from "../../../lib/ipc";
+import { ensureDatabaseExtensionsDiscovered } from "../core/discover-extensions";
 import { useDatabase } from "./use-database";
 
 vi.mock("../../../lib/ipc", async (importOriginal) => {
@@ -37,6 +43,11 @@ vi.mock("../../../lib/ipc", async (importOriginal) => {
     createProperty: vi.fn(),
     evaluateFormulaColumn: vi.fn(),
     validateFormula: vi.fn(),
+    renameProperty: vi.fn(),
+    changePropertyType: vi.fn(),
+    setPropertyConfig: vi.fn(),
+    reorderProperty: vi.fn(),
+    deleteProperty: vi.fn(),
   };
 });
 
@@ -361,5 +372,79 @@ describe("useDatabase: recálculos de fórmula concorrentes", () => {
     if (state.status !== "ready") throw new Error("esperava ready");
     expect(state.records[0].values["p-nota"]).toBe(2);
     expect(state.records[0].values["p-dobro"]).toBe(4);
+  });
+});
+
+describe("useDatabase: escritas de ESTRUTURA (o menu de coluna)", () => {
+  // O `defaultConfig` vem do registro de specs — sem os specs reais descobertos, não há padrão a mandar.
+  beforeAll(() => ensureDatabaseExtensionsDiscovered());
+  const formulaProperty = { id: "p-dobro", databaseId: "db-1", name: "Dobro", propertyType: "formula" as const, config: { expression: "1 + 1" }, position: "a1", createdAt: "", updatedAt: "" };
+
+  it("changeType manda o tipo e, logo atrás, o defaultConfig do tipo novo — o config antigo não sobra", async () => {
+    const asText = { id: "p-nota", databaseId: "db-1", name: "Nota", propertyType: "text" as const, config: {}, position: "a0", createdAt: "", updatedAt: "" };
+    vi.mocked(changePropertyType).mockResolvedValue(asText);
+    vi.mocked(setPropertyConfig).mockResolvedValue(asText);
+    const { result } = renderHook(() => useDatabase("db-1"));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.propertyMutations?.changeType("p-nota", "formula");
+    });
+
+    expect(changePropertyType).toHaveBeenCalledWith("p-nota", "formula");
+    // O padrão de Fórmula é `{ expression: "" }` — é o que `FormulaConfigForm` lê no primeiro render.
+    expect(setPropertyConfig).toHaveBeenCalledWith("p-nota", { expression: "" });
+    // A ordem: tipo primeiro (a intenção), config depois (a limpeza).
+    const typeOrder = vi.mocked(changePropertyType).mock.invocationCallOrder[0];
+    const configOrder = vi.mocked(setPropertyConfig).mock.invocationCallOrder[0];
+    expect(typeOrder).toBeLessThan(configOrder);
+    expect(outcome).toEqual({ ok: true });
+    // Recarregou: o schema mudou.
+    expect(listProperties).toHaveBeenCalledTimes(2);
+  });
+
+  it("setConfig chega em set_property_config com a config nova (editar a expressão de uma Fórmula existente)", async () => {
+    vi.mocked(setPropertyConfig).mockResolvedValue({ ...formulaProperty, config: { expression: "2 * 2" } });
+    const { result } = renderHook(() => useDatabase("db-1"));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.propertyMutations?.setConfig("p-dobro", { expression: "2 * 2" });
+    });
+    expect(setPropertyConfig).toHaveBeenCalledWith("p-dobro", { expression: "2 * 2" });
+    expect(listProperties).toHaveBeenCalledTimes(2);
+  });
+
+  it("rename, reorder e delete chamam o comando certo e recarregam", async () => {
+    vi.mocked(renameProperty).mockResolvedValue(formulaProperty);
+    vi.mocked(reorderProperty).mockResolvedValue(formulaProperty);
+    vi.mocked(deleteProperty).mockResolvedValue(undefined);
+    const { result } = renderHook(() => useDatabase("db-1"));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.propertyMutations?.rename("p-nota", "Pontuação");
+      await result.current.propertyMutations?.reorder("p-nota", null);
+      await result.current.propertyMutations?.delete("p-nota");
+    });
+    expect(renameProperty).toHaveBeenCalledWith("p-nota", "Pontuação");
+    expect(reorderProperty).toHaveBeenCalledWith("db-1", "p-nota", null);
+    expect(deleteProperty).toHaveBeenCalledWith("p-nota");
+    expect(listProperties).toHaveBeenCalledTimes(4);
+  });
+
+  it("erro de estrutura: recarrega do banco, expõe a mensagem e devolve { ok: false } para o diálogo", async () => {
+    vi.mocked(setPropertyConfig).mockRejectedValue(new AppError({ kind: "validation", message: "database bloqueada" }));
+    const { result } = renderHook(() => useDatabase("db-1"));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.propertyMutations?.setConfig("p-dobro", { expression: "1" });
+    });
+    expect(outcome).toEqual({ ok: false, message: "database bloqueada" });
+    expect(result.current.errorMessage).toBe("database bloqueada");
+    expect(listProperties).toHaveBeenCalledTimes(2);
   });
 });

@@ -214,6 +214,76 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Menu de coluna (07/09/2026) — cinco comandos saem da dívida de uma vez
+
+O cabeçalho de coluna de uma database **não tinha menu nenhum**, e era só por isso que
+quatro comandos registrados no `generate_handler!` viviam em `REGISTRADOS_SEM_TELA`, com o
+motivo escrito: "o cabeçalho da coluna não abre menu". Uma tela quitou os quatro e destravou
+o quinto.
+
+Bar: o menu do cabeçalho de coluna do Notion.
+
+**Caminho:** `/` → **Database** → clicar no cabeçalho de qualquer coluna de propriedade. O
+painel abre com o nome já focado e selecionado. Itens: renomear inline, **Tipo ›** (segunda
+página do mesmo painel, tipo atual marcado), **Editar fórmula…** (só para tipos com
+`renderConfigForm`), **Mover para a esquerda/direita**, e **Apagar propriedade** com
+confirmação que diz quantos registros perdem valor.
+
+Saíram de `REGISTRADOS_SEM_TELA`: `rename_property`, `change_property_type`,
+`reorder_property`, `delete_property`. `set_property_config` — criado nesta mesma iteração —
+nunca precisou entrar.
+
+**A dívida que motivou a iteração está fechada:** editar a expressão de uma Fórmula depois
+de criada era **impossível**. O `FormulaConfigForm` já suportava o modo "existente", com
+botão "Salvar fórmula" e tudo, e nada nunca o abria — o próprio defeito histórico deste
+projeto, em miniatura, dentro de código escrito para consertá-lo. `NewPropertyDialog` virou
+`PropertyConfigDialog` com `mode: "create" | "edit"`, e agora alguém o abre.
+
+**Trocar o tipo são DUAS chamadas, não uma transação.** `change_property_type`
+(`db/databases.rs:384`) faz `UPDATE ... SET property_type` e **nunca toca `config`** — isso
+é defeito pré-existente, confirmado com âncora e não corrigido aqui. Por isso o carregador
+manda `set_property_config` com o `defaultConfig` do tipo novo logo atrás, pelo mesmo
+caminho que a criação já usa. Se a segunda falhar, o banco fica com tipo novo e config
+antiga; `failWrite` recarrega e avisa. A falha é **contida**: o `ErrorBoundary` por célula
+(da rodada da tabela) transforma um `renderValue` que estoure com config do tipo errado em
+"valor ilegível" naquela célula, em vez de derrubar a tela — e `formatNumberValue` tem
+`default:` desde a rodada das fórmulas, então a célula não volta a ficar muda. Tornar isso
+atômico exige `change_property_type` aceitar `config` no Rust; fica nomeado.
+
+**A corrida de escrita estrutural foi herdada certa, não repetida.** As duas rodadas
+anteriores tiveram um defeito crítico da mesma classe (`applyValueChanges` e
+`refreshFormulaColumns`, os dois com resposta velha sobrescrevendo a nova). Aqui
+`structuralWrite` termina em `reload()`, e `reload()` já incrementa `requestRef` no início e
+confere antes de cada `setState` — duas ações estruturais rápidas disparam dois `reload()`,
+e o mais velho é descartado. Verificado por leitura direta.
+
+`filledCount` (`views/table/TableView.tsx:239`), que alimenta o aviso de exclusão, conta por
+`property.id in record.values` — **presença, não truthiness**. É a diferença entre dizer a
+verdade e mentir sobre uma coluna cheia de `0` ou `false` (invariante I1).
+
+Portão desta rodada:
+
+- `rtk proxy npx tsc --noEmit`: **exit 0**.
+- `rtk proxy npx vitest run`: **2011 testes em 212 arquivos, 0 falhas**, três travas verdes.
+- `npm run test:e2e`: **13 specs, 0 falhas**, contra o app Tauri real.
+
+**O que ficou de fora, e por quê:** esconder, ordenar, filtrar e congelar pela coluna
+dependem do pipeline `open_view_query`, que não existe; duplicar propriedade não tem
+comando; arrastar cabeçalho é peça própria. Nada disso aparece na tela — controle que não
+faz nada é defeito, não rascunho. "Mover" some quando a view tem `columnOrder` próprio,
+porque aí `position` não é o que a tela mostra e o item não faria nada visível.
+
+**Não verificado:** o menu não foi exercitado por spec e2e própria (a suíte passa, mas
+nenhuma spec clica nele). É a mesma lacuna que a rodada das fórmulas tinha antes da
+`database-formula.e2e.mjs`, e vale o mesmo aviso: o e2e é a única camada que atravessa o
+`serde_json` de verdade.
+
+**Nota de ambiente:** um agente rodou `taskkill /IM node.exe` para derrubar um harness de
+inspeção próprio. Isso mata **todo** processo node da máquina, não só o dele. Nesta ocasião
+o servidor do outro projeto sobreviveu (mesmo PID antes e depois), mas foi sorte. Matar por
+nome de imagem nunca é aceitável aqui — o PID é conhecido, e esta máquina roda mais de um
+projeto Node ao mesmo tempo.
+
 ### Fórmulas (06/09/2026) — 40 funções e a propriedade na tela
 
 Existia um motor de fórmula inteiro no Rust — lexer, parser, checagem de tipo estática,

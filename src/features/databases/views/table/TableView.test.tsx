@@ -52,7 +52,7 @@ function mutationsMock(): ViewMutations {
 }
 
 function renderTable(records: RecordRow[], mutations: ViewMutations | null, properties = [nota, feito, texto, criado]) {
-  return render(<TableView ctx={{ view, properties, records, mutations }} />);
+  return render(<TableView ctx={{ view, properties, records, mutations, propertyActions: null }} />);
 }
 
 describe("estrutura: linha = registro, coluna = propriedade", () => {
@@ -91,7 +91,7 @@ describe("estrutura: linha = registro, coluna = propriedade", () => {
       ...view,
       config: { columnOrder: ["p-texto", "p-nota"], columnVisibility: { "p-feito": "never" } },
     };
-    render(<TableView ctx={{ view: configured, properties: [nota, feito, texto], records: [], mutations: null }} />);
+    render(<TableView ctx={{ view: configured, properties: [nota, feito, texto], records: [], mutations: null, propertyActions: null }} />);
     const headers = screen.getAllByRole("columnheader").map((th) => th.textContent);
     expect(headers).toEqual(["AaNome", "📝Resumo", "#Nota"]);
   });
@@ -153,7 +153,7 @@ describe("editar célula no lugar", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Feito" }));
     expect(mutations.applyValueChanges).toHaveBeenCalledWith([{ recordId: "r1", propertyId: "p-feito", value: true }]);
 
-    rerender(<TableView ctx={{ view, properties: [nota, feito, texto, criado], records: [record("r1", "Aula 1", { "p-feito": true })], mutations }} />);
+    rerender(<TableView ctx={{ view, properties: [nota, feito, texto, criado], records: [record("r1", "Aula 1", { "p-feito": true })], mutations, propertyActions: null }} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Feito" }));
     expect(mutations.applyValueChanges).toHaveBeenLastCalledWith([{ recordId: "r1", propertyId: "p-feito", value: null }]);
   });
@@ -215,7 +215,7 @@ describe("Nova linha", () => {
     await act(async () => {});
 
     // O carregador é quem acrescenta a linha; aqui simulamos a chegada dela.
-    rerender(<TableView ctx={{ view, properties: [nota, feito, texto, criado], records: [record("r1", "Aula 1"), record("rec-novo", "")], mutations }} />);
+    rerender(<TableView ctx={{ view, properties: [nota, feito, texto, criado], records: [record("r1", "Aula 1"), record("rec-novo", "")], mutations, propertyActions: null }} />);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Título do registro" })).toBeInTheDocument());
   });
 });

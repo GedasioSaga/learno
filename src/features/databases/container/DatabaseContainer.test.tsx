@@ -15,7 +15,7 @@ import { registerViewSpec, resetViewSpecRegistryForTests } from "../core/view-sp
 import type { PropertyDescriptor } from "../core/property-spec";
 import type { ViewDescriptor } from "../core/view-spec";
 import { DatabaseContainer } from "./DatabaseContainer";
-import type { DatabaseContainerActions, DatabaseContainerState, DatabaseSchema } from "./types";
+import type { DatabaseContainerActions, DatabaseContainerState, DatabaseSchema, PropertyMutations } from "./types";
 
 const FAKE_VIEW_TYPE = "spec_test_table";
 
@@ -263,5 +263,85 @@ describe("propriedade que pede configuração antes de nascer (Fórmula)", () =>
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(actions.onAddProperty).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * O caminho que motivou a iteração: editar a expressão de uma Fórmula
+ * EXISTENTE. A view pede `propertyActions.editConfig(property)`, o contêiner
+ * abre o mesmo diálogo da criação em modo "editar" com a expressão atual e
+ * um id de verdade, e "Salvar fórmula" chega em `propertyMutations.setConfig`
+ * — que, no carregador, é `set_property_config` (ver `use-database.test.tsx`).
+ */
+describe("menu de coluna → editar a configuração de uma propriedade existente", () => {
+  const media: PropertyDescriptor = { id: "p-media", databaseId: "22222222-2222-4222-8222-222222222222", name: "Média", type: "formula", config: { expression: 'prop("Nota") / 2' }, position: "a0" };
+
+  /** Uma view de mentira cujo único controle é "editar a fórmula" — o que a Tabela real oferece no cabeçalho. */
+  function registerViewWithEditButton() {
+    registerViewSpec({
+      type: FAKE_VIEW_TYPE,
+      label: "Tabela (teste)",
+      icon: "▦",
+      defaultConfig: {},
+      render: ({ properties, propertyActions }) => (
+        <div>
+          {propertyActions ? (
+            <button type="button" onClick={() => propertyActions.editConfig(properties[0])}>
+              editar fórmula da primeira coluna
+            </button>
+          ) : (
+            <p>sem ações de estrutura</p>
+          )}
+        </div>
+      ),
+    });
+  }
+
+  function propertyMutationsMock(): PropertyMutations {
+    return {
+      rename: vi.fn().mockResolvedValue({ ok: true }),
+      changeType: vi.fn().mockResolvedValue({ ok: true }),
+      setConfig: vi.fn().mockResolvedValue({ ok: true }),
+      reorder: vi.fn().mockResolvedValue({ ok: true }),
+      delete: vi.fn().mockResolvedValue({ ok: true }),
+    };
+  }
+
+  beforeEach(() => {
+    registerViewWithEditButton();
+    vi.mocked(listFormulaFunctions).mockResolvedValue([]);
+    vi.mocked(validateFormula).mockResolvedValue({ valid: true, returnType: "número", diagnostics: [], dependsOn: [] });
+  });
+
+  it("abre o diálogo com a expressão atual e 'Salvar fórmula' entrega a nova a setConfig com o id da propriedade; o diálogo fecha em ok", async () => {
+    const propertyMutations = propertyMutationsMock();
+    const schema = makeSchema({ properties: [media] });
+    render(<DatabaseContainer state={readyState(schema)} mode="fullPage" propertyMutations={propertyMutations} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "editar fórmula da primeira coluna" }));
+    const dialog = screen.getByRole("dialog", { name: "Editar fórmula: Média" });
+    const textarea = within(dialog).getByLabelText("Expressão");
+    expect(textarea).toHaveValue('prop("Nota") / 2');
+    // Valida com o id de verdade — não `null` como na criação.
+    await waitFor(() => expect(validateFormula).toHaveBeenCalledWith(expect.any(String), "p-media", 'prop("Nota") / 2'));
+
+    fireEvent.change(textarea, { target: { value: 'prop("Nota") * 2' } });
+    const save = await within(dialog).findByRole("button", { name: "Salvar fórmula" });
+    await waitFor(() => expect(save).not.toBeDisabled());
+    fireEvent.click(save);
+
+    await waitFor(() => expect(propertyMutations.setConfig).toHaveBeenCalledWith("p-media", { expression: 'prop("Nota") * 2' }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("database bloqueada: a view recebe propertyActions null — sem menu de estrutura, o corpo nem sabe por quê", () => {
+    const schema = makeSchema({ database: makeDatabase({ isLocked: true }), properties: [media] });
+    render(<DatabaseContainer state={readyState(schema)} mode="fullPage" propertyMutations={propertyMutationsMock()} />);
+    expect(screen.getByText("sem ações de estrutura")).toBeInTheDocument();
+  });
+
+  it("sem propertyMutations (ninguém ligou as escritas), a view também recebe null", () => {
+    render(<DatabaseContainer state={readyState(makeSchema({ properties: [media] }))} mode="fullPage" />);
+    expect(screen.getByText("sem ações de estrutura")).toBeInTheDocument();
   });
 });

@@ -15,7 +15,7 @@
 import type { PropertyType } from "../../../lib/ipc";
 import type { Database, RecordRow } from "../contract";
 import type { PropertyDescriptor } from "../core/property-spec";
-import type { ViewDescriptor } from "../core/view-spec";
+import type { PropertyActionResult, ViewDescriptor } from "../core/view-spec";
 
 /** DBS-001 (inline, dentro de uma nota) vs DBS-002 (página inteira, bloqueável). */
 export type DatabaseContainerMode = "inline" | "fullPage";
@@ -67,6 +67,23 @@ export type DatabaseContainerState =
  * erro aparecer noutro canto da tela.
  */
 export type AddPropertyResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * As escritas de ESTRUTURA que o carregador oferece e o contêiner entrega
+ * à view como `PropertyActions` (`core/view-spec.ts`) — mais `setConfig`,
+ * que a view nunca chama direto: ela pede `editConfig`, o contêiner abre o
+ * formulário do tipo (`PropertyConfigDialog`) e é o diálogo que persiste
+ * por aqui. Mesmo formato de resultado de `onAddProperty`, pelo mesmo
+ * motivo: o diálogo só fecha com `ok`.
+ */
+export interface PropertyMutations {
+  rename(propertyId: string, name: string): Promise<PropertyActionResult>;
+  /** Manda junto o `defaultConfig` do tipo novo — ver `useDatabase` para a decisão. */
+  changeType(propertyId: string, newType: PropertyType): Promise<PropertyActionResult>;
+  setConfig(propertyId: string, config: unknown): Promise<PropertyActionResult>;
+  reorder(propertyId: string, afterPropertyId: string | null): Promise<PropertyActionResult>;
+  delete(propertyId: string): Promise<PropertyActionResult>;
+}
 
 export interface DatabaseContainerActions {
   /** DBS-001: "+ Novo" no cabeçalho. */

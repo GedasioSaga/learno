@@ -14,22 +14,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AppError,
   applyRecordValueChanges,
+  changePropertyType,
   createProperty,
   createRecord,
+  deleteProperty,
   evaluateFormulaColumn,
   getDatabase,
   listProperties,
   listRecords,
   listViews,
   renamePage,
+  renameProperty,
+  reorderProperty,
+  setPropertyConfig,
   validateFormula,
   type DatabasePropertyRow,
   type PropertyType,
 } from "../../../lib/ipc";
 import type { PropertyId, RecordId, RecordRow } from "../contract";
-import type { AddPropertyResult, DatabaseContainerState } from "../container/types";
+import type { AddPropertyResult, DatabaseContainerState, PropertyMutations } from "../container/types";
 import { specForPropertyType } from "../core/property-spec";
-import type { RecordValueChange, ViewMutations } from "../core/view-spec";
+import type { PropertyActionResult, RecordValueChange, ViewMutations } from "../core/view-spec";
 import { formulaErrorValue, parseFormulaConfig } from "../properties/formula/formula-value";
 import { resolveRecords, resolveSchema, toRecordRow } from "./resolve-schema";
 
@@ -121,6 +126,8 @@ export interface UseDatabaseResult {
    * configuração ficar aberto com o que o usuário escreveu.
    */
   addProperty(type: PropertyType, name: string, config?: unknown): Promise<AddPropertyResult>;
+  /** As escritas de ESTRUTURA do menu de coluna. `null` enquanto não há database pronta. */
+  propertyMutations: PropertyMutations | null;
   reload(): Promise<void>;
 }
 
@@ -344,8 +351,63 @@ export function useDatabase(databaseId: string | null): UseDatabaseResult {
     [databaseId, failWrite, reload],
   );
 
+  /**
+   * O molde de toda escrita de ESTRUTURA: roda o IPC, recarrega a database
+   * inteira (o schema mudou — colunas, tipos, fórmulas a recalcular — e o
+   * banco é a verdade), e devolve o resultado no formato que o diálogo
+   * espera. Em erro, `failWrite` já recarregou e avisou; a mensagem volta
+   * também, para quem pediu decidir se a mostra colada ao formulário.
+   */
+  const structuralWrite = useCallback(
+    async (write: () => Promise<unknown>, fallback: string): Promise<PropertyActionResult> => {
+      try {
+        await write();
+        setErrorMessage(null);
+        await reload();
+        return { ok: true };
+      } catch (error) {
+        await failWrite(error, fallback);
+        return { ok: false, message: messageFor(error, fallback) };
+      }
+    },
+    [failWrite, reload],
+  );
+
+  const propertyMutations: PropertyMutations | null =
+    state.status === "ready" && databaseId !== null
+      ? {
+          rename: (propertyId, name) => structuralWrite(() => renameProperty(propertyId, name), "Não foi possível renomear a propriedade."),
+          // Trocar o tipo deixa o `config` do tipo ANTIGO para trás no banco
+          // (`change_property_type` só muda `property_type`) — uma coluna
+          // Número `{ format: "plain" }` que vira Texto ficaria com aquele
+          // formato sem sentido, e uma que virasse Fórmula não teria
+          // `expression` nenhuma. É a mesma classe de estado do defeito da
+          // célula muda (ver `addProperty` acima): config que não é a do
+          // tipo. Por isso o `defaultConfig` do tipo novo vai logo atrás,
+          // pelo mesmo caminho que a criação já usa.
+          //
+          // São duas chamadas, não uma transação. Se a segunda falhar, o
+          // banco fica com tipo novo + config antiga — exatamente o que o
+          // Rust já permitia antes desta tela — e `failWrite` recarrega e
+          // avisa; a célula não fica muda porque todo formatador de célula é
+          // total (`formatNumberValue` tem `default:`). A ordem é tipo
+          // primeiro porque é a intenção do usuário; a config é a limpeza.
+          changeType: (propertyId, newType) =>
+            structuralWrite(async () => {
+              await changePropertyType(propertyId, newType);
+              const defaultConfig = specForPropertyType(newType)?.defaultConfig;
+              if (defaultConfig !== undefined) await setPropertyConfig(propertyId, defaultConfig);
+            }, "Não foi possível mudar o tipo da propriedade."),
+          setConfig: (propertyId, config) =>
+            structuralWrite(() => setPropertyConfig(propertyId, config), "Não foi possível salvar a configuração da propriedade."),
+          reorder: (propertyId, afterPropertyId) =>
+            structuralWrite(() => reorderProperty(databaseId, propertyId, afterPropertyId), "Não foi possível mover a propriedade."),
+          delete: (propertyId) => structuralWrite(() => deleteProperty(propertyId), "Não foi possível apagar a propriedade."),
+        }
+      : null;
+
   const mutations: ViewMutations | null =
     state.status === "ready" ? { applyValueChanges, renameRecord, createRecord: createRecordMutation } : null;
 
-  return { state, mutations, errorMessage, addProperty, reload };
+  return { state, mutations, errorMessage, addProperty, propertyMutations, reload };
 }

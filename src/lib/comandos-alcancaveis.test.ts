@@ -221,12 +221,12 @@ const REGISTRADOS_SEM_TELA: Record<string, string> = {
   // --- Databases: a view Tabela ligou o núcleo (get_database, list_properties,
   //     list_views, list_records, create_record, apply_record_value_changes,
   //     create_property via "+ Propriedade", create_database/create_view via
-  //     "/database"). O que sobra é gestão de ESTRUTURA sem tela: ---
+  //     "/database"). O menu do cabeçalho de coluna
+  //     (`views/table/ColumnHeaderMenu.tsx`) ligou rename_property,
+  //     change_property_type, reorder_property ("mover para a esquerda/
+  //     direita"), delete_property e set_property_config ("Editar fórmula").
+  //     O que sobra: ---
   list_databases_in_page: "nenhuma tela lista as databases de uma pagina — o bloco inline ja carrega o databaseId dele proprio; uma tela de 'databases desta pagina' (ou de page inteira, DBS-002) e que precisaria disto",
-  rename_property: "o cabecalho da coluna na Tabela ainda nao abre menu (renomear/tipo/reordenar/apagar) — a coluna nasce com o rotulo do tipo e fica assim",
-  change_property_type: "mesmo menu de coluna ausente de rename_property",
-  reorder_property: "mesmo menu de coluna ausente de rename_property; arrastar cabecalho ficou fora desta rodada de proposito (bar da Tabela)",
-  delete_property: "mesmo menu de coluna ausente de rename_property",
   set_view_config: "o ViewConfig (filtro/ordenacao/agrupamento/visibilidade) tem UI pura em view-config/, mas aplicar filtro e ordenacao depende do pipeline de consulta em Rust (open_view_query, arquitetura §8) que nao existe — persistir um config que a tela nao consegue honrar seria controle morto",
   reorder_view: "a database nasce com uma view so; nao ha abas de view na tela, entao nem reordenar nem apagar view tem onde morar",
   delete_view: "mesmo motivo de reorder_view — sem abas de view, nao ha onde apagar uma",

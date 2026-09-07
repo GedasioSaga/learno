@@ -2,14 +2,15 @@
  * DBS-002 "+ Propriedade": o menu de TIPO de uma coluna nova, montado a
  * partir do registro de `core/property-spec.ts` — só tipos que este build
  * sabe desenhar entram, na ordem de registro. A propriedade nasce com o
- * rótulo do tipo como nome ("Texto", "Data"), como no Notion; renomear
- * ainda não tem tela (dívida declarada em `comandos-alcancaveis.test.ts`).
+ * rótulo do tipo como nome ("Texto", "Data"), como no Notion; renomear é
+ * no menu do cabeçalho da coluna (`views/table/ColumnHeaderMenu.tsx`).
  *
  * Continua PURO: quem cria de verdade é `onPick`, passado por quem monta a
  * tela (`useDatabase().addProperty`).
  */
 import { useId } from "react";
 import type { PropertyType } from "../../../lib/ipc";
+import { isBackendPropertyType } from "../core/backend-property-types";
 import { collectPropertySpecs } from "../core/property-spec";
 import { useTogglePanel } from "../view-config/use-toggle-panel";
 
@@ -20,29 +21,11 @@ interface AddPropertyMenuProps {
   onPick(type: PropertyType, name: string): void;
 }
 
-/** Os 15 tipos que o Rust aceita (`VALID_PROPERTY_TYPES`) — o registro pode conhecer um tipo que o backend recusa, ou vice-versa; só a interseção vira botão. */
-const BACKEND_TYPES: ReadonlySet<string> = new Set<PropertyType>([
-  "text",
-  "number",
-  "select",
-  "multi_select",
-  "status",
-  "date",
-  "checkbox",
-  "url",
-  "files",
-  "person",
-  "formula",
-  "relation",
-  "rollup",
-  "created_time",
-  "last_edited_time",
-]);
-
 export function AddPropertyMenu({ disabled, disabledTitle, onPick }: AddPropertyMenuProps) {
   const { open, toggle, close, containerRef } = useTogglePanel();
   const panelId = useId();
-  const choices = collectPropertySpecs().filter((spec) => BACKEND_TYPES.has(spec.type));
+  // Só a interseção entre o registro e o que o Rust aceita vira botão.
+  const choices = collectPropertySpecs().filter((spec) => isBackendPropertyType(spec.type));
 
   return (
     <div className="relative" ref={containerRef}>

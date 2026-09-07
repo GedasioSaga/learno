@@ -8,16 +8,22 @@
  * célula ativa está na ordem de Tab — uma tabela de 200 linhas não pode
  * custar 2.000 Tabs para atravessar.
  *
+ * O cabeçalho de cada coluna de propriedade abre um menu
+ * (`ColumnHeaderMenu`: renomear, tipo, configuração, mover, apagar) quando
+ * `ctx.propertyActions` existe — `null` (database bloqueada, ou ninguém
+ * ligou as ações) desenha o cabeçalho estático de antes.
+ *
  * Fora desta rodada, e por isso AUSENTE da tela (controle que não faz nada
- * é defeito): redimensionar/reordenar/congelar coluna, arrastar linha,
+ * é defeito): redimensionar/congelar coluna, arrastar cabeçalho ou linha,
  * seleção múltipla, agrupamento, filtro e ordenação (as duas últimas
  * dependem do pipeline de consulta em Rust, arquitetura §8, que não existe).
  */
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import type { RecordId } from "../../contract";
+import type { RecordId, RecordRow } from "../../contract";
 import { specForPropertyType, type PropertyDescriptor } from "../../core/property-spec";
-import type { ViewRenderContext } from "../../core/view-spec";
+import type { PropertyActions, ViewRenderContext } from "../../core/view-spec";
 import { parseViewConfig } from "../../view-config";
+import { ColumnHeaderMenu } from "./ColumnHeaderMenu";
 import { columnWidth, DEFAULT_TITLE_WIDTH, orderVisibleColumns } from "./columns";
 import { TitleCell } from "./TitleCell";
 import { ValueCell } from "./ValueCell";
@@ -36,9 +42,13 @@ export interface TableViewProps {
 }
 
 export function TableView({ ctx }: TableViewProps) {
-  const { view, properties, records, mutations } = ctx;
+  const { view, properties, records, mutations, propertyActions } = ctx;
   const config = useMemo(() => parseViewConfig(view.config), [view]);
   const columns = useMemo(() => orderVisibleColumns(config, properties), [config, properties]);
+  // "Mover para a esquerda/direita" muda a `position` da database; se a view
+  // tem `columnOrder` próprio, é ele que manda na tela e o item não
+  // apareceria fazendo nada.
+  const moveEnabled = config.columnOrder.length === 0;
 
   const [editing, setEditing] = useState<CellAddress | null>(null);
   const [active, setActive] = useState<CellAddress | null>(null);
@@ -140,7 +150,14 @@ export function TableView({ ctx }: TableViewProps) {
                 Nome
               </th>
               {columns.map((column) => (
-                <ColumnHeader key={column.id} property={column} />
+                <ColumnHeader
+                  key={column.id}
+                  property={column}
+                  actions={propertyActions}
+                  columns={columns}
+                  moveEnabled={moveEnabled}
+                  records={records}
+                />
               ))}
             </tr>
           </thead>
@@ -197,15 +214,32 @@ export function TableView({ ctx }: TableViewProps) {
   );
 }
 
-function ColumnHeader({ property }: { property: PropertyDescriptor }) {
+interface ColumnHeaderProps {
+  property: PropertyDescriptor;
+  actions: PropertyActions | null;
+  columns: readonly PropertyDescriptor[];
+  moveEnabled: boolean;
+  records: readonly RecordRow[];
+}
+
+function ColumnHeader({ property, actions, columns, moveEnabled, records }: ColumnHeaderProps) {
   const spec = specForPropertyType(property.type);
   const readOnly = !spec?.renderEditor;
+  if (!actions) {
+    return (
+      <th scope="col" className="db-table__th" title={readOnly ? `${property.name} — calculado automaticamente` : property.name}>
+        <span className="db-table__th-icon" aria-hidden="true">
+          {spec?.icon ?? "?"}
+        </span>
+        {property.name}
+      </th>
+    );
+  }
+  // Ausência no mapa é o vazio (I1) — contar chaves é contar valores.
+  const filledCount = records.reduce((count, record) => (property.id in record.values ? count + 1 : count), 0);
   return (
-    <th scope="col" className="db-table__th" title={readOnly ? `${property.name} — calculado automaticamente` : property.name}>
-      <span className="db-table__th-icon" aria-hidden="true">
-        {spec?.icon ?? "?"}
-      </span>
-      {property.name}
+    <th scope="col" className="db-table__th db-table__th--menu">
+      <ColumnHeaderMenu property={property} spec={spec} actions={actions} columns={columns} moveEnabled={moveEnabled} filledCount={filledCount} />
     </th>
   );
 }

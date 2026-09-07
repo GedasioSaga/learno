@@ -9,17 +9,18 @@
 import type { KeyboardEvent, MouseEvent } from "react";
 import type { ViewMutations } from "../core/view-spec";
 import { DatabaseContainer } from "./DatabaseContainer";
-import type { DatabaseContainerActions, DatabaseContainerState } from "./types";
+import type { DatabaseContainerActions, DatabaseContainerState, PropertyMutations } from "./types";
 
 interface ExpandedDatabaseOverlayProps {
   state: DatabaseContainerState;
   actions: DatabaseContainerActions;
   mutations: ViewMutations | null;
+  propertyMutations: PropertyMutations | null;
   activeViewId?: string;
   onClose(): void;
 }
 
-export function ExpandedDatabaseOverlay({ state, actions, mutations, activeViewId, onClose }: ExpandedDatabaseOverlayProps) {
+export function ExpandedDatabaseOverlay({ state, actions, mutations, propertyMutations, activeViewId, onClose }: ExpandedDatabaseOverlayProps) {
   const title = state.status === "ready" ? state.schema.database.name || "Database" : "Database";
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -48,7 +49,14 @@ export function ExpandedDatabaseOverlay({ state, actions, mutations, activeViewI
             ✕
           </button>
         </div>
-        <DatabaseContainer state={state} mode="fullPage" actions={actions} mutations={mutations} activeViewId={activeViewId} />
+        <DatabaseContainer
+          state={state}
+          mode="fullPage"
+          actions={actions}
+          mutations={mutations}
+          propertyMutations={propertyMutations}
+          activeViewId={activeViewId}
+        />
       </div>
     </div>
   );
