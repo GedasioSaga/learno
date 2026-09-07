@@ -13,7 +13,17 @@ type Props = {
 /** Texto que o leitor de voz lê no lugar de uma lacuna sem dica. */
 const LACUNA_FALADA = "lacuna";
 /** O que a tela mostra dentro de uma lacuna sem dica. */
-const LACUNA_VAZIA = "…";
+export const LACUNA_VAZIA = "…";
+
+/**
+ * A receita visual de uma lacuna, exportada para `CriarLacunaDeOrigem`
+ * desenhar a prévia com a MESMA peça: criar e estudar precisam ter a mesma
+ * cara, senão o usuário aprende duas linguagens para um conceito só. O
+ * porquê de cada token está no comentário de `TextoComLacuna` abaixo.
+ */
+export const CLASSE_LACUNA_ESCONDIDA =
+  "mx-0.5 inline-block min-w-12 rounded-sm border-b-2 border-amber bg-amber/10 px-1.5 text-center text-amber-ink";
+export const CLASSE_LACUNA_REVELADA = "border-b-2 border-amber font-medium text-amber-ink";
 
 /**
  * O texto de um cartão cloze como uma frase só, para o `LeitorDeVoz`:
@@ -68,17 +78,14 @@ export function TextoComLacuna({ segmentos, numeroDaLacuna, revelado, extra }: P
 
             if (revelado) {
               return (
-                <span key={indice} className="border-b-2 border-amber font-medium text-amber-ink">
+                <span key={indice} className={CLASSE_LACUNA_REVELADA}>
                   {segmento.text}
                 </span>
               );
             }
 
             return (
-              <span
-                key={indice}
-                className="mx-0.5 inline-block min-w-12 rounded-sm border-b-2 border-amber bg-amber/10 px-1.5 text-center text-amber-ink"
-              >
+              <span key={indice} className={CLASSE_LACUNA_ESCONDIDA}>
                 <span className="sr-only">{segmento.hint ? "lacuna, dica: " : "lacuna"}</span>
                 {segmento.hint ? <span className="italic">{segmento.hint}</span> : <span aria-hidden="true">{LACUNA_VAZIA}</span>}
               </span>

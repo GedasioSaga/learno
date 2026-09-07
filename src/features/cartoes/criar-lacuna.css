@@ -1,0 +1,23 @@
+/* A prévia de cartão que NASCE quando o usuário marca uma "nova lacuna" em
+   `CriarLacunaDeOrigem`. Anima para EXPLICAR (régua de movimento,
+   `docs/DESIGN-TOKENS.md` §9): a diferença entre "nova lacuna" e "mesma
+   lacuna" é exatamente "nasce um cartão a mais ou não", e o cartão
+   aparecendo é o que mostra isso sem texto. Só transform/opacity, entrada
+   em ease-out a partir de 0.95, abaixo de 300ms. Ação por teclado não recebe
+   esta classe (o componente decide) — regra 3 da mesma seção. `prefers-
+   reduced-motion` é zerado globalmente em `theme.css`. */
+@keyframes lacuna-cartao-entra {
+  from {
+    opacity: 0;
+    transform: scale(var(--motion-scale-in));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.lacuna-cartao-entra {
+  animation: lacuna-cartao-entra var(--motion-base) var(--ease-out);
+  transform-origin: top left;
+}

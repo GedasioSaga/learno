@@ -214,6 +214,71 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### O gesto do produto (07/09/2026) — selecionar um trecho vira lacuna
+
+A rodada anterior entregou o cloze inteiro — tipo de nota, parser, um cartão por lacuna,
+renderização na tela de estudo — e ele era **inalcançável pelo gesto que o produto promete**:
+só dava para criar digitando `{{c1::}}` à mão, o que ninguém faz. O tipo mais usado do Anki
+estava no app, e o gesto da tese (*"selecionar um trecho cria um card"*) só produzia
+frente/verso. É o defeito histórico deste repositório numa variante nova: não código sem
+chamador, mas **feature sem o gesto**.
+
+**A decisão de desenho: as lacunas são marcadas dentro do formulário, sobre uma cópia do
+texto do bloco — nunca na página.** Acumular seleções na própria página exigiria decorações
+no editor que *parecem* edição, e "criar um cartão editou minha nota" é a surpresa que se
+descobre tarde e custa confiança. Uma cópia dentro de um diálogo deixa o bloco visivelmente
+intocado atrás. Além disso, a prévia de quantos cartões nascem só faz sentido ao lado do
+texto, e só existe se houver um lugar para ela antes de salvar.
+
+**A distinção do Anki foi preservada, e ela não é detalhe:** `Ctrl+Shift+C` incrementa o
+número (duas perguntas separadas) e `Ctrl+Shift+Alt+C` reusa o mesmo (uma pergunta com dois
+buracos). Isso muda quantos cartões nascem e é decidido no gesto. Aparece na tela sem
+explicação escrita: cada botão **carrega o número que vai produzir** (`Nova lacuna [2]` vs
+`Mesma lacuna [1]`), desenhado com a mesma peça visual da lacuna na tela de estudo, e a
+lista abaixo mostra uma prévia por cartão. "Nova lacuna" faz um cartão a mais **aparecer**;
+"Mesma lacuna" só abre outro buraco no que já existia. O botão de salvar diz "Criar N
+cartões".
+
+Detalhe de modelo que segue o Anki: remover a `c1` **não renumera** a `c2` — a próxima é
+`c3`. O número de cartões é sempre derivado das lacunas, nunca guardado.
+
+**O invariante mais importante está provado por teste:** `create-cloze.test.tsx` monta um
+editor TipTap real, seleciona um trecho, executa o gesto inteiro até `criarNotaComOrigem`, e
+confere que `editor.getJSON()` é **byte a byte idêntico** antes e depois. A mesma asserção
+prova a tese: o texto vira `A {{c1::mitocôndria}} produz ATP…`, com `sourceBlockId` e
+`sourceTextFrozen` preenchidos — a referência viva ao bloco de origem.
+
+`lacunas.ts` é um **gerador, não um parser** — e isso está escrito no `///` dele, de
+propósito. A gramática de cloze continua morando só no Rust; este arquivo produz a marcação
+a partir de índices que ele mesmo controla, e nunca lê marcação de volta.
+
+Bordas cobertas por teste: seleção vazia e só-espaço; seleção que já contém `{{` ou `}}`
+(abre sem lacuna, com o motivo, salvar desabilitado); texto do bloco vazio; sobreposição de
+lacunas; seleção fora do texto; ausência do tipo Cloze; ausência de baralho; erro do
+backend; e **uma nota que acabaria sem nenhuma lacuna não pode ser criada** — o `submit`
+forçado é barrado sem chamar o backend, porque um cartão sem lacuna nasce sem nada para
+perguntar.
+
+Portão desta rodada:
+
+- `rtk proxy npx tsc --noEmit`: **exit 0**.
+- `rtk proxy npx vitest run`: **2064 testes em 217 arquivos**, três travas verdes.
+- `cargo clippy --all-targets --all-features -- -D warnings -W clippy::unwrap_used
+  -W clippy::expect_used`: **exit 0**.
+- `npm run test:e2e`: **13 specs, 0 falhas**, contra o app Tauri real.
+
+**Fora do escopo, declarado:** dica (`{{c1::texto::dica}}`) pelo gesto; editar as lacunas de
+uma nota cloze que já existe (depende da tela de edição de nota, que não existe — é por isso
+que `update_note`, `delete_note` e `list_notes` seguem em `REGISTRADOS_SEM_TELA`). Seleção
+que atravessa blocos cai para "o trecho é o texto inteiro", sem `blocoOrigemId`: funciona,
+mas perde o contexto ao redor, e está documentado no `CreateClozeButton`.
+
+**Não verificado:** a tela não foi aberta. Os tokens usados são os já medidos em
+`DESIGN-TOKENS.md`, mas isso é argumento, não observação — os cinco temas não foram olhados,
+e a animação de entrada e o `selectionchange` real do WebView2 não foram exercitados (o
+jsdom prova os índices, não o comportamento do navegador). Nenhuma spec e2e cobre este
+gesto.
+
 ### Cloze (07/09/2026) — o tipo de cartão que a tese do produto exige
 
 A tese, no topo deste documento: *"o flashcard nasce dentro da nota. Selecionar um trecho
