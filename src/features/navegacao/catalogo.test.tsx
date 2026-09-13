@@ -4,7 +4,7 @@ import { atalhoDaSecao, METADADOS_DAS_SECOES, montarSecoes } from "./catalogo";
 import { SECAO_IDS } from "./contrato";
 
 describe("catálogo de seções", () => {
-  it("tem as sete seções, na ordem do pedido", () => {
+  it("tem as oito seções, na ordem do pedido (Finanças logo abaixo de Cronograma)", () => {
     expect(METADADOS_DAS_SECOES.map((secao) => secao.nome)).toEqual([
       "Hoje",
       "Notas",
@@ -12,12 +12,13 @@ describe("catálogo de seções", () => {
       "Mapa mental",
       "Trilha",
       "Cronograma",
+      "Finanças",
       "Biblioteca",
     ]);
   });
 
-  it("dá a cada seção um atalho Ctrl+1…7 pela ordem do rail", () => {
-    expect(SECAO_IDS.map(atalhoDaSecao)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it("dá a cada seção um atalho Ctrl+1…8 pela ordem do rail", () => {
+    expect(SECAO_IDS.map(atalhoDaSecao)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 });
 
@@ -33,6 +34,7 @@ describe("montarSecoes", () => {
       "em-construcao",
       "em-construcao",
       "pronta",
+      "em-construcao",
       "em-construcao",
       "em-construcao",
       "em-construcao",

@@ -3,8 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { AppShell } from "./components/AppShell";
 import { BotaoDeIcone } from "./components/BotaoDeIcone";
 import { RecoveryBanner } from "./features/backup";
+import { AtualizadorBanner } from "./components/AtualizadorBanner";
 import { ConteudoDeBiblioteca, PainelDeBiblioteca } from "./features/biblioteca";
 import { ConteudoDeCronograma } from "./features/cronograma";
+import { ConteudoDeFinancas } from "./features/financas";
 import { ConteudoDeHoje } from "./features/hoje";
 import { IconeConfiguracoes } from "./features/navegacao/icones";
 import { ConteudoDeCartoes, PainelDeCartoes } from "./features/cartoes";
@@ -31,7 +33,7 @@ type LoadState =
   | { status: "load-failed"; message: string };
 
 /**
- * As sete seções do app, ligadas às telas que existem.
+ * As oito seções do app, ligadas às telas que existem.
  *
  * Para ligar uma seção nova: acrescente a entrada dela aqui —
  * `cartoes: { Painel: PainelDeCartoes, Conteudo: ConteudoDeCartoes }` — e
@@ -45,6 +47,7 @@ const SECOES = montarSecoes({
   "mapa-mental": { Painel: PainelDeMapaMental, Conteudo: ConteudoDeMapaMental },
   trilha: { Painel: PainelDeTrilha, Conteudo: ConteudoDeTrilha },
   cronograma: { Conteudo: ConteudoDeCronograma },
+  financas: { Conteudo: ConteudoDeFinancas },
   biblioteca: { Painel: PainelDeBiblioteca, Conteudo: ConteudoDeBiblioteca },
 });
 
@@ -184,6 +187,7 @@ function Workspace() {
           seção atual. Navegar por ela é gesto de teclado, então a troca de
           seção não anima. */}
       <SearchPalette onNavigate={(pageId) => abrirPagina(pageId, "teclado")} />
+      <AtualizadorBanner />
 
       {/* Único ponto de entrada das Configurações. Cada seção lá dentro é o
           único caminho de UI para um comando que existe e funciona no backend

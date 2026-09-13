@@ -59,6 +59,11 @@ pub fn run() {
         // bookmark (título/descrição/favicon) sem esbarrar em CORS — ver
         // src-tauri/capabilities/default.json para o escopo de URL.
         .plugin(tauri_plugin_http::init())
+        // Auto-update pelo GitHub Releases: o frontend (AtualizadorBanner)
+        // consulta o latest.json do endpoint em tauri.conf.json, baixa o
+        // instalador assinado e reinicia pelo plugin-process.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(ipc::AppState::new())
         .setup(|app| {
             // PLT-004: sobe o sidecar uma vez, aqui, e guarda o handle em
@@ -206,6 +211,21 @@ pub fn run() {
             ipc::prazos_commands::atualizar_prazo,
             ipc::prazos_commands::remover_prazo,
             ipc::prazos_commands::listar_prazos,
+            ipc::financas_commands::listar_categorias_financas,
+            ipc::financas_commands::criar_categoria_financas,
+            ipc::financas_commands::criar_recorrente,
+            ipc::financas_commands::listar_recorrentes,
+            ipc::financas_commands::atualizar_recorrente,
+            ipc::financas_commands::remover_recorrente,
+            ipc::financas_commands::mudar_valor_recorrente,
+            ipc::financas_commands::encerrar_recorrente,
+            ipc::financas_commands::criar_lancamento,
+            ipc::financas_commands::atualizar_lancamento,
+            ipc::financas_commands::remover_lancamento,
+            ipc::financas_commands::listar_lancamentos_do_mes,
+            ipc::financas_commands::confirmar_recorrente,
+            ipc::financas_commands::resumo_financeiro_do_mes,
+            ipc::financas_commands::visao_financeira_por_meses,
             ipc::database_commands::create_database,
             ipc::database_commands::get_database,
             ipc::database_commands::list_databases_in_page,

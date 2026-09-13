@@ -28,11 +28,11 @@ beforeEach(() => {
 });
 
 describe("AppShell", () => {
-  it("mostra o rail com as sete seções, o painel e o conteúdo da seção ativa, e o rodapé", () => {
+  it("mostra o rail com as oito seções, o painel e o conteúdo da seção ativa, e o rodapé", () => {
     render(<AppShell secoes={SECOES} acoes={<button type="button">Configurações</button>} />);
 
     const rail = screen.getByRole("navigation", { name: "Seções" });
-    expect(within(rail).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(rail).getAllByRole("listitem")).toHaveLength(8);
     expect(within(rail).getByRole("button", { name: "Notas" })).toHaveAttribute("aria-current", "page");
     expect(within(rail).getByRole("button", { name: "Trilha" })).not.toHaveAttribute("aria-current");
 
@@ -83,7 +83,7 @@ describe("AppShell", () => {
   it("Ctrl+dígito fora da faixa, ou com Shift/Alt junto, não faz nada", () => {
     render(<AppShell secoes={SECOES} />);
 
-    fireEvent.keyDown(window, { key: "8", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "9", ctrlKey: true });
     fireEvent.keyDown(window, { key: "0", ctrlKey: true });
     fireEvent.keyDown(window, { key: "3", ctrlKey: true, shiftKey: true });
     fireEvent.keyDown(window, { key: "3", ctrlKey: true, altKey: true });

@@ -2678,3 +2678,228 @@ export function removerPrazo(prazoId: string): Promise<void> {
 export function listarPrazos(): Promise<PrazosListados> {
   return call<PrazosListados>("listar_prazos");
 }
+
+// ---------------------------------------------------------------------------
+// Finanças — `0043_financas.sql`, `db::financas`, `ipc::financas_commands`.
+// Todo valor é CENTAVOS inteiros; mês é `YYYY-MM`; data é `YYYY-MM-DD`.
+// ---------------------------------------------------------------------------
+
+/** Quem diz se o dinheiro entra ou sai — o valor é sempre `>= 0`. */
+export type TipoFinanceiro = "entrada" | "saida";
+
+/** Espelha `CategoriaRow`. */
+export interface CategoriaRow {
+  id: string;
+  nome: string;
+  tipo: TipoFinanceiro;
+  ordem: number;
+  arquivada: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Espelha `RecorrenteRow`: renda ou gasto fixo, sem o valor (que mora nas vigências). */
+export interface RecorrenteRow {
+  id: string;
+  descricao: string;
+  tipo: TipoFinanceiro;
+  categoriaId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Espelha `VigenciaRow`: um valor que vale de `inicioMes` até `fimMes` (inclusivo; `null` = sem fim). */
+export interface VigenciaRow {
+  id: string;
+  recorrenteId: string;
+  valorCentavos: number;
+  inicioMes: string;
+  fimMes: string | null;
+  createdAt: string;
+}
+
+/** Espelha `RecorrenteComVigencias` (`recorrente` vem achatado). Vigências em ordem de `inicioMes`. */
+export interface RecorrenteComVigencias extends RecorrenteRow {
+  vigencias: VigenciaRow[];
+}
+
+/** Espelha `RecorrentePatchInput`. Campo ausente = sem mudança. */
+export interface RecorrentePatchInput {
+  descricao?: string;
+  tipo?: TipoFinanceiro;
+  categoriaId?: string;
+}
+
+/** Espelha `LancamentoRow`. `recorrenteId`/`mesReferencia` preenchidos = fixo confirmado. */
+export interface LancamentoRow {
+  id: string;
+  dataLocal: string;
+  descricao: string;
+  tipo: TipoFinanceiro;
+  categoriaId: string | null;
+  valorCentavos: number;
+  recorrenteId: string | null;
+  mesReferencia: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Espelha `LancamentoPatchInput`. Campo ausente = sem mudança. */
+export interface LancamentoPatchInput {
+  dataLocal?: string;
+  descricao?: string;
+  tipo?: TipoFinanceiro;
+  categoriaId?: string;
+  valorCentavos?: number;
+}
+
+/** Espelha `FixoDoMes`: um recorrente vigente no mês, pendente (`lancamentoId === null`) ou confirmado. */
+export interface FixoDoMes {
+  recorrenteId: string;
+  descricao: string;
+  tipo: TipoFinanceiro;
+  categoriaId: string | null;
+  valorPrevistoCentavos: number;
+  lancamentoId: string | null;
+  valorConfirmadoCentavos: number | null;
+}
+
+/** Espelha `GastoPorCategoria`. `categoriaId === null` = lançamento sem categoria. */
+export interface GastoPorCategoria {
+  categoriaId: string | null;
+  nome: string | null;
+  saidasCentavos: number;
+}
+
+/** Espelha `LinhaDoMes`. Previsto = fixos vigentes + avulsos; realizado = lançamentos do mês. */
+export interface LinhaDoMes {
+  mes: string;
+  entradasPrevistas: number;
+  saidasPrevistas: number;
+  entradasRealizadas: number;
+  saidasRealizadas: number;
+  sobraPrevista: number;
+  sobraRealizada: number;
+}
+
+/**
+ * Espelha `ResumoDoMes`. Toda soma vem do backend — a tela nunca refaz a conta.
+ * Campos repetidos de `LinhaDoMes` em vez de `extends`: o Rust não usa
+ * `flatten` aqui, e `contrato-ipc.test.ts` compara campo a campo.
+ */
+export interface ResumoDoMes {
+  mes: string;
+  entradasPrevistas: number;
+  saidasPrevistas: number;
+  entradasRealizadas: number;
+  saidasRealizadas: number;
+  sobraPrevista: number;
+  sobraRealizada: number;
+  fixos: FixoDoMes[];
+  porCategoria: GastoPorCategoria[];
+}
+
+/** `listar_categorias_financas`. Não arquivadas; entradas antes das saídas. */
+export function listarCategoriasFinancas(): Promise<CategoriaRow[]> {
+  return call<CategoriaRow[]>("listar_categorias_financas");
+}
+
+/** `criar_categoria_financas`. Nome repetido volta como erro `invalid`. */
+export function criarCategoriaFinancas(nome: string, tipo: TipoFinanceiro): Promise<CategoriaRow> {
+  return call<CategoriaRow>("criar_categoria_financas", { nome, tipo });
+}
+
+/** `criar_recorrente`. Cria o recorrente e a primeira vigência, aberta a partir de `inicioMes`. */
+export function criarRecorrente(
+  descricao: string,
+  tipo: TipoFinanceiro,
+  categoriaId: string | null,
+  valorCentavos: number,
+  inicioMes: string,
+): Promise<RecorrenteComVigencias> {
+  return call<RecorrenteComVigencias>("criar_recorrente", { descricao, tipo, categoriaId, valorCentavos, inicioMes });
+}
+
+/** `listar_recorrentes`. */
+export function listarRecorrentes(): Promise<RecorrenteComVigencias[]> {
+  return call<RecorrenteComVigencias[]>("listar_recorrentes");
+}
+
+/** `atualizar_recorrente`. Devolve o recorrente sem vigências. */
+export function atualizarRecorrente(recorrenteId: string, patch: RecorrentePatchInput): Promise<RecorrenteRow> {
+  return call<RecorrenteRow>("atualizar_recorrente", { recorrenteId, patch });
+}
+
+/** `remover_recorrente`. Apaga as vigências; lançamentos já confirmados ficam, sem vínculo. */
+export function removerRecorrente(recorrenteId: string): Promise<void> {
+  return call<void>("remover_recorrente", { recorrenteId });
+}
+
+/** `mudar_valor_recorrente`. O novo valor vale de `mes` em diante; o anterior fecha no mês de antes. */
+export function mudarValorRecorrente(
+  recorrenteId: string,
+  valorCentavos: number,
+  mes: string,
+): Promise<RecorrenteComVigencias> {
+  return call<RecorrenteComVigencias>("mudar_valor_recorrente", { recorrenteId, valorCentavos, mes });
+}
+
+/** `encerrar_recorrente`. `ultimoMes` ainda conta; o mês seguinte não. */
+export function encerrarRecorrente(recorrenteId: string, ultimoMes: string): Promise<RecorrenteComVigencias> {
+  return call<RecorrenteComVigencias>("encerrar_recorrente", { recorrenteId, ultimoMes });
+}
+
+/** `criar_lancamento`. */
+export function criarLancamento(
+  dataLocal: string,
+  descricao: string,
+  tipo: TipoFinanceiro,
+  categoriaId: string | null,
+  valorCentavos: number,
+): Promise<LancamentoRow> {
+  return call<LancamentoRow>("criar_lancamento", { dataLocal, descricao, tipo, categoriaId, valorCentavos });
+}
+
+/** `atualizar_lancamento`. */
+export function atualizarLancamento(lancamentoId: string, patch: LancamentoPatchInput): Promise<LancamentoRow> {
+  return call<LancamentoRow>("atualizar_lancamento", { lancamentoId, patch });
+}
+
+/** `remover_lancamento`. Exclusão física. Remover um fixo confirmado o devolve a pendente. */
+export function removerLancamento(lancamentoId: string): Promise<void> {
+  return call<void>("remover_lancamento", { lancamentoId });
+}
+
+/** `listar_lancamentos_do_mes`. Ordenados por data. */
+export function listarLancamentosDoMes(mes: string): Promise<LancamentoRow[]> {
+  return call<LancamentoRow[]>("listar_lancamentos_do_mes", { mes });
+}
+
+/**
+ * `confirmar_recorrente`. Cria o lançamento do fixo no mês. Sem `valorCentavos`
+ * usa o valor vigente; sem `dataLocal` usa o dia 1º. Confirmar duas vezes no
+ * mesmo mês volta como erro `invalid`.
+ */
+export function confirmarRecorrente(
+  recorrenteId: string,
+  mes: string,
+  valorCentavos?: number | null,
+  dataLocal?: string | null,
+): Promise<LancamentoRow> {
+  return call<LancamentoRow>("confirmar_recorrente", {
+    recorrenteId,
+    mes,
+    valorCentavos: valorCentavos ?? null,
+    dataLocal: dataLocal ?? null,
+  });
+}
+
+/** `resumo_financeiro_do_mes`. */
+export function resumoFinanceiroDoMes(mes: string): Promise<ResumoDoMes> {
+  return call<ResumoDoMes>("resumo_financeiro_do_mes", { mes });
+}
+
+/** `visao_financeira_por_meses`. `quantidade` de 1 a 36. */
+export function visaoFinanceiraPorMeses(inicioMes: string, quantidade: number): Promise<LinhaDoMes[]> {
+  return call<LinhaDoMes[]>("visao_financeira_por_meses", { inicioMes, quantidade });
+}

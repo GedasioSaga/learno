@@ -4,7 +4,7 @@ import type { ComponentType, ReactNode } from "react";
  * O contrato de uma seção do app — o que cada tela (Hoje, Notas, Cartões…)
  * implementa para aparecer no rail e ocupar a casca.
  *
- * Existe para que sete telas escritas por pessoas diferentes falem o mesmo
+ * Existe para que oito telas escritas por pessoas diferentes falem o mesmo
  * dialeto: a casca (`AppShell`) só conhece esta interface, e uma seção só
  * conhece os dois pontos onde pode desenhar — o painel lateral e o conteúdo.
  * Nada aqui sabe de página, deck ou mapa; isso é da store de cada seção.
@@ -13,7 +13,7 @@ import type { ComponentType, ReactNode } from "react";
  * escreve seus componentes e os liga em `src/App.tsx` via `montarSecoes`.
  */
 
-/** As sete seções, na ordem em que aparecem no rail. */
+/** As oito seções, na ordem em que aparecem no rail. */
 export const SECAO_IDS = [
   "hoje",
   "notas",
@@ -21,6 +21,7 @@ export const SECAO_IDS = [
   "mapa-mental",
   "trilha",
   "cronograma",
+  "financas",
   "biblioteca",
 ] as const;
 

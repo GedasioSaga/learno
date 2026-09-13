@@ -5,6 +5,7 @@ import {
   IconeBiblioteca,
   IconeCartoes,
   IconeCronograma,
+  IconeFinancas,
   IconeHoje,
   IconeMapaMental,
   IconeNotas,
@@ -12,7 +13,7 @@ import {
 } from "./icones";
 
 /**
- * A identidade das sete seções — nome, ícone, o que cada uma é.
+ * A identidade das oito seções — nome, ícone, o que cada uma é.
  *
  * Só metadado: nenhum componente de tela mora aqui, então este arquivo não
  * muda quando uma seção fica pronta. Quem liga tela a seção é `montarSecoes`,
@@ -98,6 +99,19 @@ export const CATALOGO_DE_SECOES: Readonly<Record<SecaoId, MetadadosDaSecao>> = {
       "A diferença entre planejado e realizado, visível de cara",
     ],
   },
+  financas: {
+    id: "financas",
+    nome: "Finanças",
+    resumo: "Salário, gastos fixos e o que sobra no mês.",
+    icone: <IconeFinancas />,
+    descricao:
+      "O dinheiro do mês num lugar só: renda e gastos fixos que mudam com o tempo, cada lançamento do dia a dia e quanto sobra — o previsto lado a lado com o que aconteceu de verdade.",
+    planejado: [
+      "Renda e gastos fixos com valor que muda a partir de um mês",
+      "Lançamentos de entrada e saída por categoria",
+      "Visão do mês com previsto, realizado e sobra",
+    ],
+  },
   biblioteca: {
     id: "biblioteca",
     nome: "Biblioteca",
@@ -113,11 +127,11 @@ export const CATALOGO_DE_SECOES: Readonly<Record<SecaoId, MetadadosDaSecao>> = {
   },
 };
 
-/** As sete seções, na ordem do rail. */
+/** As oito seções, na ordem do rail. */
 export const METADADOS_DAS_SECOES: readonly MetadadosDaSecao[] = SECAO_IDS.map((id) => CATALOGO_DE_SECOES[id]);
 
 /**
- * Atalho de teclado de uma seção: Ctrl+1 … Ctrl+7, pela ordem do rail.
+ * Atalho de teclado de uma seção: Ctrl+1 … Ctrl+8, pela ordem do rail.
  * `null` para uma seção fora da ordem conhecida (não acontece com o catálogo,
  * mas o tipo não garante).
  */

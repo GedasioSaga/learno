@@ -26,7 +26,7 @@
 -- para uma meia dúzia de linhas.
 CREATE TABLE study_routines (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL
     -- Sem UNIQUE, mesmo precedente de `study_subjects.name` (0029:38-42) e de
     -- `decks.name` (0010): duas rotinas homônimas em contextos diferentes
     -- ("Dia de semana" antes e depois de mudar de emprego) é caso legítimo, e
@@ -39,7 +39,7 @@ CREATE TABLE study_routines (
     -- chips de dia no diálogo "Aplicar" (fase 2) — a leitura da semana em
     -- `semana()` NUNCA consulta esta coluna; aplicar sempre grava dia por dia
     -- de verdade, e `default_weekdays` só existe para poupar clique.
-    default_weekdays TEXT NOT NULL DEFAULT '1111100',
+    default_weekdays TEXT NOT NULL DEFAULT '1111100'
     -- GLOB de largura fixa, mesmo padrão de `0024:81`/`local_date`: garante
     -- exatamente 7 caracteres, cada um '0' ou '1', sem precisar de uma
     -- segunda checagem de comprimento (o GLOB já falha se faltar ou sobrar
@@ -98,7 +98,7 @@ CREATE TABLE study_routine_items (
     -- GLOB fecha o formato `HH:MM`, e a comparação de string fecha o teto que
     -- o GLOB sozinho deixaria passar (`29:59` bate o GLOB, mas não é hora
     -- válida).
-    start_local_time TEXT NOT NULL,
+    start_local_time TEXT NOT NULL
     CHECK (start_local_time GLOB '[0-2][0-9]:[0-5][0-9]' AND start_local_time <= '23:59'),
     planned_minutes INTEGER NOT NULL CHECK (planned_minutes > 0 AND planned_minutes <= 1440),
     -- Mesmas cinco chaves de `study_plan_blocks.activity` (0024:141) — ver a
@@ -107,13 +107,13 @@ CREATE TABLE study_routine_items (
     -- 'other' aqui: `activity` significa qual subsistema do app EXECUTA o
     -- item, e nenhum desses tem execução própria. A categoria visível ao
     -- usuário vem de `title` + `subject_id`, nunca deste campo.
-    activity TEXT NOT NULL DEFAULT 'other',
+    activity TEXT NOT NULL DEFAULT 'other'
     CHECK (activity IN ('pomodoro', 'review', 'mindmap', 'reading', 'other')),
     -- Mesmo CHECK pareado de `study_plan_blocks.pomodoro_cycles` (0024:142):
     -- só faz sentido com `activity = 'pomodoro'`, e só se os minutos
     -- planejados dividirem exato pelos ciclos (o "2x25" da tela nunca pode
     -- desenhar um número que não bate com os minutos guardados).
-    pomodoro_cycles INTEGER,
+    pomodoro_cycles INTEGER
     CHECK (pomodoro_cycles IS NULL OR (activity = 'pomodoro' AND pomodoro_cycles > 0 AND planned_minutes % pomodoro_cycles = 0)),
     title TEXT NOT NULL DEFAULT '',
     -- Vínculo opcional com `study_subjects` (0029) — mesmo ON DELETE SET

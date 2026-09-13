@@ -20,6 +20,7 @@ pub mod cronograma;
 pub mod databases;
 pub mod decks;
 pub mod effects;
+pub mod financas;
 pub mod gamificacao;
 pub mod ids;
 pub mod integrity;
@@ -60,6 +61,10 @@ pub use decks::{DeckRepository, DeckRow};
 pub use effects::{
     BrokenReference, BrokenReferenceOwner, EffectExecutionContext, EffectOutcome, EffectRepository, MissingKind,
     OpenAfter, PropertyWrite, PropertyWriteOp, RecordEffect, ValueSource,
+};
+pub use financas::{
+    CategoriaRow, FinancasRepository, FixoDoMes, GastoPorCategoria, LancamentoPatchInput, LancamentoRow, LinhaDoMes,
+    RecorrenteComVigencias, RecorrentePatchInput, RecorrenteRow, ResumoDoMes, VigenciaRow,
 };
 pub use gamificacao::{
     Desafio, EstadoDeNivel, GamificacaoRepository, MelhorDia, MelhorSemana, RecordesPessoais, ResumoDeSessao,

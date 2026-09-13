@@ -38,7 +38,7 @@ interface AppShellProps {
  * em si. Nenhuma sombra separa as colunas — sombra é para o eixo Z, e aqui a
  * separação é lateral, trabalho de um fio (`hairline`).
  *
- * Atalhos: Ctrl+1 … Ctrl+7 trocam de seção pela ordem do rail. Troca por
+ * Atalhos: Ctrl+1 … Ctrl+8 trocam de seção pela ordem do rail. Troca por
  * teclado não anima o conteúdo (§9.3); troca por clique anima em 180ms.
  */
 export function AppShell({ secoes, acoes }: AppShellProps) {

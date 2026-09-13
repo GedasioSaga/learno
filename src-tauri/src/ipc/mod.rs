@@ -19,6 +19,7 @@ pub(crate) mod commands;
 pub(crate) mod cronograma_commands;
 pub(crate) mod database_commands;
 pub(crate) mod deck_commands;
+pub(crate) mod financas_commands;
 pub(crate) mod formula_commands;
 pub(crate) mod gamificacao_commands;
 pub(crate) mod mindmap_commands;
@@ -72,6 +73,12 @@ pub use commands::{
     list_page_versions, list_trashed_pages, move_page, permanently_delete_page, rename_page,
     restore_page, restore_page_version, save_data_dir, search_pages, set_page_favorite,
     save_theme, set_page_icon, trash_page, ApkgImportResult,
+};
+pub use financas_commands::{
+    atualizar_lancamento, atualizar_recorrente, confirmar_recorrente, criar_categoria_financas, criar_lancamento,
+    criar_recorrente, encerrar_recorrente, listar_categorias_financas, listar_lancamentos_do_mes, listar_recorrentes,
+    mudar_valor_recorrente, remover_lancamento, remover_recorrente, resumo_financeiro_do_mes,
+    visao_financeira_por_meses,
 };
 pub use gamificacao_commands::{
     desafios_hoje, nivel_atual, recordes_pessoais, registrar_xp_bloco_cronograma, registrar_xp_desafio_diario,

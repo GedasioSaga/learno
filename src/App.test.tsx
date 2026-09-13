@@ -98,7 +98,7 @@ describe("App", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("disco cheio");
   });
 
-  it("o rail tem as sete seções, na ordem certa, e trocar de seção troca o conteúdo", async () => {
+  it("o rail tem as oito seções, na ordem certa, e trocar de seção troca o conteúdo", async () => {
     openWorkspaceMock.mockResolvedValue(savedConfig);
     listPageTreeMock.mockResolvedValue([]);
     const user = userEvent.setup();
@@ -111,10 +111,10 @@ describe("App", () => {
       within(rail)
         .getAllByRole("listitem")
         .map((item) => item.textContent),
-    ).toEqual(["Hoje", "Notas", "Cartões", "Mapa mental", "Trilha", "Cronograma", "Biblioteca"]);
+    ).toEqual(["Hoje", "Notas", "Cartões", "Mapa mental", "Trilha", "Cronograma", "Finanças", "Biblioteca"]);
     expect(within(rail).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
-    // Trilha é a seção mais nova das sete (ver `features/trilha/`) — sem
+    // Trilha abre sem IPC (ver `features/trilha/`) — sem
     // ponteiro de Trilha salvo (o `localStorage.clear()` do `beforeEach`
     // cuida disso), o convite de criar aparece sem chamada de IPC nenhuma.
     await user.click(within(rail).getByRole("button", { name: "Trilha" }));

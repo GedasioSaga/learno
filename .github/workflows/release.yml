@@ -1,0 +1,75 @@
+# Build + release automático: push de tag `v*` (feito por scripts/publicar.ps1)
+# empacota o sidecar Python, gera o instalador NSIS assinado (minisign do
+# updater) e publica o release público com o latest.json — é esse arquivo que
+# os Learno instalados consultam para se atualizar sozinhos.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup node
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # src-tauri/binaries/ não é versionado: o externalBin do tauri.conf.json
+      # exige o sidecar lá, com o target triple no nome, antes do build.
+      - name: empacotar sidecar
+        shell: pwsh
+        working-directory: sidecar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pyinstaller learno_sidecar.spec --noconfirm
+          New-Item -ItemType Directory -Force ../src-tauri/binaries | Out-Null
+          Copy-Item dist/learno-sidecar.exe ../src-tauri/binaries/learno-sidecar-x86_64-pc-windows-msvc.exe
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      # A tag precisa bater com a versão do tauri.conf.json: é ela que vai para
+      # o latest.json, e um app que se compara com a versão errada ou nunca
+      # atualiza ou atualiza em loop.
+      - name: conferir versao da tag
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          Write-Host "tag = $tag / tauri.conf.json = $($conf.version)"
+          if ($conf.version -ne $tag) { throw "Tag v$tag diferente da versao $($conf.version) do tauri.conf.json. Build ABORTADO." }
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Learno ${{ github.ref_name }}'
+          releaseBody: 'Instalador Windows nos assets (learno_x.y.z_x64-setup.exe). Quem já tem o Learno instalado recebe o aviso de atualização ao abrir o app.'
+          releaseDraft: false
+          prerelease: false

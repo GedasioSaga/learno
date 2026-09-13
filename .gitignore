@@ -46,6 +46,9 @@ sidecar/dist/
 
 # Session scratch
 .claude-trail.md
+.playwright-mcp/
+.diagram-design
+/*.png
 
 # e2e: driver nativo baixado por máquina (versão precisa bater com o Edge
 # instalado — ver docs/e2e.md). Não é código do projeto, é ~22MB de binário

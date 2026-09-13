@@ -39,9 +39,21 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyRTM0Nzk2NjQ2RkNGMjYKUldRbXoyOWtsa2Zqa3FDNDMwa3Y3Vnd5cWpFWjJDNTA1T2tHd0lNUUo1NEhRZG1wSEgxT2lhcHUK",
+      "endpoints": [
+        "https://github.com/GedasioSaga/learno/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
