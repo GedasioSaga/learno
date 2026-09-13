@@ -214,6 +214,14 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Repo público e auto-update pelo GitHub (13/09/2026)
+
+- Repo `https://github.com/GedasioSaga/learno` (público, branch `master`). Release v0.1.0 publicado pelo run `34788793978` (`gh run watch --exit-status`: exit 0). Assets: `learno_0.1.0_x64-setup.exe` (17,3 MB), `.sig` e `latest.json`.
+- `releases/latest/download/latest.json` responde `version=0.1.0` com assinatura de 416 bytes.
+- `cargo test`: todas as suítes `ok` (lib: 894 passed, 0 failed). `tsc --noEmit`: exit 0. `AtualizadorBanner.test.tsx`: 6/6.
+- **Pendente:** 2 testes-guarda do vitest falham desde antes (`comandos-alcancaveis`, `contrato-ipc`). É dívida de Rotina/Finanças: comandos sem tela e structs fora do contrato. Por isso `publicar.ps1` precisa de `-SemTestes` até corrigir.
+- Não testado ainda: instalar a v0.1.0 e ver o banner oferecer a v0.1.1 de verdade.
+
 ### Biblioteca: estante organizada e páginas de anotação (08/09/2026)
 
 Portão inteiro, verde:
