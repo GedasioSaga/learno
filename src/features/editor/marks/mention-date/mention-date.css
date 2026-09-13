@@ -37,7 +37,9 @@
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--surface-raised, var(--surface));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - dropdown de sugestão,
+     flutuando sobre o texto. Preto fixo não seguia o tema. */
+  box-shadow: var(--shadow-hard);
 }
 
 .ed-mention-date-suggestion__empty {
@@ -73,7 +75,9 @@
   border: 1px solid var(--border);
   border-radius: 0.6rem;
   background: var(--surface-raised, var(--surface));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - mini-calendário
+     flutuando sobre o texto, mesma categoria de popover. */
+  box-shadow: var(--shadow-hard);
   outline: none;
 }
 

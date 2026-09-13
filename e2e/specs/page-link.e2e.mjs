@@ -13,17 +13,12 @@
 // Se a marcação real usar outro papel ARIA, só os seletores em
 // `openSlashItem`/`typeSlash` precisam mudar, não o resto do spec.
 
-import { TEST_DB } from "../lib/env.mjs";
-import { psql, psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
+import { scalar, waitFor } from "../lib/db.mjs";
 
 const STAMP = Date.now();
 const CURSO_TITLE = `E2E Curso ${STAMP}`;
 const MODULO_TITLE = `E2E Módulo 3 ${STAMP}`;
 const SUB_PAGE_TITLE = `E2E Sub-página ${STAMP}`;
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -73,28 +68,21 @@ async function expandIfCollapsed(title) {
 
 describe("EDT-017/FUN-003/FUN-043 — bloco link-to-page", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
-
-    await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
+    // Sem assistente de primeira execução (docs/MIGRACAO-SQLITE.md): App.tsx
+    // chama openWorkspace() sozinho ao subir, abre o arquivo SQLite na pasta
+    // de dados do app e aplica as migrações. O primeiro elemento real do app
+    // já é a barra lateral - timeout generoso porque essa primeira execução
+    // ainda cria o arquivo e roda a migração.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
 
     await createRootPage(CURSO_TITLE);
     await createRootPage(MODULO_TITLE);
   });
 
-  after(() => {
-    const titles = [CURSO_TITLE, MODULO_TITLE, SUB_PAGE_TITLE].map(sqlLiteral).join(", ");
-    psqlQuiet(`delete from pages where title in (${titles})`);
-  });
+  // Sem limpeza: db.mjs abre o banco só para leitura de propósito (o app
+  // está de pé com o arquivo em WAL) e o `wdio.conf.mjs` descarta a pasta de
+  // dados inteira entre sessões - não há DELETE a fazer aqui, e os títulos
+  // com STAMP já evitam colisão com outra spec dentro da mesma sessão.
 
   it("FUN-003: '/page' dentro de 'Curso' cria uma sub-página que aparece como filha na sidebar", async () => {
     await treeItemByTitle(CURSO_TITLE).click();
@@ -116,9 +104,20 @@ describe("EDT-017/FUN-003/FUN-043 — bloco link-to-page", () => {
     await expect(subPageRow).toHaveAttribute("aria-level", "2");
   });
 
-  it("FUN-003 (Postgres): parent_id da sub-página é o id de 'Curso'", () => {
-    const parentId = psql(`select parent_id from pages where title = ${sqlLiteral(SUB_PAGE_TITLE)}`);
-    const cursoId = psql(`select id from pages where title = ${sqlLiteral(CURSO_TITLE)}`);
+  it("FUN-003 (SQLite): parent_id da sub-página é o id de 'Curso'", async () => {
+    // waitFor em vez de leitura direta: a gravação é assíncrona em relação
+    // ao Enter do teste anterior (ver db.mjs) - ler no instante seguinte à
+    // interação dá falso negativo de vez em quando.
+    const cursoId = await waitFor(
+      () => scalar("select id from pages where title = ?", [CURSO_TITLE]),
+      (valor) => valor !== undefined,
+      { mensagem: "id de 'Curso' gravado" },
+    );
+    const parentId = await waitFor(
+      () => scalar("select parent_id from pages where title = ?", [SUB_PAGE_TITLE]),
+      (valor) => valor === cursoId,
+      { mensagem: "parent_id da sub-página apontando para 'Curso'" },
+    );
     expect(parentId).toBe(cursoId);
   });
 
@@ -147,9 +146,17 @@ describe("EDT-017/FUN-003/FUN-043 — bloco link-to-page", () => {
     await expect(moduloRow).toHaveAttribute("aria-level", "2");
   });
 
-  it("FUN-043 (Postgres): parent_id de 'Módulo 3' agora é o id de 'Curso' - a @menção nunca faria isto", () => {
-    const parentId = psql(`select parent_id from pages where title = ${sqlLiteral(MODULO_TITLE)}`);
-    const cursoId = psql(`select id from pages where title = ${sqlLiteral(CURSO_TITLE)}`);
+  it("FUN-043 (SQLite): parent_id de 'Módulo 3' agora é o id de 'Curso' - a @menção nunca faria isto", async () => {
+    const cursoId = await waitFor(
+      () => scalar("select id from pages where title = ?", [CURSO_TITLE]),
+      (valor) => valor !== undefined,
+      { mensagem: "id de 'Curso' gravado" },
+    );
+    const parentId = await waitFor(
+      () => scalar("select parent_id from pages where title = ?", [MODULO_TITLE]),
+      (valor) => valor === cursoId,
+      { mensagem: "parent_id de 'Módulo 3' apontando para 'Curso'" },
+    );
     expect(parentId).toBe(cursoId);
   });
 

@@ -49,6 +49,13 @@
   margin-top: 0.3rem;
 }
 
+.ed-heading--4 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
 .ed-list-item {
   display: flex;
   gap: 0.5rem;
@@ -174,7 +181,10 @@
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--surface-raised, var(--surface));
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - a barra flutua sobre a
+     seleção, mesma categoria de popover/menu. Preto fixo sumia contra o
+     fundo nos temas escuros; `--shadow-hard` é calibrada por tema. */
+  box-shadow: var(--shadow-hard);
 }
 
 .ed-toolbar__item {

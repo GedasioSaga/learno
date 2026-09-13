@@ -4,8 +4,10 @@
 //! `db::blocks::BlockRepository` (which never touches `block_page_links`
 //! itself) and read back through `db::backlinks::BacklinkRepository`.
 //!
-//! `#[ignore]`d like every other `db_*.rs` file here — see `db_blocks.rs`'s
-//! header for how to run these.
+//! Sem `#[ignore]`: desde a migração para SQLite (`docs/MIGRACAO-SQLITE.md`)
+//! cada teste abre seu próprio arquivo de banco descartável via
+//! `support::IsolatedDatabase`, então roda num `cargo test` limpo, sem
+//! cluster nem variável de ambiente nenhuma.
 
 mod support;
 
@@ -65,7 +67,6 @@ fn mention_block_with_text(page_id: Uuid, target_page_id: Uuid, plain_text: &str
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn two_pages_mentioning_the_same_target_both_show_up_as_backlinks() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -90,7 +91,6 @@ async fn two_pages_mentioning_the_same_target_both_show_up_as_backlinks() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn renaming_the_mentioning_page_updates_the_backlink_title_live() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -114,7 +114,6 @@ async fn renaming_the_mentioning_page_updates_the_backlink_title_live() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn editing_the_link_out_of_a_block_removes_the_backlink() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -147,7 +146,6 @@ async fn editing_the_link_out_of_a_block_removes_the_backlink() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deleting_the_mentioning_block_removes_the_backlink() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -166,7 +164,6 @@ async fn deleting_the_mentioning_block_removes_the_backlink() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn outgoing_links_answer_the_other_direction() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -190,7 +187,6 @@ async fn outgoing_links_answer_the_other_direction() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn a_page_mentioning_itself_is_not_listed_as_its_own_backlink() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -206,7 +202,6 @@ async fn a_page_mentioning_itself_is_not_listed_as_its_own_backlink() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn backlink_row_carries_a_snippet_of_the_mentioning_block() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -229,7 +224,6 @@ async fn backlink_row_carries_a_snippet_of_the_mentioning_block() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn a_long_block_is_cut_at_the_snippet_limit_on_a_word_boundary() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -263,7 +257,6 @@ async fn a_long_block_is_cut_at_the_snippet_limit_on_a_word_boundary() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn accented_text_survives_the_cut_without_splitting_a_character() {
     let db = IsolatedDatabase::setup("backlinks").await;
     let pages = PageRepository::new(db.pool.clone());

@@ -8,7 +8,7 @@
  * cobertos pelo spec de imagem.
  */
 import { insertBlockHere } from "../../core/commands";
-import { registerBlockSpec, registerSlashMenuItem } from "../../core/block-spec";
+import { registerBlockSpec, registerSlashMenuItem, registerTurnIntoItem } from "../../core/block-spec";
 import { registerBlockExtension } from "../../core/registry";
 import "./media.css";
 import { MediaPaste } from "./media-paste";
@@ -151,3 +151,21 @@ registerSlashMenuItem([
     run: (editor) => insertBlockHere(editor, "file"),
   },
 ]);
+
+// EDT-049: "Transformar em" > "Imagem" - só "Imagem" foi pedida (vídeo/áudio/
+// arquivo continuam só no menu "/"). Reusa `insertBlockHere`, não
+// `turnCurrentBlockInto`: `image` é um átomo (`content: ""`), então converter
+// um bloco textual COM texto no lugar (`setNodeMarkup`) rejeitaria o
+// conteúdo existente com "Invalid content for node type image" -
+// `insertBlockHere` já resolve isso do jeito certo (bloco vazio -> converte
+// no lugar; bloco com texto -> insere a imagem depois, texto original
+// intacto). Sem `isActive`: uma imagem não tem posição de texto para o
+// cursor ocupar, então "o bloco atual já é este tipo" nunca é observável
+// aqui - mesma omissão que `divider` já faz em `core/core-specs.ts`.
+registerTurnIntoItem({
+  id: "blocks-media:turn:image",
+  title: "Imagem",
+  group: MEDIA_GROUP,
+  icon: "🖼",
+  run: (editor) => insertBlockHere(editor, "image", { width: IMAGE_DEFAULT_WIDTH_PERCENT }),
+});

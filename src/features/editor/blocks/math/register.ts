@@ -8,7 +8,7 @@
  * Importa sempre de `../../core/<módulo>`, nunca de `../../index` - ver
  * README sobre o ciclo de TDZ que isso evitaria.
  */
-import { registerBlockSpec, registerInlinePlainText, registerSlashMenuItem } from "../../core/block-spec";
+import { registerBlockSpec, registerInlinePlainText, registerSlashMenuItem, registerTurnIntoItem } from "../../core/block-spec";
 import { insertBlockHere } from "../../core/commands";
 import { registerBlockExtension } from "../../core/registry";
 import { Equation } from "./equation-block";
@@ -50,6 +50,20 @@ registerSlashMenuItem({
   id: "math:equation",
   title: "Equação em bloco",
   keywords: ["equacao", "equation", "latex", "formula", "matematica", "matemática"],
+  group: "Mídia",
+  icon: "∑",
+  run: (editor) => insertBlockHere(editor, EQUATION_NODE_NAME, { expression: "" }),
+});
+
+// EDT-049: "Transformar em" > "Equação em bloco". Mesmo motivo de
+// `blocks-media:turn:image` (ver o comentário lá): `equation` é um átomo
+// (`content: ""`), então `insertBlockHere` - não `turnCurrentBlockInto` - é
+// quem sabe preservar o texto de um bloco não vazio em vez de rejeitá-lo.
+// Sem `isActive` pelo mesmo motivo: não há posição de texto dentro de um
+// átomo para o cursor confirmar "já sou este tipo".
+registerTurnIntoItem({
+  id: "math:turn:equation",
+  title: "Equação em bloco",
   group: "Mídia",
   icon: "∑",
   run: (editor) => insertBlockHere(editor, EQUATION_NODE_NAME, { expression: "" }),

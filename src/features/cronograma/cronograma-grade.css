@@ -1,0 +1,673 @@
+/*
+ * Visão de Grade do Cronograma (`GradeSemanal.tsx`) — a folha inteira da
+ * tela, fora de qualquer `@layer` de propósito: as poucas classes Tailwind
+ * que sobraram no JSX moram em camada, e uma regra sem camada vence sem
+ * `!important` (mesmo raciocínio de `features/mapa-mental/mapa-mental.css`).
+ *
+ * Toda cor vem de `src/styles/theme.css`. Nenhum hex aqui: os cinco temas
+ * trocam os tokens e esta folha segue sem saber quantos temas existem.
+ *
+ * Hierarquia de linha, de propósito em três pesos:
+ * - hora cheia: `--hairline` sólido;
+ * - meia hora: `--hairline` a ~55% (`--grade-linha-meia`) — precisa existir
+ *   pra um bloco de 25 min ter referência, mas não pode pesar igual à hora,
+ *   senão a grade vira papel quadriculado;
+ * - `--border` (3:1) NÃO aparece na grade. Ela é borda de controle; a grade
+ *   é papel de fundo, e o que precisa ser encontrado nela é o bloco, não a
+ *   linha.
+ */
+
+[data-slot="grade-semanal"] {
+  /* 30 minutos. 28px cabe uma linha de texto de 12px com folga; uma hora
+     (56px) cabe título + matéria + horário. */
+  --grade-faixa: 28px;
+  /* Meia faixa de respiro antes da primeira linha, pro rótulo "07:00" ficar
+     centrado NA linha (como a referência) sem ser cortado pelo cabeçalho. */
+  --grade-recuo-topo: calc(var(--grade-faixa) / 2);
+  --grade-calha: 3.25rem;
+  --grade-cabecalho: 3.5rem;
+  --grade-raio: 4px;
+  --grade-linha-meia: color-mix(in srgb, var(--hairline) 55%, transparent);
+  /* Recuo horizontal do bloco. É variável porque a marca de omissão e a
+     cobertura dela (ver "Cobertura", abaixo) precisam alcançar a borda do
+     bloco atravessando exatamente este recuo — a lane dividida o encolhe. */
+  --grade-bloco-recuo: 6px;
+
+  position: relative;
+  overflow: auto;
+  /* A grade é o próprio contêiner de rolagem (como a referência): o
+     cabeçalho de dias e a calha de horas ficam presos, o resto rola. A
+     altura máxima deixa o resto da página (título, meta, prazos) visível. */
+  max-height: calc(100vh - 11rem);
+  min-height: 20rem;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  /* Barra fina, na cor de controle: a nativa grossa da WebView2 é a primeira
+     coisa a denunciar "isto é uma página" numa grade densa. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Cor por matéria: cada `data-cor` só define a variável; quem pinta é UMA
+   regra de bloco mais abaixo. BORDA/ACENTO usa a cor pura do token (3:1
+   medido em `mapa-mental.css`); FUNDO é só verniz via `color-mix`; TEXTO
+   nunca muda de cor — o nome escrito é a pista, nunca a cor sozinha. */
+[data-slot="grade-semanal"] [data-cor="amber"] { --cor-do-bloco: var(--amber); }
+[data-slot="grade-semanal"] [data-cor="mint"] { --cor-do-bloco: var(--mint); }
+[data-slot="grade-semanal"] [data-cor="emerald"] { --cor-do-bloco: var(--emerald); }
+[data-slot="grade-semanal"] [data-cor="terracotta"] { --cor-do-bloco: var(--terracotta); }
+[data-slot="grade-semanal"] [data-cor="brown"] { --cor-do-bloco: var(--brown); }
+[data-slot="grade-semanal"] [data-cor="azul"] { --cor-do-bloco: var(--matiz-azul); }
+[data-slot="grade-semanal"] [data-cor="roxo"] { --cor-do-bloco: var(--matiz-roxo); }
+[data-slot="grade-semanal"] [data-cor="vermelho"] { --cor-do-bloco: var(--matiz-vermelho); }
+
+/* ---- Trilho de colunas: calha + 7 dias, igual no cabeçalho e no corpo ---- */
+.grade__cabecalho,
+.grade__sem-horario,
+.grade__corpo {
+  display: grid;
+  grid-template-columns: var(--grade-calha) repeat(7, minmax(0, 1fr));
+  min-width: 720px;
+}
+
+/* ---- Cabeçalho de dias (preso no topo) ---- */
+.grade__cabecalho {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: var(--grade-cabecalho);
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.grade__canto {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.grade__dia {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding: 0.625rem 0.5rem 0;
+  border-left: 1px solid var(--hairline);
+  line-height: 1;
+}
+
+.grade__dia-nome {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+/* O número é o que se acha de relance: serifado (o mesmo `--font-display`
+   do título "Cronograma"), grande, e com algarismo tabular pra a coluna
+   não tremer entre "7" e "13". */
+.grade__dia-numero {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.grade__dia-mes {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* Hoje: número invertido (tinta sobre papel), a única marca forte do
+   cabeçalho — e é independente de tema, sempre no contraste máximo. */
+.grade__dia[data-hoje="true"] .grade__dia-nome {
+  color: var(--ink);
+}
+.grade__dia[data-hoje="true"] .grade__dia-numero {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ---- Faixa "sem horário" (o "todo o dia" da referência), presa sob o cabeçalho ---- */
+.grade__sem-horario {
+  position: sticky;
+  top: var(--grade-cabecalho);
+  z-index: 3;
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.grade__sem-horario-rotulo {
+  padding: 0.375rem 0.375rem 0.375rem 0;
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: right;
+  color: var(--ink-muted);
+}
+
+.grade__sem-horario-dia {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 8px à direita: é o quanto a área de clique do ✕ de `BlocoCard`
+     ultrapassa o cartão — sem isso a última coluna estoura e nasce uma
+     barra de rolagem horizontal. */
+  padding: 3px 8px 3px 3px;
+  border-left: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+/* `BlocoCard` (o mesmo cartão da visão de Colunas) recebe `data-cor` só
+   aqui, e vira um chip com acento à esquerda — a regra vence as classes
+   utilitárias do cartão porque esta folha está fora de camada. */
+[data-slot="grade-semanal"] [data-slot="bloco-card"][data-cor] {
+  border-color: transparent;
+  border-left: 3px solid var(--cor-do-bloco);
+  border-radius: var(--grade-raio);
+  background: color-mix(in srgb, var(--cor-do-bloco) 14%, var(--surface));
+  padding: 2px 4px 2px 6px;
+}
+
+/* ---- Corpo: calha de horas + colunas ---- */
+.grade__corpo {
+  position: relative;
+}
+
+.grade__calha {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  height: calc(var(--grade-recuo-topo) + (var(--grade-faixas) + 1) * var(--grade-faixa));
+  background: var(--surface);
+}
+
+/* Rótulo só na hora cheia, centrado na linha (`translateY(-50%)`), com
+   algarismo tabular — sem isso "07:00" e "11:00" têm larguras diferentes
+   e a régua treme. */
+.grade__hora {
+  position: absolute;
+  right: 0.5rem;
+  top: calc(var(--grade-recuo-topo) + var(--linha) * var(--grade-faixa));
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+.grade__coluna {
+  position: relative;
+  height: calc(var(--grade-recuo-topo) + (var(--grade-faixas) + 1) * var(--grade-faixa));
+  border-left: 1px solid var(--hairline);
+  min-width: 0;
+  /* As linhas de hora/meia hora são fundo, não elemento: dois gradientes
+     repetidos, cortados na última faixa (a faixa extra do fim NÃO recebe
+     linha — é só respiro pra um bloco que atravessa a meia-noite). */
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      var(--hairline) 0 1px,
+      transparent 1px calc(var(--grade-faixa) * 2)
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 var(--grade-faixa),
+      var(--grade-linha-meia) var(--grade-faixa) calc(var(--grade-faixa) + 1px),
+      transparent calc(var(--grade-faixa) + 1px) calc(var(--grade-faixa) * 2)
+    );
+  background-position: 0 var(--grade-recuo-topo);
+  background-size: 100% calc(var(--grade-faixas) * var(--grade-faixa) + 1px);
+  background-repeat: no-repeat;
+}
+
+/* ---- O bloco ---- */
+/* Posição por MINUTO, não por linha de 30 min (a referência faz o mesmo):
+   `--inicio` é o minuto desde o topo da grade, `--duracao` a altura em
+   minutos; dois blocos que só se encostam (08:00–08:50 e 08:50–09:15)
+   ficam empilhados sem se sobrepor, o que uma célula de 30 min não
+   conseguia. Lanes dividem a largura do GRUPO de conflito em partes iguais
+   (`--lanes` é quantas lanes ESTÃO VISÍVEIS no grupo — o componente já
+   descontou o que foi pro "+N", ver `LARGURA_MINIMA_DA_LANE_PX`). Os 5px
+   descontados (2 de cada lado + 1 da borda) são
+   `MARGEM_HORIZONTAL_DA_COLUNA_PX` no componente — mudar um sem o outro
+   desalinha a conta de quantas lanes cabem. */
+.grade__bloco {
+  position: absolute;
+  top: calc(var(--grade-recuo-topo) + (var(--inicio) / 30) * var(--grade-faixa) + 1px);
+  height: calc((var(--duracao) / 30) * var(--grade-faixa) - 2px);
+  left: calc(2px + var(--lane) * (100% - 5px) / var(--lanes, 1));
+  width: calc((100% - 5px) / var(--lanes, 1) - 2px);
+  min-height: 1.125rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* 2px em cima/embaixo: três linhas (14 + 13 + 13) precisam caber nos
+     ≈45px de um bloco de 50 min. */
+  padding: 2px var(--grade-bloco-recuo);
+  overflow: hidden;
+  border-left: 3px solid var(--cor-do-bloco);
+  border-radius: var(--grade-raio);
+  background: color-mix(in srgb, var(--cor-do-bloco) 14%, var(--surface));
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* Bloco de uma faixa só (25–30 min): título e horário numa linha. */
+.grade__bloco-linha {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.375rem;
+  min-width: 0;
+  /* A linha atravessa o recuo direito do bloco (margem negativa) e o
+     devolve como padding: o texto não sai do lugar, mas a caixa da linha
+     alcança a borda do bloco — é onde a marca de omissão mora, e as linhas
+     com `overflow: hidden` (nível 1 e 3) a cortariam se ela ficasse fora.
+     `--grade-reserva` só existe na primeira linha de um bloco com "+N"
+     (ver `[data-reserva-mais]`); o resto do tempo é zero. */
+  margin-right: calc(-1 * var(--grade-bloco-recuo));
+  padding-right: calc(var(--grade-reserva, 0px) + var(--grade-bloco-recuo));
+  /* Herda o fundo do bloco pra passar adiante à cobertura da marca de
+     omissão — é a mesma cor, então não se vê. */
+  background-color: inherit;
+}
+
+.grade__bloco-titulo {
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.grade__bloco-materia,
+.grade__bloco-horario,
+.grade__bloco-continua {
+  font-size: 11px;
+  line-height: 1.15;
+  color: var(--ink-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.grade__bloco-horario {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Linha única (nível 1: bloco de menos de 40 min) ----
+   "Título · Matéria" à esquerda, horário à direita — a MESMA informação
+   mínima dos blocos maiores, numa linha. O que cabe é medido pelo flex, na
+   largura real do bloco, e o descarte segue uma ordem fixa:
+   1. o FIM do horário ("–09:15"): `.grade__bloco-horario` é um flex interno
+      com quebra; o fim cai numa fileira escondida pelo `max-height` e sobra
+      "08:50" — que é o que um calendário mostra num evento curto;
+   2. o INÍCIO: a base do horário é `5ch` (o que "08:50" ocupa); se nome +
+      5ch não cabem, a linha externa quebra e o horário inteiro vai pra
+      fileira escondida — nunca "08:5";
+   3. a cauda da MATÉRIA, depois a do TÍTULO: um `p` só, com reticência no
+      fim — "Pomodoro · Ingl…" preserva o que identifica o bloco.
+   Título e matéria nunca são sacrificados pelo horário: a posição vertical
+   já diz a hora, e tooltip + `aria-label` têm o horário completo. Antes o
+   nível 1 nem tinha matéria, e o horário sumia sem aviso num bloco de
+   25 min com a coluna inteira livre (114px úteis: "Pomodoro" 57 + horário
+   60 + gap 6 não cabem). Medido em 07/09/2026 na vitrine `cronograma-grade`. */
+.grade__bloco-compacto {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0 0.25rem;
+  max-height: 1.2em;
+  overflow: hidden;
+}
+.grade__bloco-nome {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.grade__bloco-nome > .grade__bloco-materia::before {
+  content: "· ";
+  margin-left: 0.25em;
+}
+.grade__bloco-compacto > .grade__bloco-horario {
+  flex: 1 0 5ch;
+  max-width: max-content;
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-height: 1.15em;
+  overflow: hidden;
+}
+.grade__bloco-compacto > .grade__bloco-horario > span {
+  white-space: nowrap;
+}
+.grade__bloco-linha > .grade__bloco-horario {
+  flex-shrink: 0;
+}
+/* Mesma regra na linha de horário própria (nível 3): a duração ("50 min")
+   entra inteira ou quebra pra fileira escondida — nunca "50 mi". E o
+   intervalo segue a mesma ordem do nível 1: base de `5ch`, o fim cai
+   primeiro pra fileira escondida — "09:00", nunca "09:00–09…". */
+.grade__bloco-linha.grade__bloco-horario {
+  flex-wrap: wrap;
+  max-height: 1.2em;
+  overflow: hidden;
+}
+.grade__bloco-intervalo {
+  flex: 1 0 5ch;
+  max-width: max-content;
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-height: 1.15em;
+  overflow: hidden;
+}
+.grade__bloco-intervalo > span {
+  white-space: nowrap;
+}
+
+.grade__bloco-duracao {
+  margin-left: auto;
+  padding-left: 0.375rem;
+  flex-shrink: 0;
+}
+
+/* ---- A marca de omissão, e a cobertura dela ----
+   Toda linha que carrega horário termina num `.grade__bloco-omitido`
+   (`MarcaDeOmissao` no componente): uma borda pontilhada de 2px, na cor
+   da matéria, encostada na borda DIREITA do bloco — o "continua amanhã"
+   virado de lado. Ela está sempre no DOM; quem decide se aparece é a
+   largura, pelo mesmo flex que decide o resto:
+   - o horário (níveis 1 e 2) e a duração (nível 3) ficam POR CIMA dela,
+     com o fundo do bloco herdado e uma margem negativa que atravessa o
+     recuo até a borda (o `padding-right` do mesmo tamanho devolve o texto
+     pro lugar — nada se move);
+   - quando o CSS descarta o horário — `display: none` na lane dividida,
+     ou a fileira escondida do `flex-wrap` na coluna inteira — nada cobre
+     e a marca aparece.
+   Ou seja: o descarte que o componente não enxerga não fica sem marca, e
+   um horário que coube não ganha marca nenhuma. Só o FIM do horário
+   escondido ("08:50" sem "–09:15") não marca: começo sozinho é a
+   convenção de qualquer calendário, e a altura do bloco já diz o fim.
+   `--grade-reserva` (o canto do "+N") entra na conta pra marca ficar à
+   esquerda do botão, não embaixo dele. `--grade-marca-recuo` afasta a
+   marca da borda direita do bloco: rente à borda (`right: 0`) os 2px
+   pontilhados caíam no último pixel do verniz, encostados na coluna
+   escura do lado, e liam-se como FORA do cartão — medido em 07/09/2026
+   na vitrine (`markRight === cardRight`). Dentro do recuo horizontal,
+   continua custando zero de largura (é absoluta), e a cobertura do
+   horário, que vai até a borda, continua cobrindo-a. */
+.grade__bloco-omitido {
+  --grade-marca-recuo: 2px;
+  position: absolute;
+  top: 50%;
+  right: calc(var(--grade-reserva, 0px) + var(--grade-marca-recuo));
+  height: 0.8em;
+  transform: translateY(-50%);
+  border-right: 2px dotted var(--cor-do-bloco);
+  pointer-events: none;
+}
+.grade__bloco-linha > .grade__bloco-horario,
+.grade__bloco-duracao {
+  position: relative;
+  z-index: 1;
+  background-color: inherit;
+  margin-right: calc(-1 * var(--grade-bloco-recuo));
+  padding-right: var(--grade-bloco-recuo);
+}
+
+/* Bloco em lane dividida (conflito de horário): a largura é ≥ 64px, nunca
+   menos (o que não cabe vai pro "+N"), e o texto fecha um ponto — 11px de
+   título, 4px de recuo, acento de 2px — pra uma palavra inteira ("Pomodoro",
+   "História") caber nesses 64px sem virar "Pomo…" — medido: "Pomodoro" a
+   11px tem 55px, e 64 − 2 de acento − 6 de recuo = 56. O horário inline
+   cortaria no meio ("10:00–10:"): some da linha do título — continua no
+   tooltip e no `aria-label`, e a marca de omissão (acima) aparece no lugar,
+   porque nada mais a cobre; a posição vertical já diz a hora. A linha de
+   horário própria do nível 3 fica com o que couber inteiro (o início, na
+   lane mínima); a do nível 2 some com o horário, e a marca fica no fim da
+   linha da matéria. */
+.grade__bloco[data-dividido="true"] {
+  --grade-bloco-recuo: 3px;
+  padding: 2px var(--grade-bloco-recuo);
+  border-left-width: 2px;
+  font-size: 11px;
+}
+.grade__bloco[data-dividido="true"] .grade__bloco-materia,
+.grade__bloco[data-dividido="true"] .grade__bloco-horario,
+.grade__bloco[data-dividido="true"] .grade__bloco-continua {
+  font-size: 10.5px;
+}
+.grade__bloco[data-dividido="true"] .grade__bloco-linha > .grade__bloco-horario,
+.grade__bloco[data-dividido="true"] .grade__bloco-duracao {
+  display: none;
+}
+/* Na lane de 64px a matéria inline ("· Inglês") empurraria o título pra
+   reticência — o argumento inteiro da lane mínima é "Pomodoro" caber
+   inteiro. Some, como o horário; o tooltip continua com tudo. */
+.grade__bloco[data-dividido="true"] .grade__bloco-nome > .grade__bloco-materia {
+  display: none;
+}
+/* Última lane visível de um grupo com "+N": a primeira linha para antes do
+   botão, em vez de ser coberta por ele. */
+.grade__bloco[data-reserva-mais="true"] > .grade__bloco-linha:first-child {
+  --grade-reserva: 1.625rem;
+}
+
+/* ---- "+N": o excedente de um grupo de conflito ---- */
+/* Botão pequeno no canto superior direito do grupo, na altura do minuto de
+   início. 18px de altura desenhada, mas a área que reage cresce por
+   `::after` (≈36×32px) — o mais perto do alvo mínimo que cabe numa faixa
+   de 28px sem tampar o bloco vizinho. Sem `scale` no press: é um chip
+   preso à grade, e a grade "encolhendo" parece quebrada; o feedback é a
+   cor. */
+.grade__mais {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--grade-recuo-topo) + (var(--inicio) / 30) * var(--grade-faixa) + 3px);
+  right: 4px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 10.5px;
+  line-height: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.grade__mais::after {
+  content: "";
+  position: absolute;
+  inset: -7px -8px;
+}
+.grade__mais:hover,
+.grade__mais[aria-expanded="true"] {
+  background: var(--surface-sunken);
+}
+
+/* O painel: nível 2 de elevação (`border` + `shadow-hard`), o mesmo do
+   menu de coluna (`table.css`). Nasce logo abaixo do botão, na altura do
+   grupo, e abre pra direita nas colunas da esquerda e pra esquerda nas da
+   direita (`data-lado`), pra não estourar a borda da grade. Entra em
+   escala 0.95 → 1 com opacidade, `--motion-base`, ease-out
+   (`prefers-reduced-motion` zera em `theme.css`); fechar é desmontar. */
+.grade__mais-painel {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--grade-recuo-topo) + (var(--inicio) / 30) * var(--grade-faixa) + 24px);
+  width: 13rem;
+  box-sizing: border-box;
+  padding: 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-hard);
+  font-size: 12px;
+  line-height: 1.2;
+  animation: grade-mais-entrar var(--motion-base) var(--ease-out);
+}
+.grade__mais-painel[data-lado="direita"] {
+  left: 2px;
+  transform-origin: top left;
+}
+.grade__mais-painel[data-lado="esquerda"] {
+  right: 2px;
+  transform-origin: top right;
+}
+.grade__mais-painel:focus-visible {
+  outline-offset: -2px;
+}
+
+@keyframes grade-mais-entrar {
+  from {
+    opacity: 0;
+    transform: scale(var(--motion-scale-in));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.grade__mais-titulo {
+  padding: 0 0.25rem 0.25rem;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.grade__mais-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Cada item é o MESMO desenho do bloco na grade (acento à esquerda, verniz
+   da matéria, título/matéria/horário), só que com largura pra tudo caber —
+   é o bloco que não coube, inteiro. `data-estado` esmaece o passado como
+   na grade. */
+.grade__mais-item {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 6px;
+  border-left: 3px solid var(--cor-do-bloco);
+  border-radius: var(--grade-raio);
+  background: color-mix(in srgb, var(--cor-do-bloco) 14%, var(--surface));
+}
+.grade__mais-item[data-estado="passado"] {
+  background: color-mix(in srgb, var(--cor-do-bloco) 7%, var(--surface));
+  border-left-color: color-mix(in srgb, var(--cor-do-bloco) 55%, var(--surface));
+}
+.grade__mais-item[data-estado="passado"] .grade__bloco-titulo {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+.grade__mais-item[data-estado="agora"] {
+  background: color-mix(in srgb, var(--cor-do-bloco) 22%, var(--surface));
+}
+
+/* Estado derivado do relógio (nunca de dado que não existe — ver o
+   comentário de `estadoDoBloco` no componente). Passado esmaece; "agora"
+   ganha o acento mais forte E a palavra escrita, na cor da linha do agora. */
+.grade__bloco[data-estado="passado"] {
+  background: color-mix(in srgb, var(--cor-do-bloco) 7%, var(--surface));
+  border-left-color: color-mix(in srgb, var(--cor-do-bloco) 55%, var(--surface));
+}
+.grade__bloco[data-estado="passado"] .grade__bloco-titulo {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+/* A marca de omissão esmaece junto com o acento. */
+.grade__bloco[data-estado="passado"] .grade__bloco-omitido {
+  border-right-color: color-mix(in srgb, var(--cor-do-bloco) 55%, var(--surface));
+}
+
+.grade__bloco[data-estado="agora"] {
+  background: color-mix(in srgb, var(--cor-do-bloco) 22%, var(--surface));
+  border-left-width: 4px;
+}
+
+.grade__bloco-agora {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--terracotta-ink);
+  flex-shrink: 0;
+}
+
+/* Bloco que atravessa a meia-noite: ocupa também a faixa extra do fim da
+   coluna, cruzando a linha das 00:00 de verdade — e o canto de baixo fica
+   reto com borda tracejada, o desenho de "isto continua". */
+.grade__bloco[data-continua="true"] {
+  border-bottom: 1px dashed var(--cor-do-bloco);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* ---- A linha do agora ---- */
+.grade__agora {
+  position: absolute;
+  z-index: 1;
+  left: var(--grade-calha);
+  right: 0;
+  top: calc(var(--grade-recuo-topo) + (var(--grade-agora-offset) / 30) * var(--grade-faixa));
+  height: 0;
+  border-top: 1px solid color-mix(in srgb, var(--terracotta) 40%, transparent);
+  pointer-events: none;
+}
+
+/* Na coluna de hoje a linha é cheia, com o ponto na esquerda. */
+.grade__agora-hoje {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  top: calc(var(--grade-recuo-topo) + (var(--grade-agora-offset) / 30) * var(--grade-faixa));
+  height: 0;
+  border-top: 2px solid var(--terracotta);
+  pointer-events: none;
+}
+
+.grade__agora-hoje::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--terracotta);
+}
+
+/* O horário atual na calha, no lugar da hora cheia mais próxima. */
+.grade__agora-rotulo {
+  position: absolute;
+  z-index: 1;
+  right: 0.25rem;
+  top: calc(var(--grade-recuo-topo) + (var(--grade-agora-offset) / 30) * var(--grade-faixa));
+  transform: translateY(-50%);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface);
+  font-size: 10.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--terracotta-ink);
+}

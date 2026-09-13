@@ -27,14 +27,8 @@
 // `invoke` mockado) — este arquivo é o que falta no dia em que
 // `Editor.tsx` passar a expor `pageId` às extensões.
 
-import { TEST_DB } from "../lib/env.mjs";
-
 const STAMP = Date.now();
 const PAGE_TITLE = `E2E Bloco Sincronizado ${STAMP}`;
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -86,17 +80,13 @@ function syncedBadge() {
 
 describe("EDT-073 — Turn into > Bloco sincronizado", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
+    // Não existe mais assistente de primeira execução: o app abre direto
+    // (`App.tsx` chama `openWorkspace()` ao subir, que já cria o arquivo
+    // SQLite na pasta de dados e roda as migrações). O primeiro elemento do
+    // app de verdade é a barra lateral (`nav[aria-label="Páginas"]` em
+    // `AppShell.tsx`) — timeout generoso porque essa primeira execução ainda
+    // inclui a criação do arquivo e a migração.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
 
     await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
 

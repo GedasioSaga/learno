@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! DBS-024 ("Criado em") e DBS-026 ("Editado em") contra Postgres real.
+//! DBS-024 ("Criado em") e DBS-026 ("Editado em") contra um banco SQLite
+//! real e isolado.
 //!
 //! Este arquivo é NOVO e não pertence a nenhuma pasta exclusiva de outra
 //! peça da Fase 3 (`docs/FASE-3-ARQUITETURA.md` §11 lista as pastas
@@ -11,10 +12,13 @@
 //! TypeScript. A prova de banco fica aqui, reusando `tests/support` e os
 //! tipos já exportados de `learno_lib::db` (nenhum arquivo-núcleo tocado).
 //!
-//! `#[ignore]`d como todo `db_*.rs` que precisa de `LEARNO_TEST_DATABASE_URL`
-//! (`scripts/dev-db.ps1 start`, depois `cargo test -- --ignored`).
+//! Não precisa de `#[ignore]`: `IsolatedDatabase::setup` (`tests/support`)
+//! cria um arquivo SQLite descartável em pasta temporária, já migrado, então
+//! os dois testes abaixo passam num `cargo test` limpo, sem nenhum banco
+//! pré-existente nem variável de ambiente — mudança que veio da migração
+//! para SQLite (`docs/MIGRACAO-SQLITE.md`).
 //!
-//! Nenhuma repositório de `database`/`database_properties` existe ainda
+//! Nenhum repositório de `database`/`database_properties` existe ainda
 //! neste crate (mesma observação de `db_value_invariants.rs`) — este
 //! arquivo insere essas linhas com SQL puro, só o necessário para exercitar
 //! o gatilho de `0017_database_value_invariants.sql`.
@@ -31,44 +35,62 @@ use std::time::Duration;
 // `db::` ainda não. O caminho completo não depende dele nem corre atrás de
 // um alvo em movimento.
 use learno_lib::db::record_values::{RecordValueChangeInput, RecordValueRepository};
-use learno_lib::db::PageRepository;
+use learno_lib::db::{IdBind, PageRepository};
 use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
 use support::IsolatedDatabase;
 use uuid::Uuid;
 
+// Ponte src/db/ids.rs (ver comentário do módulo `ids`): `Uuid` cru quebra o
+// bind contra a coluna TEXT de uma tabela STRICT (`cannot store BLOB value
+// in TEXT column`), então todo `.bind(x)` de id vira `.bind(x.db())`. E,
+// diferente da versão Postgres, nenhuma das três tabelas abaixo tem
+// `DEFAULT` para `id` — `0007_databases.sql`/`0008_database_properties_views.sql`/
+// `0003_pages.sql` declaram `id TEXT PRIMARY KEY NOT NULL` sem gerador —
+// então o id é gerado aqui, como todo repositório do crate já faz
+// (`PageRepository::create`, `insert_relation_property`).
+
 async fn create_database(pool: &SqlitePool, container_page_id: Uuid, name: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO databases (container_page_id, name) VALUES ($1, $2) RETURNING id")
-        .bind(container_page_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO databases (id, container_page_id, name) VALUES ($1, $2, $3)")
+        .bind(id.db())
+        .bind(container_page_id.db())
         .bind(name)
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 async fn create_property(pool: &SqlitePool, database_id: Uuid, name: &str, property_type: &str) -> Uuid {
-    sqlx::query_scalar(
-        "INSERT INTO database_properties (database_id, name, property_type, config, position) \
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO database_properties (id, database_id, name, property_type, config, position) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
-    .bind(database_id)
+    .bind(id.db())
+    .bind(database_id.db())
     .bind(name)
     .bind(property_type)
     .bind(JsonValue::Object(serde_json::Map::new()))
     .bind("a0")
-    .fetch_one(pool)
+    .execute(pool)
     .await
-    .unwrap()
+    .unwrap();
+    id
 }
 
 async fn create_record(pool: &SqlitePool, database_id: Uuid, title: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO pages (database_id, title, position) VALUES ($1, $2, $3) RETURNING id")
-        .bind(database_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES ($1, $2, $3, $4)")
+        .bind(id.db())
+        .bind(database_id.db())
         .bind(title)
         .bind("a0")
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 /// `(database, record)` prontos, o mesmo mínimo que `db_value_invariants.rs`
@@ -91,7 +113,6 @@ async fn setup_database_and_record(db: &IsolatedDatabase, label: &str) -> Fixtur
 /// propriedade do mesmo registro é editada — só `drv_touch_record` (0017)
 /// mexe em `updated_at`; nada mexe em `created_at` depois do INSERT.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn dbs024_criado_em_vem_de_pages_created_at_e_nunca_muda() {
     let db = IsolatedDatabase::setup("timestamps_created").await;
     let fixture = setup_database_and_record(&db, "DBS-024").await;
@@ -128,7 +149,6 @@ async fn dbs024_criado_em_vem_de_pages_created_at_e_nunca_muda() {
 /// `database_record_values`. Duas propriedades distintas, para provar
 /// "qualquer", não só "a mesma de novo".
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn dbs026_editado_em_avanca_quando_qualquer_outra_propriedade_muda() {
     let db = IsolatedDatabase::setup("timestamps_edited").await;
     let fixture = setup_database_and_record(&db, "DBS-026").await;

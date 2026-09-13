@@ -1,161 +1,183 @@
-//! Manual backup/restore of the whole local Postgres database (PLT-011),
-//! shelling out to the `pg_dump`/`pg_restore` binaries that ship with any
-//! Postgres 18 install rather than reimplementing a dump format.
+//! Backup e restauração manual do banco inteiro (PLT-011), portado de
+//! `pg_dump`/`pg_restore` para SQLite em 05/09/2026 (ver
+//! `docs/MIGRACAO-SQLITE.md`).
 //!
-//! No credential lives in this file: the password always arrives as a
-//! parameter from the caller (mirroring `test_database_connection` in
-//! `ipc::commands`) and is only ever passed to the child process through the
-//! `PGPASSWORD` environment variable — never as a `-W`/`--password` argument,
-//! which would leak it into the process list.
+//! O que a porta muda, e por quê importa: um backup deixou de ser um
+//! processo externo (`pg_dump`) e virou uma instrução SQL, `VACUUM INTO`.
+//! Isso apaga de uma vez o binário que precisava estar no PATH, a senha que
+//! precisava viajar por variável de ambiente, o timeout de processo pendurado
+//! e o parsing de stderr alheio. Sobra uma cópia lógica completa do banco,
+//! escrita pela própria conexão, atômica, e que — diferente de copiar o
+//! arquivo com `fs::copy` — nunca sai desatualizada em relação ao que ainda
+//! só existe no `-wal`.
 //!
-//! The full round trip (`run_backup` then `run_restore` into an empty
-//! database) needs a live Postgres plus the `pg_dump`/`pg_restore` binaries,
-//! so it is exercised only by the `#[ignore]`d test in
-//! `src-tauri/tests/backup_dump.rs`, against the throwaway trust-auth
-//! cluster from `scripts/dev-db.ps1` — never the machine's own Postgres
-//! service, whose password is not ours to have. Everything that can be
-//! proven without a database — the exact arguments built, the filename
-//! format, and how a failed/missing process is reported — is a plain test
-//! right here, and was actually run (not just read) while writing this file.
+//! A restauração é a metade que continua exigindo cuidado, porque substituir
+//! o arquivo por baixo de um pool aberto é justamente como se corrompe um
+//! banco SQLite. O contrato está em [`run_restore`]: quem chama fecha o pool
+//! antes. Em troca, a restauração ganhou o que a versão Postgres não tinha —
+//! o arquivo restaurado é verificado ANTES de a substituição acontecer, e o
+//! banco atual é copiado para o lado antes de ser sobrescrito.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tokio::process::Command;
-use tokio::time::timeout;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
+use sqlx::{ConnectOptions, Connection, SqlitePool};
 
-use crate::config::AppConfig;
 use crate::error::{Error, Result};
 
-const PG_DUMP_BIN: &str = "pg_dump";
-const PG_RESTORE_BIN: &str = "pg_restore";
+/// Extensão dos arquivos de backup. É um banco SQLite completo e abrível,
+/// não um formato de dump proprietário: dá para inspecionar com qualquer
+/// ferramenta SQLite sem passar pelo Learno.
+const BACKUP_EXTENSION: &str = "sqlite";
 
-/// How long a single `pg_dump`/`pg_restore` invocation may run before this
-/// gives up on it rather than blocking forever — this gate sits in front of
-/// a schema migration at app startup (PLT-020) and of every PLT-013
-/// risky-operation trigger, so a hung child process must not freeze either.
-/// A local desktop-scale Postgres dump/restore finishes in seconds; a
-/// process still running after this long is far more likely stuck (a
-/// locked table, a slow disk, a non-local host that stopped responding)
-/// than legitimately busy.
-const BACKUP_PROCESS_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// `learno-backup-<UTC timestamp>.dump`. Colons are deliberately absent from
-/// the timestamp format — `HH:MM:SS` is a legal ISO-8601 time but an illegal
-/// Windows filename.
+/// `learno-backup-<timestamp UTC>.sqlite`. Dois-pontos são deliberadamente
+/// ausentes do formato — `HH:MM:SS` é hora ISO-8601 legal e nome de arquivo
+/// ilegal no Windows. Os milissegundos não são enfeite: `VACUUM INTO` recusa
+/// escrever sobre um arquivo existente, então dois backups no mesmo segundo
+/// (o periódico do PLT-013 e o de operação de risco, por exemplo) falhariam
+/// com precisão de segundo.
 fn backup_file_name(now: DateTime<Utc>) -> String {
-    format!("learno-backup-{}.dump", now.format("%Y%m%dT%H%M%SZ"))
+    format!("learno-backup-{}.{BACKUP_EXTENSION}", now.format("%Y%m%dT%H%M%S%.3fZ"))
 }
 
-/// `pg_dump`'s custom format (`-Fc`) is compressed and is the one
-/// `pg_restore` expects — plain SQL would also work but loses the
-/// selective-restore and compression `pg_restore` gives us for free.
-fn dump_args(config: &AppConfig, output_path: &Path) -> Vec<String> {
-    vec![
-        "--host".into(),
-        config.host.clone(),
-        "--port".into(),
-        config.port.to_string(),
-        "--username".into(),
-        config.user.clone(),
-        "--dbname".into(),
-        config.database.clone(),
-        "--format".into(),
-        "custom".into(),
-        "--no-password".into(),
-        "--file".into(),
-        output_path.display().to_string(),
-    ]
+/// Caminho do arquivo `-wal`/`-shm` que o SQLite mantém ao lado do arquivo
+/// principal em `journal_mode = WAL` — não é extensão (`.wal`), é um sufixo
+/// colado ao nome completo do arquivo.
+fn sidecar_path(database_path: &Path, suffix: &str) -> PathBuf {
+    let mut with_suffix = database_path.as_os_str().to_os_string();
+    with_suffix.push(suffix);
+    PathBuf::from(with_suffix)
 }
 
-/// `--clean --if-exists`: PLT-011's acceptance is "restored into an empty
-/// base recovers all content", but a restore run against a non-empty target
-/// (retried after a partial failure, say) should still land correctly
-/// instead of erroring on every object that already exists.
-fn restore_args(config: &AppConfig, dump_path: &Path) -> Vec<String> {
-    vec![
-        "--host".into(),
-        config.host.clone(),
-        "--port".into(),
-        config.port.to_string(),
-        "--username".into(),
-        config.user.clone(),
-        "--dbname".into(),
-        config.database.clone(),
-        "--no-password".into(),
-        "--clean".into(),
-        "--if-exists".into(),
-        dump_path.display().to_string(),
-    ]
-}
-
-/// Runs `program` with `args`, feeding `password` in through the
-/// environment, and reports the three ways this can go wrong for someone
-/// who has no console to see it in (a packaged desktop app): the binary
-/// missing from PATH, the process hanging past `process_timeout`, and the
-/// process exiting with an error — for which its own `stderr` (the disk-full
-/// or permission message `pg_dump`/`pg_restore` actually printed) is folded
-/// into the returned error instead of being silently inherited into a
-/// terminal nobody is watching. `kill_on_drop` matters for the timeout
-/// case specifically: `timeout()` dropping this future must not leave a
-/// hung `pg_dump` running detached in the background.
+/// PLT-011: escreve uma cópia consistente do banco atrás de `pool` num
+/// arquivo novo e datado sob `output_dir`, criando a pasta se preciso.
 ///
-/// Factored out of `run_backup`/`run_restore` so every failure shape above
-/// can be proven with a real spawned process and no Postgres at all.
-/// `process_timeout` is a parameter (rather than always reading
-/// `BACKUP_PROCESS_TIMEOUT` directly) only so the timeout path itself can be
-/// exercised in a test without an actual 5-minute wait.
-async fn spawn_and_check(program: &str, args: &[String], password: &str, process_timeout: Duration) -> Result<()> {
-    let mut command = Command::new(program);
-    command.args(args).env("PGPASSWORD", password).kill_on_drop(true);
-
-    let output = match timeout(process_timeout, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(Error::Config(format!(
-                "{program} não encontrado no PATH — instale as ferramentas de cliente do Postgres (pg_dump/pg_restore) e tente novamente"
-            )));
-        }
-        Ok(Err(error)) => return Err(error.into()),
-        Err(_elapsed) => {
-            return Err(Error::Invalid(format!(
-                "{program} não respondeu em {}s e foi interrompido — processo pode estar travado, disco cheio ou muito lento",
-                process_timeout.as_secs()
-            )));
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
-        let detail = if stderr.is_empty() { "sem detalhes na saída de erro do processo".to_string() } else { stderr.to_string() };
-        return Err(Error::Invalid(format!("{program} saiu com código de erro {}: {detail}", output.status)));
-    }
-    Ok(())
-}
-
-/// PLT-011: dumps the configured database to a fresh, timestamped file under
-/// `output_dir`, creating that directory if needed.
-pub async fn run_backup(config: &AppConfig, password: &str, output_dir: &Path) -> Result<PathBuf> {
+/// `VACUUM INTO` roda na conexão que o pool já tem aberta, então não existe
+/// caso de "o binário não está instalado" nem de "a senha está errada" — os
+/// dois modos de falha que dominavam a versão `pg_dump`. O que sobra é erro
+/// de disco (sem espaço, sem permissão), e esse chega como `Error::Database`
+/// com a mensagem do próprio SQLite.
+pub async fn run_backup(pool: &SqlitePool, output_dir: &Path) -> Result<PathBuf> {
     tokio::fs::create_dir_all(output_dir).await?;
     let output_path = output_dir.join(backup_file_name(Utc::now()));
 
-    spawn_and_check(PG_DUMP_BIN, &dump_args(config, &output_path), password, BACKUP_PROCESS_TIMEOUT).await?;
-    Ok(output_path)
-}
-
-/// PLT-011: restores `dump_path` (as produced by `run_backup`, or any
-/// `pg_dump -Fc` output) over the configured database.
-pub async fn run_restore(config: &AppConfig, password: &str, dump_path: &Path) -> Result<()> {
-    if !dump_path.is_file() {
+    // `VACUUM INTO` falha se o alvo existir; conferir antes transforma um
+    // "SQL logic error" opaco numa mensagem que diz o que aconteceu.
+    if output_path.exists() {
         return Err(Error::Invalid(format!(
-            "arquivo de dump não encontrado: {}",
-            dump_path.display()
+            "já existe um arquivo de backup em {} — apague-o ou tente de novo",
+            output_path.display()
         )));
     }
 
-    spawn_and_check(PG_RESTORE_BIN, &restore_args(config, dump_path), password, BACKUP_PROCESS_TIMEOUT).await
+    sqlx::query("VACUUM INTO ?").bind(output_path.to_string_lossy().as_ref()).execute(pool).await?;
+    Ok(output_path)
+}
+
+/// Confere que `backup_path` é de fato um banco SQLite íntegro e do Learno,
+/// antes que ele possa substituir o banco de verdade de alguém.
+///
+/// Duas checagens, e as duas importam por motivos diferentes:
+///
+/// - `PRAGMA integrity_check` lê o banco inteiro e responde exatamente `ok`
+///   quando não há página corrompida. Um arquivo truncado por uma cópia
+///   interrompida passa por qualquer teste de extensão ou de cabeçalho, e é
+///   pego aqui.
+/// - a presença de `_sqlx_migrations` separa "um banco SQLite qualquer" de
+///   "um banco do Learno". Restaurar o arquivo errado apagaria tudo sem
+///   nenhum erro visível: o app abriria vazio, e migrações rodariam sobre um
+///   schema desconhecido.
+///
+/// Abre em modo somente-leitura e sem `create_if_missing`, então um caminho
+/// inexistente falha aqui em vez de virar um arquivo vazio recém-criado.
+pub async fn validate_backup_file(backup_path: &Path) -> Result<()> {
+    if !backup_path.is_file() {
+        return Err(Error::Invalid(format!("arquivo de backup não encontrado: {}", backup_path.display())));
+    }
+
+    let mut connection: SqliteConnection = SqliteConnectOptions::new()
+        .filename(backup_path)
+        .create_if_missing(false)
+        .read_only(true)
+        .connect()
+        .await
+        .map_err(|e| Error::Invalid(format!("{} não é um banco SQLite legível ({e})", backup_path.display())))?;
+
+    // O erro de "isto não é um banco" não aparece no `connect` acima: o
+    // SQLite só lê o cabeçalho do arquivo na primeira instrução de verdade.
+    // Por isso a falha desta consulta é traduzida para `Invalid` em vez de
+    // vazar como `Database` — para quem escolheu o arquivo errado no seletor,
+    // é um problema de escolha, não do banco.
+    let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_one(&mut connection)
+        .await
+        .map_err(|e| Error::Invalid(format!("{} não é um banco SQLite legível ({e})", backup_path.display())))?;
+    if integrity != "ok" {
+        let _ = connection.close().await;
+        return Err(Error::Invalid(format!(
+            "o arquivo de backup {} está corrompido: {integrity}",
+            backup_path.display()
+        )));
+    }
+
+    let is_learno: Option<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
+            .fetch_optional(&mut connection)
+            .await?;
+    let _ = connection.close().await;
+
+    if is_learno.is_none() {
+        return Err(Error::Invalid(format!(
+            "{} é um banco SQLite, mas não um backup do Learno (não tem histórico de migração)",
+            backup_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+/// Onde o banco atual é guardado antes de ser sobrescrito por uma
+/// restauração. Fica ao lado do próprio banco, e não em `output_dir`, para
+/// que a rede de segurança sobreviva mesmo a uma restauração feita a partir
+/// de um arquivo em pendrive que some logo depois.
+fn pre_restore_copy_path(database_path: &Path, now: DateTime<Utc>) -> PathBuf {
+    sidecar_path(database_path, &format!(".antes-da-restauracao-{}", now.format("%Y%m%dT%H%M%S%.3fZ")))
+}
+
+/// PLT-011: substitui o banco em `database_path` pelo conteúdo de
+/// `backup_path`.
+///
+/// **Contrato, e é o ponto perigoso deste arquivo:** o pool que aponta para
+/// `database_path` precisa estar FECHADO antes desta chamada. Trocar o
+/// arquivo por baixo de conexões abertas é o caminho conhecido para
+/// corromper um banco SQLite — as conexões seguiriam com páginas em cache e
+/// um `-wal` que descreve um arquivo que não existe mais. Quem chama
+/// (`ipc::backup_commands::restore_backup`) fecha o pool, chama isto, e só
+/// então reconecta.
+///
+/// Ordem deliberada: valida primeiro, copia o banco atual para o lado
+/// depois, sobrescreve por último. Assim uma restauração a partir de um
+/// arquivo ruim para antes de tocar em qualquer coisa, e mesmo uma
+/// restauração bem-sucedida deixa o estado anterior recuperável em disco.
+pub async fn run_restore(database_path: &Path, backup_path: &Path) -> Result<()> {
+    validate_backup_file(backup_path).await?;
+
+    if database_path.is_file() {
+        std::fs::copy(database_path, pre_restore_copy_path(database_path, Utc::now()))?;
+    }
+
+    // Os sidecars pertencem ao banco que está sendo substituído: descrevem
+    // páginas de um arquivo que deixa de existir na linha seguinte, e deixá-los
+    // para trás arriscaria a próxima conexão reaplicar frames de WAL sobre um
+    // banco que já é outro. Ausência de qualquer um dos dois não é erro — é o
+    // caso comum quando não houve escrita desde o último checkpoint.
+    for suffix in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(sidecar_path(database_path, suffix));
+    }
+
+    std::fs::copy(backup_path, database_path)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -164,141 +186,146 @@ mod tests {
 
     use super::*;
     use chrono::TimeZone;
+    use sqlx::sqlite::SqlitePoolOptions;
 
-    fn sample_config() -> AppConfig {
-        AppConfig {
-            host: "localhost".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "postgres".into(),
-        }
+    fn fixed_time() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 9, 2, 14, 30, 5).unwrap()
     }
 
-    fn strs(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
+    fn temp_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("learno-dump-test-{label}-{}", uuid::Uuid::new_v4()))
+    }
+
+    /// Um banco SQLite de verdade, com uma tabela e uma linha, para os testes
+    /// que precisam de conteúdo a copiar.
+    async fn database_with_content(path: &Path, with_migration_history: bool) -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(path).create_if_missing(true))
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE anotacao (id INTEGER PRIMARY KEY, texto TEXT)").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO anotacao (texto) VALUES ('mitocôndria')").execute(&pool).await.unwrap();
+        if with_migration_history {
+            sqlx::query("CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, success BOOLEAN)")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool
     }
 
     #[test]
     fn backup_file_name_has_no_colon_so_it_is_a_legal_windows_filename() {
-        let fixed = Utc.with_ymd_and_hms(2026, 9, 2, 14, 30, 5).unwrap();
-        let name = backup_file_name(fixed);
+        let name = backup_file_name(fixed_time());
 
-        assert_eq!(name, "learno-backup-20260902T143005Z.dump");
+        assert!(name.starts_with("learno-backup-20260902T143005"));
+        assert!(name.ends_with(".sqlite"));
         assert!(!name.contains(':'));
     }
 
+    /// Milissegundos no nome não são enfeite: `VACUUM INTO` recusa escrever
+    /// sobre arquivo existente, então dois backups no mesmo segundo colidiriam
+    /// com precisão de segundo.
     #[test]
-    fn dump_args_carries_every_connection_field_and_the_output_path() {
-        let config = sample_config();
-        let output = PathBuf::from("C:/tmp/learno-backup-x.dump");
+    fn backup_file_names_differ_within_the_same_second() {
+        let base = fixed_time();
+        let primeiro = backup_file_name(base + chrono::Duration::milliseconds(10));
+        let segundo = backup_file_name(base + chrono::Duration::milliseconds(20));
 
-        let args = dump_args(&config, &output);
-
-        assert_eq!(
-            args,
-            strs(&[
-                "--host", "localhost",
-                "--port", "5432",
-                "--username", "postgres",
-                "--dbname", "learno",
-                "--format", "custom",
-                "--no-password",
-                "--file", "C:/tmp/learno-backup-x.dump",
-            ])
-        );
+        assert_ne!(primeiro, segundo);
     }
 
-    #[test]
-    fn restore_args_carries_every_connection_field_and_the_dump_path() {
-        let config = sample_config();
-        let dump = PathBuf::from("C:/tmp/learno-backup-x.dump");
-
-        let args = restore_args(&config, &dump);
-
-        assert_eq!(
-            args,
-            strs(&[
-                "--host", "localhost",
-                "--port", "5432",
-                "--username", "postgres",
-                "--dbname", "learno",
-                "--no-password",
-                "--clean",
-                "--if-exists",
-                "C:/tmp/learno-backup-x.dump",
-            ])
-        );
-    }
-
-    #[test]
-    fn dump_and_restore_args_never_carry_the_password_as_a_literal_argument() {
-        let config = sample_config();
-        let path = PathBuf::from("C:/tmp/x.dump");
-
-        assert!(!dump_args(&config, &path).iter().any(|a| a == "supersecret"));
-        assert!(!restore_args(&config, &path).iter().any(|a| a == "supersecret"));
-    }
-
-    // Was `Error::Io` before `spawn_and_check` learned to tell "binary
-    // missing" apart from other I/O failures — a bare `Io` gave a user with
-    // no console just "entrada e saída: program not found", with no hint
-    // that installing Postgres client tools is the fix.
     #[tokio::test]
-    async fn spawn_and_check_reports_config_error_when_the_binary_does_not_exist() {
-        let result = spawn_and_check("learno-nonexistent-binary-xyz", &[], "unused", BACKUP_PROCESS_TIMEOUT).await;
-        match result {
-            Err(Error::Config(message)) => assert!(message.contains("PATH")),
-            other => panic!("expected Err(Error::Config(_)), got {other:?}"),
+    async fn run_backup_writes_a_readable_copy_of_the_data() {
+        let db_path = temp_path("origem.sqlite");
+        let pool = database_with_content(&db_path, true).await;
+        let output_dir = temp_path("saida");
+
+        let backup = run_backup(&pool, &output_dir).await.unwrap();
+
+        assert!(backup.is_file());
+        validate_backup_file(&backup).await.unwrap();
+
+        let copia = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(&backup).create_if_missing(false))
+            .await
+            .unwrap();
+        let texto: String = sqlx::query_scalar("SELECT texto FROM anotacao").fetch_one(&copia).await.unwrap();
+        assert_eq!(texto, "mitocôndria");
+    }
+
+    #[tokio::test]
+    async fn validate_backup_file_rejects_a_path_that_does_not_exist() {
+        let missing = temp_path("nao-existe.sqlite");
+        assert!(matches!(validate_backup_file(&missing).await, Err(Error::Invalid(_))));
+    }
+
+    /// Um arquivo que não é banco nenhum — o caso "o usuário escolheu o
+    /// arquivo errado no seletor" — para antes de qualquer substituição.
+    #[tokio::test]
+    async fn validate_backup_file_rejects_a_file_that_is_not_a_database() {
+        let lixo = temp_path("lixo.sqlite");
+        std::fs::write(&lixo, b"isto aqui nao e um banco de dados").unwrap();
+
+        match validate_backup_file(&lixo).await {
+            Err(Error::Invalid(_)) => {}
+            other => panic!("esperava Err(Error::Invalid(_)), obtido {other:?}"),
         }
     }
 
-    #[cfg(windows)]
+    /// Um banco SQLite legítimo, mas de outro programa: restaurá-lo apagaria
+    /// tudo sem erro visível. Sem `_sqlx_migrations` não é backup do Learno.
     #[tokio::test]
-    async fn spawn_and_check_reports_invalid_when_the_process_exits_with_an_error_code() {
-        let args = vec!["/C".to_string(), "exit".to_string(), "1".to_string()];
-        let result = spawn_and_check("cmd", &args, "unused", BACKUP_PROCESS_TIMEOUT).await;
-        assert!(matches!(result, Err(Error::Invalid(_))));
-    }
+    async fn validate_backup_file_rejects_a_sqlite_database_that_is_not_learnos() {
+        let alheio = temp_path("alheio.sqlite");
+        let pool = database_with_content(&alheio, false).await;
+        pool.close().await;
 
-    // Disco cheio ou permissão negada chegam do processo real via stderr —
-    // sem isso, tudo que sobrevivia era o código de saída, e o usuário via
-    // "pg_dump saiu com código de erro: exit code: 1" sem nenhuma pista do
-    // porquê.
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn spawn_and_check_includes_the_process_stderr_in_the_error_message() {
-        let args = strs(&["/C", "echo disco sem espaco 1>&2 & exit 3"]);
-        let result = spawn_and_check("cmd", &args, "unused", BACKUP_PROCESS_TIMEOUT).await;
-        match result {
-            Err(Error::Invalid(message)) => assert!(
-                message.contains("disco sem espaco"),
-                "expected the process's own stderr in the error, got: {message}"
-            ),
-            other => panic!("expected Err(Error::Invalid(_)), got {other:?}"),
-        }
-    }
-
-    // `ping` (not `pg_dump`) só para ter um processo real que fica de pé por
-    // alguns segundos sem exigir um Postgres — o timeout de 200ms é bem
-    // menor que os ~5s que `-n 6` leva, então isto sempre estoura de
-    // verdade, e não por acaso.
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn spawn_and_check_reports_invalid_when_the_process_runs_past_the_timeout() {
-        let args = strs(&["-n", "6", "127.0.0.1"]);
-        let result = spawn_and_check("ping", &args, "unused", Duration::from_millis(200)).await;
-        match result {
-            Err(Error::Invalid(message)) => assert!(message.contains("não respondeu")),
-            other => panic!("expected Err(Error::Invalid(_)), got {other:?}"),
+        match validate_backup_file(&alheio).await {
+            Err(Error::Invalid(message)) => assert!(message.contains("Learno"), "mensagem inesperada: {message}"),
+            other => panic!("esperava Err(Error::Invalid(_)), obtido {other:?}"),
         }
     }
 
     #[tokio::test]
-    async fn run_restore_rejects_a_dump_path_that_does_not_exist_before_spawning_anything() {
-        let config = sample_config();
-        let missing = std::env::temp_dir().join("learno-test-missing-dump-file.dump");
+    async fn run_restore_refuses_a_bad_backup_without_touching_the_live_database() {
+        let db_path = temp_path("vivo.sqlite");
+        let pool = database_with_content(&db_path, true).await;
+        pool.close().await;
+        let antes = std::fs::read(&db_path).unwrap();
 
-        let result = run_restore(&config, "unused", &missing).await;
-        assert!(matches!(result, Err(Error::Invalid(_))));
+        let lixo = temp_path("lixo2.sqlite");
+        std::fs::write(&lixo, b"nao e banco").unwrap();
+
+        assert!(run_restore(&db_path, &lixo).await.is_err());
+        assert_eq!(std::fs::read(&db_path).unwrap(), antes, "o banco vivo não pode ter sido tocado");
+    }
+
+    #[tokio::test]
+    async fn run_restore_replaces_the_database_and_keeps_a_copy_of_what_it_replaced() {
+        let db_path = temp_path("alvo.sqlite");
+        let pool = database_with_content(&db_path, true).await;
+        let backup_dir = temp_path("backups");
+        let backup = run_backup(&pool, &backup_dir).await.unwrap();
+
+        sqlx::query("UPDATE anotacao SET texto = 'depois do backup'").execute(&pool).await.unwrap();
+        pool.close().await;
+
+        run_restore(&db_path, &backup).await.unwrap();
+
+        let restaurado = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(&db_path).create_if_missing(false))
+            .await
+            .unwrap();
+        let texto: String = sqlx::query_scalar("SELECT texto FROM anotacao").fetch_one(&restaurado).await.unwrap();
+        assert_eq!(texto, "mitocôndria", "o conteúdo do backup precisa ter substituído o conteúdo novo");
+
+        let vizinhos: Vec<String> = std::fs::read_dir(db_path.parent().unwrap())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("antes-da-restauracao"))
+            .collect();
+        assert!(!vizinhos.is_empty(), "a restauração precisa deixar uma cópia do que sobrescreveu");
     }
 }

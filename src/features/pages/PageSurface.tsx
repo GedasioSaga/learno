@@ -1,12 +1,42 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { EmptyState } from "../../components/EmptyState";
 import { createPageVersionSnapshot } from "../../lib/ipc";
 import { useAutosaveDraft } from "../backup";
 import { Editor } from "../editor";
 import { BacklinksSection } from "./backlinks";
 import { EmojiIconPicker } from "./EmojiIconPicker";
+import { type FontePagina, usePreferenciasDaPagina } from "./page-preferences-store";
 import { usePageTreeStore } from "./store";
 import { displayTitle } from "./tree-utils";
+
+/**
+ * `CSSProperties` do `@types/react` removeu a assinatura de índice que
+ * aceitava propriedade customizada (`--algo`) — de propósito, para tipagem
+ * fechada via csstype (ver o comentário no próprio arquivo de tipos). Esta
+ * interface reabre só para `--*`, sem abrir mão de checagem de tipo em
+ * nenhuma outra propriedade: `estilo.color` continua validado normalmente.
+ */
+interface EstiloComVariaveisCss extends CSSProperties {
+  [propriedade: `--${string}`]: string | undefined;
+}
+
+// FUN-017: sem coluna no banco para a fonte da página (ver
+// `page-preferences-store.ts`), a mudança é aplicada por CSS puro: `.ed-root`
+// (editor.css) e o título aqui embaixo já leem `var(--font-sans)`/
+// `var(--font-display)`, então redefinir essas DUAS variáveis num ancestral
+// muda o que os dois resolvem — sem editar `core/editor.css`, que não é
+// nosso. "Serifada" reaproveita o token que já existe; "Mono" não tem token
+// no projeto (nenhum tema declara `--font-mono`), então é a única fonte
+// literal deste arquivo — não é cor, a regra de "só token" do
+// DESIGN-TOKENS.md é sobre cor.
+const PILHA_MONOSPACADA =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
+function estiloDaFonte(fonte: FontePagina): EstiloComVariaveisCss | undefined {
+  if (fonte === "padrao") return undefined;
+  if (fonte === "serifada") return { "--font-sans": "var(--font-display)" };
+  return { "--font-sans": PILHA_MONOSPACADA, "--font-display": PILHA_MONOSPACADA };
+}
 
 interface PageSurfaceProps {
   /** Id da página a exibir. Funciona tanto para uma página comum quanto para
@@ -85,6 +115,7 @@ export function PageSurface({ pageId }: PageSurfaceProps) {
   // keystroke, `clearDraft` only erases it once `rename` confirms the title
   // actually reached Postgres.
   const { saveDraft, clearDraft } = useAutosaveDraft(pageId);
+  const preferencias = usePreferenciasDaPagina(pageId);
 
   usePeriodicVersionSnapshot(pageId, page?.title);
 
@@ -97,9 +128,32 @@ export function PageSurface({ pageId }: PageSurfaceProps) {
     );
   }
 
+  const estilo: EstiloComVariaveisCss = {
+    ...estiloDaFonte(preferencias.fonte),
+    // FUN-018: `zoom` não é padrão CSS, mas é suportado no motor Chromium que
+    // o WebView2 do Tauri usa no Windows (e no `npm run dev` em qualquer
+    // browser atual) — e é o único jeito de encolher TÍTULO e cabeçalhos do
+    // editor junto com o corpo sem tocar em `core/editor.css`: eles usam
+    // `rem` literal (`1.6rem` etc., ver `editor.css`), que só responde à
+    // fonte da RAIZ do documento, nunca a um `font-size` redefinido num
+    // ancestral. Baixar o `font-size` daqui não moveria a agulha nos títulos;
+    // `zoom` escala o que já foi desenhado, título incluído. String, não
+    // número — React só entende número puro como pixels, e `0.875px` de
+    // zoom não é a intenção.
+    zoom: preferencias.textoPequeno ? "0.875" : undefined,
+  };
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-8 pt-6">
+    // `--measure` (65ch, de `docs/DESIGN-TOKENS.md`) é a largura de leitura:
+    // linha mais longa que isso faz o olho perder o começo da seguinte, e o
+    // editor ocupava a janela inteira. O contêiner centraliza; o fundo segue
+    // sendo a largura toda. FUN-016 ("largura total") desliga essa régua.
+    <div
+      data-slot="page-surface"
+      style={estilo}
+      className={`mx-auto flex h-full w-full flex-col ${preferencias.larguraTotal ? "max-w-none" : "max-w-[var(--measure)]"}`}
+    >
+      <div className="flex items-center gap-2 px-8 pt-8">
         <EmojiIconPicker
           pageId={page.id}
           currentIcon={page.icon}

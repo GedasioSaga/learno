@@ -46,9 +46,11 @@ pub use backlinks::{BacklinkRepository, BacklinkRow, OutgoingLinkRow};
 pub use biblioteca::{AnotacaoRow, BibliotecaRepository, LivroAberto, LivroNaEstante, LivroRow, ProgressoDeLeitura};
 pub use biblioteca_categorias::{Categoria, CategoriaRepository, CategoriasDoLivro};
 pub use blocks::{BlockChangeInput, BlockPatchInput, BlockPlacementInput, BlockRepository, BlockRow, NewBlockInput};
-pub use cards::{AnswerOutcome, CardRepository, CardRow, CardToStudy, DeckCounts, DiaPrevisto};
+pub use cards::{AnswerOutcome, CardRepository, CardRow, CardToStudy, DeckCounts, DeckMaturity, DiaPrevisto};
 pub use cronograma::{
-    BlocoPatchInput, BlocoPlanejado, CronogramaRepository, DiaDaSemana, Materia, MateriaPatchInput, SemanaDeEstudo,
+    AplicacaoDeRotina, BlocoPatchInput, BlocoPlanejado, CronogramaRepository, DiaDaSemana, DiaDeRotinaPulado,
+    ItemDeRotina, ItemDeRotinaPatchInput, Materia, MateriaPatchInput, ModoDeAplicacaoDeRotina, Rotina,
+    RotinaPatchInput, SemanaDeEstudo,
 };
 pub use databases::{
     DatabasePropertyRow, DatabaseRecord, DatabaseRepository, DatabaseRow, DatabaseViewRow, VALID_PROPERTY_TYPES,

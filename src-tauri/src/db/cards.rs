@@ -79,6 +79,16 @@ const LIMITE_NOVOS_POR_DIA: i64 = 20;
 /// na WebView. Dez anos é generoso para qualquer gráfico de previsão real.
 const DECK_FORECAST_DIAS_MAXIMO: i64 = 3650;
 
+/// Limiar de "maduro" que `deck_maturity` usa — CONVENÇÃO DO ANKI, não um
+/// número escolhido por esta peça: no Anki, um cartão em `review` com
+/// intervalo de **21 dias ou mais** é classificado "mature" (visível na
+/// coluna "Card State"/`is:mature` do Browse, e nas estatísticas de
+/// "Card Counts" do próprio app) — abaixo disso é "young". Este projeto
+/// reusa o mesmo corte em vez de inventar outro: é a definição que qualquer
+/// usuário vindo do Anki já reconhece, e não há uma segunda convenção de
+/// mercado para "cartão maduro" para justificar um número diferente.
+const INTERVALO_MADURO_DIAS: i64 = 21;
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CardRow {
@@ -174,6 +184,51 @@ pub struct DeckCounts {
     pub revisar: i64,
 }
 
+/// `deck_maturity()` do contrato de IPC: quanto de UM baralho (`deck_id`
+/// exato — sem descer para subbaralhos, ao contrário de `deck_counts`/
+/// `next_card`/`deck_forecast`, porque "este baralho está maduro" e "esta
+/// trilha, que anexa este `deck_id` específico, está madura" são a mesma
+/// pergunta, e a Trilha aponta para um baralho por id, não para uma árvore)
+/// já foi de fato aprendido, para a peça de Trilha que vai decidir se uma
+/// etapa pode ser considerada dominada.
+///
+/// `maduros + jovens + novos + suspensos` pode ser MENOR que `total`:
+/// cartões em `state = 'learning'` (primeira aprendizagem, ainda não
+/// chegaram a `review` nem uma vez) não caem em nenhum dos quatro — não são
+/// "novos" (já foram respondidos ao menos uma vez) nem "jovens" (a definição
+/// pedida para esta peça é literalmente "em revisão/reaprendizado", e
+/// `learning` não é nenhum dos dois). Ver o comentário de
+/// `CardRepository::deck_maturity` para por que isso é a leitura mais
+/// simples do pedido, e não um bug: o `learning` residual ainda entra no
+/// TOTAL e no denominador de `fracao_maduros`, então um baralho cheio de
+/// cartões em primeira aprendizagem não aparenta estar mais maduro do que é.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckMaturity {
+    /// Todo cartão do baralho, qualquer `state` — inclusive `suspended` e
+    /// `learning` (ver o comentário acima sobre por que os quatro campos
+    /// abaixo nem sempre somam a este total).
+    pub total: i64,
+    /// `state = 'review'` com `interval_days >= INTERVALO_MADURO_DIAS`.
+    pub maduros: i64,
+    /// `state IN ('review', 'relearning')` com `interval_days <
+    /// INTERVALO_MADURO_DIAS` — um cartão em `relearning` sempre tem
+    /// `interval_days = 0` enquanto dura o relapso (`crate::srs` grava
+    /// `interval_dias: 0` explicitamente nos dois agendadores ao entrar em
+    /// reaprendizagem), então ele cai aqui por construção, nunca em
+    /// `maduros`, mesmo que o intervalo anterior ao lapso fosse alto.
+    pub jovens: i64,
+    /// `state = 'new'` — nunca respondido.
+    pub novos: i64,
+    /// `state = 'suspended'`.
+    pub suspensos: i64,
+    /// `maduros / (total - suspensos)`, ou `0.0` (nunca `NaN`) quando esse
+    /// denominador é zero (baralho vazio, ou 100% suspenso). Ver a decisão
+    /// de excluir suspensos do denominador no comentário de
+    /// `CardRepository::deck_maturity`.
+    pub fracao_maduros: f64,
+}
+
 /// `answer_card()` do contrato de IPC.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -255,6 +310,57 @@ impl CardRepository {
         let novos = (LIMITE_NOVOS_POR_DIA - estudados_hoje).max(0).min(novos_total);
 
         Ok(DeckCounts { novos, aprendendo, revisar })
+    }
+
+    /// `deck_maturity`: quanto de UM baralho específico (`deck_id` exato, sem
+    /// escopo de subbaralhos — ver o comentário de [`DeckMaturity`]) já
+    /// amadureceu. Erra com `Error::NotFound` se `deck_id` não existir —
+    /// mesma convenção de `DeckRepository::get` (lê "independente de estar
+    /// na lixeira", sem filtrar `deleted_at`; um baralho na lixeira ainda tem
+    /// maturidade real, só não aparece na árvore).
+    ///
+    /// DECISÃO — denominador de `fracao_maduros` exclui suspensos: um cartão
+    /// suspenso não está sendo aprendido nem esquecido, é uma pausa
+    /// deliberada do usuário; contá-lo no denominador penalizaria a fração
+    /// por uma escolha do usuário, não por desempenho de memória. O custo
+    /// aceito: um baralho quase todo suspenso mostra uma fração alta com base
+    /// em poucos cartões — aceitável porque `total`/`suspensos` continuam
+    /// expostos para quem quiser essa nuance.
+    pub async fn deck_maturity(&self, deck_id: Uuid) -> Result<DeckMaturity> {
+        let existe: Option<i64> = sqlx::query_scalar("SELECT 1 FROM decks WHERE id = $1")
+            .bind(deck_id.db())
+            .fetch_optional(&self.pool)
+            .await?;
+        if existe.is_none() {
+            return Err(Error::NotFound(format!("baralho {deck_id}")));
+        }
+
+        let sql = "SELECT \
+                COUNT(*), \
+                COALESCE(SUM(CASE WHEN state = 'review' AND interval_days >= $2 THEN 1 ELSE 0 END), 0), \
+                COALESCE(SUM(CASE WHEN state IN ('review', 'relearning') AND interval_days < $2 THEN 1 ELSE 0 END), 0), \
+                COALESCE(SUM(CASE WHEN state = 'new' THEN 1 ELSE 0 END), 0), \
+                COALESCE(SUM(CASE WHEN state = 'suspended' THEN 1 ELSE 0 END), 0) \
+             FROM cards WHERE deck_id = $1";
+        let (total, maduros, jovens, novos, suspensos): (i64, i64, i64, i64, i64) = sqlx::query_as(sql)
+            .bind(deck_id.db())
+            .bind(INTERVALO_MADURO_DIAS)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let denominador = total - suspensos;
+        let fracao_maduros = if denominador > 0 {
+            // Alargamento para calcular uma RAZÃO de exibição, nunca
+            // realimentado numa soma/média posterior — contagem de cartões
+            // neste app fica a ordens de grandeza de distância de 2^53 (onde
+            // `f64` deixaria de representar todo `i64` com exatidão), então
+            // não há perda de precisão prática neste `as`.
+            maduros as f64 / denominador as f64
+        } else {
+            0.0
+        };
+
+        Ok(DeckMaturity { total, maduros, jovens, novos, suspensos, fracao_maduros })
     }
 
     /// `next_card`: o próximo cartão a estudar, ou `None` quando a fila está

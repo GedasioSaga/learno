@@ -22,15 +22,10 @@
 // nenhuma dele. EDT-051 solta no centro do parágrafo do alvo: metade da
 // altura (interior) e centro da largura (longe dos 24px da direita).
 
-import { TEST_DB } from "../lib/env.mjs";
-import { psql, psqlQuiet, psqlRows, sqlLiteral } from "../lib/psql.mjs";
+import { column, scalar, waitFor } from "../lib/db.mjs";
 
 const STAMP = Date.now();
 const PAGE_TITLE = `E2E Drag ${STAMP}`;
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -86,70 +81,93 @@ async function dropRelativeToBlock(sourceText, targetText, xFrac, yFrac) {
     x: wrapperRect.left + wrapperRect.width * xFrac,
     y: wrapperRect.top + wrapperRect.height * yFrac,
   };
-  const sourceHandle = await dragHandleFor(sourceText);
-  // Delta inteiro: o protocolo WebDriver rejeita coordenada fracionária em
+  // Coordenada inteira: o protocolo WebDriver rejeita fracionária em
   // `pointerMove`, e o retângulo do WebView2 vem em subpixel (~27.75px de
-  // altura), então arredondar aqui é obrigatório, não cosmético.
-  await sourceHandle.dragAndDrop(
-    { x: Math.round(targetPoint.x - sourceCenter.x), y: Math.round(targetPoint.y - sourceCenter.y) },
-    { duration: 600 },
-  );
+  // altura), então arredondar é obrigatório, não cosmético.
+  const origem = { x: Math.round(sourceCenter.x), y: Math.round(sourceCenter.y) };
+  const destino = { x: Math.round(targetPoint.x), y: Math.round(targetPoint.y) };
+
+  // Sequência explícita de ponteiro em vez de `element.dragAndDrop`.
+  //
+  // O `dragAndDrop` do WebdriverIO faz pointerDown, um único movimento até o
+  // destino e pointerUp colado nele. Isso funciona quase sempre e falhava de
+  // vez em quando (1 rodada em 4, medido): o gesto começava — o indicador de
+  // solta aparecia na tela —, mas a ordem não mudava nem no DOM nem no banco.
+  // O motivo é que `drop-zone.ts` decide a faixa no ÚLTIMO `pointermove` que
+  // recebe, e um `pointerUp` disparado no mesmo instante do movimento final
+  // pode chegar antes de o handler ter processado aquela posição.
+  //
+  // Aqui o caminho é: apertar na origem, um movimento intermediário (para o
+  // gesto ser reconhecido como arrasto, não como clique), o movimento até o
+  // destino, uma PAUSA com o ponteiro parado lá — que é o que garante o
+  // `pointermove` final processado — e só então soltar.
+  await browser.performActions([
+    {
+      type: "pointer",
+      id: "mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", duration: 0, x: origem.x, y: origem.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pause", duration: 100 },
+        {
+          type: "pointerMove",
+          duration: 300,
+          x: Math.round((origem.x + destino.x) / 2),
+          y: Math.round((origem.y + destino.y) / 2),
+        },
+        { type: "pointerMove", duration: 300, x: destino.x, y: destino.y },
+        { type: "pause", duration: 200 },
+        { type: "pointerUp", button: 0 },
+      ],
+    },
+  ]);
+  await browser.releaseActions();
 }
 
 /**
  * Espera `plainTextOrderOnPage(pageId)` bater com `expected` - o `drop` só
  * dispara `scheduleSave` (ver `core/use-blocks-document.ts`), que espera
- * `SAVE_DEBOUNCE_MS` (600ms) antes de escrever no Postgres de verdade, então
- * ler a tabela `blocks` no instante seguinte ao `dragAndDrop` é uma corrida.
- * `browser.waitUntil` é o jeito do WebdriverIO de repetir uma checagem até
- * um timeout - `expect(...).toEqual(...)` sozinho não espera nada aqui
- * porque `toEqual` (ao contrário dos matchers de elemento como
- * `toHaveText`) nunca fez polling: é o matcher puro do Jest, reexportado
- * como está.
+ * `SAVE_DEBOUNCE_MS` (600ms) antes de escrever no arquivo SQLite de verdade,
+ * então ler a tabela `blocks` no instante seguinte ao `dragAndDrop` é uma
+ * corrida. `waitFor` (de `lib/db.mjs`) é quem repete a leitura até a
+ * condição valer ou estourar o tempo — e, se estourar, já embute no erro o
+ * último valor lido, então uma falha de persistência do arrasto continua
+ * distinguível de uma falha de leitura sem precisar de um `catch` próprio
+ * aqui (o `browser.waitUntil` da versão Postgres precisava disso porque seu
+ * `timeoutMsg` é uma string fixa, montada antes da checagem rodar).
  */
 async function waitForOrder(pageId, expected) {
-  let actual = [];
-  try {
-    await browser.waitUntil(
-      () => {
-        actual = plainTextOrderOnPage(pageId);
-        return actual.length === expected.length && actual.every((text, i) => text === expected[i]);
-      },
-      { timeout: 10000, interval: 300 },
-    );
-  } catch {
-    // Relatar o que o banco tem de fato, não só o esperado: a mensagem
-    // anterior dizia apenas "não chegou a [...]", e por isso uma falha de
-    // LEITURA (linhas voltando com "\r" grudado — ver `lib/psql.mjs`) se
-    // parecia, no texto do erro, com uma falha do arrasto. `timeoutMsg` do
-    // `waitUntil` é uma string fixa, montada antes da checagem rodar, então
-    // não serve para isto.
-    throw new Error(`ordem esperada ${JSON.stringify(expected)}, banco tem ${JSON.stringify(actual)}`);
-  }
+  await waitFor(
+    () => plainTextOrderOnPage(pageId),
+    (actual) => actual.length === expected.length && actual.every((text, i) => text === expected[i]),
+    {
+      timeoutMs: 10000,
+      intervalMs: 300,
+      mensagem: `ordem esperada ${JSON.stringify(expected)}`,
+    },
+  );
 }
 
 function plainTextOrderOnPage(pageId) {
-  return psqlRows(
-    `select plain_text from blocks where page_id = ${sqlLiteral(pageId)} and parent_block_id is null and deleted_at is null order by position`,
+  return column(
+    "select plain_text from blocks where page_id = ? and parent_block_id is null and deleted_at is null order by position",
+    [pageId],
   );
 }
 
 function idOfPage(title) {
-  return psql(`select id from pages where title = ${sqlLiteral(title)}`);
+  return scalar("select id from pages where title = ?", [title]);
 }
 
 describe("EDT-050/EDT-051 — arrastar blocos para reordenar e aninhar", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
-    await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
+    // Sem assistente de primeira execução (ver `docs/MIGRACAO-SQLITE.md`): o
+    // app abre direto no arquivo SQLite da pasta de dados e roda as
+    // migrações sozinho — `App.tsx` chama `openWorkspace()` ao subir. O
+    // timeout generoso é porque essa primeira abertura ainda cria o arquivo
+    // e migra o schema antes da árvore aparecer.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
 
     await $("button*=Nova página").click();
     const titleInput = await $('input[aria-label^="Título de"]');
@@ -174,9 +192,12 @@ describe("EDT-050/EDT-051 — arrastar blocos para reordenar e aninhar", () => {
     await waitForOrder(idOfPage(PAGE_TITLE), ["A", "B", "C"]);
   });
 
-  after(() => {
-    psqlQuiet(`delete from pages where title = ${sqlLiteral(PAGE_TITLE)}`);
-  });
+  // Sem limpeza: `lib/db.mjs` abre o SQLite em modo somente leitura de
+  // propósito (o app está de pé com o arquivo em WAL — ver o comentário de
+  // `open()` lá), então não há DELETE possível daqui. Não é necessário
+  // também: o banco inteiro é descartado entre sessões de teste
+  // (`wdio.conf.mjs` apaga `APP_DATA_DIR` antes de subir), e `PAGE_TITLE`
+  // já carrega `STAMP` para não colidir com outra execução da mesma sessão.
 
   it("EDT-050: arrasta C para a faixa de cima de B — nova ordem A, C, B", async () => {
     // yFrac 0.25 < 0.3 cai na faixa de "reordenar antes" de `dropZoneFor`;
@@ -201,12 +222,13 @@ describe("EDT-050/EDT-051 — arrastar blocos para reordenar e aninhar", () => {
     // C saiu da lista de irmãos de topo — só A e B continuam lá.
     await waitForOrder(pageId, ["A", "B"]);
 
-    const parentOfC = psql(
-      `select parent_block_id from blocks where page_id = ${sqlLiteral(pageId)} and plain_text = 'C' and deleted_at is null`,
+    const parentOfC = scalar(
+      "select parent_block_id from blocks where page_id = ? and plain_text = 'C' and deleted_at is null",
+      [pageId],
     );
-    const idOfA = psql(
-      `select id from blocks where page_id = ${sqlLiteral(pageId)} and plain_text = 'A' and deleted_at is null`,
-    );
+    const idOfA = scalar("select id from blocks where page_id = ? and plain_text = 'A' and deleted_at is null", [
+      pageId,
+    ]);
     expect(parentOfC).toBe(idOfA);
   });
 });

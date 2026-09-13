@@ -1,62 +1,80 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration tests for the relation graph (arquitetura §5) —
-//! `db::relations::RelationRepository`, exercised against a real Postgres
-//! instance. `#[ignore]`d like every other `db_*.rs` file here — see
-//! `db_blocks.rs`'s header for how to run these
-//! (`LEARNO_TEST_DATABASE_URL`, then `cargo test -- --ignored`).
+//! `db::relations::RelationRepository`, exercised contra um banco SQLite
+//! real. Nenhum teste aqui precisa de `#[ignore]`: cada um cria seu próprio
+//! arquivo SQLite descartável via `support::IsolatedDatabase`, já migrado,
+//! numa pasta temporária — então a suíte roda direto num `cargo test`
+//! limpo, em qualquer máquina, sem cluster nenhum para subir antes. Isso
+//! veio da migração para SQLite (`docs/MIGRACAO-SQLITE.md`); antes disso
+//! era Postgres, com `LEARNO_TEST_DATABASE_URL` e `scripts/dev-db.ps1` como
+//! pré-requisito.
 //!
 //! ## Divergência da arquitetura
 //!
 //! This piece (R2) is scoped to `src-tauri/src/db/relations/` and the
 //! `0018` migration only — not `tests/`. This file exists anyway, for the
-//! same reason `tests/db_value_invariants.rs` exists outside N2's nominal
+//! same reason other `tests/db_*.rs` files exist outside N2's nominal
 //! scope: regra 6 of this session's own rules ("clippy não é teste —
 //! execute antes de encerrar") is not satisfiable by writing code that
 //! nothing runs, and this repository's own history
 //! (`docs/ACHADOS-FASE-2.md`, FUN-044) is the concrete cost of skipping
 //! that. No other piece owns a file named `db_relations.rs`.
 //!
-//! It also cannot compile yet: `db/mod.rs` does not declare `pub mod
-//! relations;` (arquitetura §11 — that wiring is N1's, done once, and
-//! Fase B pieces run in parallel before it happens). See `mod.rs`'s own
-//! divergência note for the exact lines N1 needs to add. Verified in this
-//! piece's own report by temporarily wiring those lines into a disposable
-//! copy of `src-tauri/`, never into this repository's real
-//! `src/db/mod.rs`.
+//! `db/mod.rs` already declares `pub mod relations;` and re-exports every
+//! type this file needs (`CreateRelationInput`, `RelationRepository`,
+//! `RelationTargetPage`, ...) — that wiring (arquitetura §11, N1's task) is
+//! done, so this file compiles against the real `src/db/mod.rs` with no
+//! disposable copy involved.
 //!
 //! No `database`/`database_properties` generic repository exists yet
 //! either (a different Fase 3 piece owns it), so this file inserts
 //! databases and plain (non-relation) records with plain SQL — exactly
-//! `tests/db_value_invariants.rs`'s own convention, reused verbatim so a
-//! third piece reading both files sees one pattern, not two.
+//! `tests/db_timestamps.rs`'s own convention, reused so a third piece
+//! reading both files sees one pattern, not two. IDs em SQL cru passam
+//! pela ponte `DbId`/`IdBind` (`src/db/ids.rs`): a coluna `id` é TEXT em
+//! tabela `STRICT`, e `sqlx-sqlite` codifica `Uuid` cru como BLOB — ligar
+//! ou ler um `Uuid` direto contra essa coluna falha
+//! (`cannot store BLOB value in TEXT column` na escrita,
+//! `ParseByteLength { len: 36 }` na leitura).
 
 mod support;
 
 use std::collections::HashSet;
 
-use learno_lib::db::{CreateRelationInput, PageRepository, RelationRepository, RelationTargetPage};
+use learno_lib::db::{CreateRelationInput, IdBind, PageRepository, RelationRepository, RelationTargetPage};
 use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
 use support::IsolatedDatabase;
 use uuid::Uuid;
 
+// O id vem do Rust, e não de um `DEFAULT gen_random_uuid()` na coluna: a
+// migração para SQLite tirou o default de toda coluna de id (ver a tabela de
+// equivalências em `docs/MIGRACAO-SQLITE.md`), alinhando o schema com a
+// decisão que a Fase 2 já tinha tomado para blocos — quem cria a linha sabe o
+// id dela antes de gravar.
 async fn create_database(pool: &SqlitePool, container_page_id: Uuid, name: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO databases (container_page_id, name) VALUES ($1, $2) RETURNING id")
-        .bind(container_page_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO databases (id, container_page_id, name) VALUES ($1, $2, $3)")
+        .bind(id.db())
+        .bind(container_page_id.db())
         .bind(name)
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 async fn create_record(pool: &SqlitePool, database_id: Uuid, title: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO pages (database_id, title, position) VALUES ($1, $2, $3) RETURNING id")
-        .bind(database_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES ($1, $2, $3, $4)")
+        .bind(id.db())
+        .bind(database_id.db())
         .bind(title)
         .bind("a0")
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 async fn relation_property_count(pool: &SqlitePool, relation_id: Uuid) -> i64 {
@@ -71,7 +89,7 @@ async fn relation_property_count(pool: &SqlitePool, relation_id: Uuid) -> i64 {
 
 async fn relation_row_exists(pool: &SqlitePool, relation_id: Uuid) -> bool {
     sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM database_relations WHERE id = $1)")
-        .bind(relation_id)
+        .bind(relation_id.db())
         .fetch_one(pool)
         .await
         .unwrap()
@@ -79,7 +97,7 @@ async fn relation_row_exists(pool: &SqlitePool, relation_id: Uuid) -> bool {
 
 async fn edge_count(pool: &SqlitePool, relation_id: Uuid) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM database_relation_edges WHERE relation_id = $1")
-        .bind(relation_id)
+        .bind(relation_id.db())
         .fetch_one(pool)
         .await
         .unwrap()
@@ -87,7 +105,7 @@ async fn edge_count(pool: &SqlitePool, relation_id: Uuid) -> i64 {
 
 async fn property_config(pool: &SqlitePool, property_id: Uuid) -> JsonValue {
     sqlx::query_scalar("SELECT config FROM database_properties WHERE id = $1")
-        .bind(property_id)
+        .bind(property_id.db())
         .fetch_one(pool)
         .await
         .unwrap()
@@ -129,7 +147,6 @@ fn one_way_input(two: &TwoDatabases, name: &str) -> CreateRelationInput {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn one_way_relation_only_creates_a_source_property() {
     let db = IsolatedDatabase::setup("relations_1way").await;
     let two = setup_two_databases(&db, "1way").await;
@@ -155,7 +172,6 @@ async fn one_way_relation_only_creates_a_source_property() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn two_way_relation_is_readable_from_both_ends_and_toggling_off_keeps_the_edge() {
     let db = IsolatedDatabase::setup("relations_2way").await;
     let two = setup_two_databases(&db, "2way").await;
@@ -199,7 +215,6 @@ async fn two_way_relation_is_readable_from_both_ends_and_toggling_off_keeps_the_
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deleting_the_last_relation_property_deletes_the_relation_and_its_edges() {
     let db = IsolatedDatabase::setup("relations_cleanup").await;
     let two = setup_two_databases(&db, "cleanup").await;
@@ -216,7 +231,7 @@ async fn deleting_the_last_relation_property_deletes_the_relation_and_its_edges(
     // `database_properties_cleanup_relation` trigger exists for (mod.rs's
     // doc comment). Not a call into `RelationRepository` on purpose.
     sqlx::query("DELETE FROM database_properties WHERE id = $1")
-        .bind(created.source_property_id)
+        .bind(created.source_property_id.db())
         .execute(&two.pool)
         .await
         .unwrap();
@@ -228,7 +243,6 @@ async fn deleting_the_last_relation_property_deletes_the_relation_and_its_edges(
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn symmetric_self_relation_shows_the_link_on_both_sides_regardless_of_uuid_order() {
     let db = IsolatedDatabase::setup("relations_symmetric").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -278,7 +292,6 @@ async fn symmetric_self_relation_shows_the_link_on_both_sides_regardless_of_uuid
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn cardinality_one_rejects_extra_targets_on_set_but_add_replaces() {
     let db = IsolatedDatabase::setup("relations_card1").await;
     let two = setup_two_databases(&db, "card1").await;
@@ -308,7 +321,6 @@ async fn cardinality_one_rejects_extra_targets_on_set_but_add_replaces() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn list_relation_targets_paginates_with_a_total_independent_of_the_page() {
     let db = IsolatedDatabase::setup("relations_page").await;
     let two = setup_two_databases(&db, "page").await;
@@ -339,7 +351,6 @@ async fn create_n_targets(pool: &SqlitePool, database_id: Uuid, count: usize) ->
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn list_relation_targets_bulk_answers_every_record_including_ones_with_no_targets() {
     let db = IsolatedDatabase::setup("relations_bulk").await;
     let two = setup_two_databases(&db, "bulk").await;
@@ -382,7 +393,6 @@ async fn list_relation_targets_bulk_answers_every_record_including_ones_with_no_
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn trashing_a_target_hides_the_edge_and_restoring_brings_it_back() {
     let db = IsolatedDatabase::setup("relations_trash").await;
     let two = setup_two_databases(&db, "trash").await;
@@ -407,7 +417,6 @@ async fn trashing_a_target_hides_the_edge_and_restoring_brings_it_back() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn permanently_deleting_a_target_page_removes_the_edge_via_fk_cascade() {
     let db = IsolatedDatabase::setup("relations_permdel").await;
     let two = setup_two_databases(&db, "permdel").await;
@@ -435,7 +444,6 @@ async fn permanently_deleting_a_target_page_removes_the_edge_via_fk_cascade() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deleting_the_target_database_reads_back_as_an_empty_page_not_an_error() {
     let db = IsolatedDatabase::setup("relations_dbdel").await;
     let two = setup_two_databases(&db, "dbdel").await;
@@ -451,7 +459,7 @@ async fn deleting_the_target_database_reads_back_as_an_empty_page_not_an_error()
     // nothing in this piece's scope marks it `broken` (that is
     // `0019_database_derived.sql`'s own T5 — see mod.rs's divergência
     // note). The relation and its edges cascade away on their own.
-    sqlx::query("DELETE FROM databases WHERE id = $1").bind(two.target_db).execute(&two.pool).await.unwrap();
+    sqlx::query("DELETE FROM databases WHERE id = $1").bind(two.target_db.db()).execute(&two.pool).await.unwrap();
 
     assert!(!relation_row_exists(&two.pool, created.relation.id).await);
     let after = repo.list_relation_targets(a1, created.source_property_id, 10, 0).await.unwrap();

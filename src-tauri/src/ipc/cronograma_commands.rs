@@ -5,7 +5,10 @@
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::{BlocoPatchInput, BlocoPlanejado, CronogramaRepository, Materia, MateriaPatchInput, SemanaDeEstudo};
+use crate::db::{
+    AplicacaoDeRotina, BlocoPatchInput, BlocoPlanejado, CronogramaRepository, ItemDeRotina, ItemDeRotinaPatchInput,
+    Materia, MateriaPatchInput, ModoDeAplicacaoDeRotina, Rotina, RotinaPatchInput, SemanaDeEstudo,
+};
 use crate::error::Result;
 use crate::ipc::state::AppState;
 
@@ -34,7 +37,10 @@ async fn definir_meta_semanal_inner(state: &AppState, inicio_da_semana: &str, me
     cronograma_repository(state)?.definir_meta_semanal(inicio_da_semana, meta_minutos).await
 }
 
-/// `criar_bloco`.
+/// `criar_bloco`. `startLocalTime`/`pomodoroCycles` são opcionais — ver
+/// `CronogramaRepository::criar_bloco` para o porquê de terem passado a
+/// entrar direto no `INSERT` (remove o remendo de dois passos que
+/// `criar_bloco` + `atualizar_bloco` exigia do chamador).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn criar_bloco(
@@ -42,12 +48,26 @@ pub async fn criar_bloco(
     dia: String,
     atividade: String,
     minutos_planejados: i64,
+    start_local_time: Option<String>,
+    pomodoro_cycles: Option<i64>,
     titulo: Option<String>,
     deck_id: Option<Uuid>,
     page_id: Option<Uuid>,
     subject_id: Option<Uuid>,
 ) -> Result<BlocoPlanejado> {
-    criar_bloco_inner(&state, &dia, &atividade, minutos_planejados, titulo, deck_id, page_id, subject_id).await
+    criar_bloco_inner(
+        &state,
+        &dia,
+        &atividade,
+        minutos_planejados,
+        start_local_time,
+        pomodoro_cycles,
+        titulo,
+        deck_id,
+        page_id,
+        subject_id,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -56,13 +76,15 @@ async fn criar_bloco_inner(
     dia: &str,
     atividade: &str,
     minutos_planejados: i64,
+    start_local_time: Option<String>,
+    pomodoro_cycles: Option<i64>,
     titulo: Option<String>,
     deck_id: Option<Uuid>,
     page_id: Option<Uuid>,
     subject_id: Option<Uuid>,
 ) -> Result<BlocoPlanejado> {
     cronograma_repository(state)?
-        .criar_bloco(dia, atividade, minutos_planejados, titulo, deck_id, page_id, subject_id)
+        .criar_bloco(dia, atividade, minutos_planejados, start_local_time, pomodoro_cycles, titulo, deck_id, page_id, subject_id)
         .await
 }
 
@@ -166,6 +188,150 @@ async fn copiar_semana_inner(
     cronograma_repository(state)?.copiar_semana(semana_origem_inicio, semana_destino_inicio).await
 }
 
+/// `criar_rotina`: o molde de um dia ("Dia de semana"). Ver
+/// `CronogramaRepository::criar_rotina`.
+#[tauri::command]
+pub async fn criar_rotina(state: State<'_, AppState>, nome: String, default_weekdays: Option<String>) -> Result<Rotina> {
+    criar_rotina_inner(&state, &nome, default_weekdays).await
+}
+
+async fn criar_rotina_inner(state: &AppState, nome: &str, default_weekdays: Option<String>) -> Result<Rotina> {
+    cronograma_repository(state)?.criar_rotina(nome, default_weekdays).await
+}
+
+/// `listar_rotinas`.
+#[tauri::command]
+pub async fn listar_rotinas(state: State<'_, AppState>) -> Result<Vec<Rotina>> {
+    listar_rotinas_inner(&state).await
+}
+
+async fn listar_rotinas_inner(state: &AppState) -> Result<Vec<Rotina>> {
+    cronograma_repository(state)?.listar_rotinas().await
+}
+
+/// `atualizar_rotina`.
+#[tauri::command]
+pub async fn atualizar_rotina(state: State<'_, AppState>, rotina_id: Uuid, patch: RotinaPatchInput) -> Result<Rotina> {
+    atualizar_rotina_inner(&state, rotina_id, patch).await
+}
+
+async fn atualizar_rotina_inner(state: &AppState, rotina_id: Uuid, patch: RotinaPatchInput) -> Result<Rotina> {
+    cronograma_repository(state)?.atualizar_rotina(rotina_id, patch).await
+}
+
+/// `remover_rotina`: apaga a rotina e seus itens (`ON DELETE CASCADE`).
+/// Nunca toca em `study_plan_blocks` — ver `CronogramaRepository::remover_rotina`.
+#[tauri::command]
+pub async fn remover_rotina(state: State<'_, AppState>, rotina_id: Uuid) -> Result<()> {
+    remover_rotina_inner(&state, rotina_id).await
+}
+
+async fn remover_rotina_inner(state: &AppState, rotina_id: Uuid) -> Result<()> {
+    cronograma_repository(state)?.remover_rotina(rotina_id).await
+}
+
+/// `criar_item_de_rotina`: uma linha do molde ("05:00, 2h, Estudo profundo").
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn criar_item_de_rotina(
+    state: State<'_, AppState>,
+    rotina_id: Uuid,
+    start_local_time: String,
+    minutos_planejados: i64,
+    atividade: String,
+    pomodoro_cycles: Option<i64>,
+    titulo: Option<String>,
+    subject_id: Option<Uuid>,
+) -> Result<ItemDeRotina> {
+    criar_item_de_rotina_inner(
+        &state,
+        rotina_id,
+        &start_local_time,
+        minutos_planejados,
+        &atividade,
+        pomodoro_cycles,
+        titulo,
+        subject_id,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn criar_item_de_rotina_inner(
+    state: &AppState,
+    rotina_id: Uuid,
+    start_local_time: &str,
+    minutos_planejados: i64,
+    atividade: &str,
+    pomodoro_cycles: Option<i64>,
+    titulo: Option<String>,
+    subject_id: Option<Uuid>,
+) -> Result<ItemDeRotina> {
+    cronograma_repository(state)?
+        .criar_item_de_rotina(rotina_id, start_local_time, minutos_planejados, atividade, pomodoro_cycles, titulo, subject_id)
+        .await
+}
+
+/// `listar_itens_de_rotina`.
+#[tauri::command]
+pub async fn listar_itens_de_rotina(state: State<'_, AppState>, rotina_id: Uuid) -> Result<Vec<ItemDeRotina>> {
+    listar_itens_de_rotina_inner(&state, rotina_id).await
+}
+
+async fn listar_itens_de_rotina_inner(state: &AppState, rotina_id: Uuid) -> Result<Vec<ItemDeRotina>> {
+    cronograma_repository(state)?.listar_itens_de_rotina(rotina_id).await
+}
+
+/// `atualizar_item_de_rotina`.
+#[tauri::command]
+pub async fn atualizar_item_de_rotina(
+    state: State<'_, AppState>,
+    item_id: Uuid,
+    patch: ItemDeRotinaPatchInput,
+) -> Result<ItemDeRotina> {
+    atualizar_item_de_rotina_inner(&state, item_id, patch).await
+}
+
+async fn atualizar_item_de_rotina_inner(state: &AppState, item_id: Uuid, patch: ItemDeRotinaPatchInput) -> Result<ItemDeRotina> {
+    cronograma_repository(state)?.atualizar_item_de_rotina(item_id, patch).await
+}
+
+/// `remover_item_de_rotina`.
+#[tauri::command]
+pub async fn remover_item_de_rotina(state: State<'_, AppState>, item_id: Uuid) -> Result<()> {
+    remover_item_de_rotina_inner(&state, item_id).await
+}
+
+async fn remover_item_de_rotina_inner(state: &AppState, item_id: Uuid) -> Result<()> {
+    cronograma_repository(state)?.remover_item_de_rotina(item_id).await
+}
+
+/// `aplicar_rotina`: materializa a rotina num dia real. Ver
+/// `CronogramaRepository::aplicar_rotina` para a transação, a idempotência
+/// e o porquê da assinatura já caber as fatias 2 e 3.
+#[tauri::command]
+pub async fn aplicar_rotina(
+    state: State<'_, AppState>,
+    rotina_id: Uuid,
+    data_inicio: String,
+    data_fim: String,
+    modo: ModoDeAplicacaoDeRotina,
+    hoje_local: String,
+) -> Result<AplicacaoDeRotina> {
+    aplicar_rotina_inner(&state, rotina_id, &data_inicio, &data_fim, modo, &hoje_local).await
+}
+
+async fn aplicar_rotina_inner(
+    state: &AppState,
+    rotina_id: Uuid,
+    data_inicio: &str,
+    data_fim: &str,
+    modo: ModoDeAplicacaoDeRotina,
+    hoje_local: &str,
+) -> Result<AplicacaoDeRotina> {
+    cronograma_repository(state)?.aplicar_rotina(rotina_id, data_inicio, data_fim, modo, hoje_local).await
+}
+
 #[cfg(test)]
 mod tests {
     // Rule 3 exempts `#[cfg(test)]` from the unwrap/expect ban; clippy's
@@ -193,7 +359,7 @@ mod tests {
         #[tokio::test]
         async fn criar_bloco_reports_not_connected() {
             let state = AppState::new();
-            let result = criar_bloco_inner(&state, "2026-08-31", "reading", 30, None, None, None, None).await;
+            let result = criar_bloco_inner(&state, "2026-08-31", "reading", 30, None, None, None, None, None, None).await;
             assert!(matches!(result, Err(Error::Config(_))));
         }
 
@@ -282,7 +448,7 @@ mod tests {
 
             // 2026-08-31 é segunda-feira.
             let bloco =
-                criar_bloco_inner(&state, "2026-09-01", "reading", 30, Some("Capítulo 3".into()), None, None, None)
+                criar_bloco_inner(&state, "2026-09-01", "reading", 30, None, None, Some("Capítulo 3".into()), None, None, None)
                     .await
                     .unwrap();
             assert_eq!(bloco.title, "Capítulo 3");
@@ -303,7 +469,7 @@ mod tests {
         async fn criar_bloco_with_no_title_defaults_to_empty_string() {
             let (state, data_dir) = estado_com_banco("titulo-vazio").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 15, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 15, None, None, None, None, None, None).await.unwrap();
             assert_eq!(bloco.title, "");
 
             encerra(state, data_dir).await;
@@ -313,7 +479,7 @@ mod tests {
         async fn criar_bloco_rejects_an_invalid_activity() {
             let (state, data_dir) = estado_com_banco("atividade-invalida").await;
 
-            let result = criar_bloco_inner(&state, "2026-08-31", "almoço", 30, None, None, None, None).await;
+            let result = criar_bloco_inner(&state, "2026-08-31", "almoço", 30, None, None, None, None, None, None).await;
             assert!(matches!(result, Err(Error::Invalid(_))));
 
             encerra(state, data_dir).await;
@@ -323,7 +489,7 @@ mod tests {
         async fn criar_bloco_rejects_zero_planned_minutes() {
             let (state, data_dir) = estado_com_banco("zero-minutos").await;
 
-            let result = criar_bloco_inner(&state, "2026-08-31", "reading", 0, None, None, None, None).await;
+            let result = criar_bloco_inner(&state, "2026-08-31", "reading", 0, None, None, None, None, None, None).await;
             assert!(matches!(result, Err(Error::Invalid(_))));
 
             encerra(state, data_dir).await;
@@ -374,8 +540,8 @@ mod tests {
         async fn mover_bloco_reorders_within_the_same_day_after_a_given_sibling() {
             let (state, data_dir) = estado_com_banco("reordena-mesmo-dia").await;
 
-            let a = criar_bloco_inner(&state, "2026-08-31", "other", 10, Some("A".into()), None, None, None).await.unwrap();
-            let b = criar_bloco_inner(&state, "2026-08-31", "other", 10, Some("B".into()), None, None, None).await.unwrap();
+            let a = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, Some("A".into()), None, None, None).await.unwrap();
+            let b = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, Some("B".into()), None, None, None).await.unwrap();
             // Nasce: A, B (A criado primeiro, ambos no fim do dia).
             assert!(a.position < b.position);
 
@@ -395,7 +561,7 @@ mod tests {
         async fn mover_bloco_moves_to_a_different_day() {
             let (state, data_dir) = estado_com_banco("muda-de-dia").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None, None, None).await.unwrap();
             let moved = mover_bloco_inner(&state, bloco.id, "2026-09-02", None).await.unwrap();
             assert_eq!(moved.local_date, "2026-09-02");
 
@@ -410,7 +576,7 @@ mod tests {
         async fn mover_bloco_rejects_an_after_id_that_is_not_a_sibling_in_the_destination_day() {
             let (state, data_dir) = estado_com_banco("apos-invalido").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None, None, None).await.unwrap();
             let estranho = Uuid::now_v7();
 
             let result = mover_bloco_inner(&state, bloco.id, "2026-09-02", Some(estranho)).await;
@@ -433,7 +599,7 @@ mod tests {
         async fn atualizar_bloco_patches_only_the_given_fields_leaving_the_rest_untouched() {
             let (state, data_dir) = estado_com_banco("patch-parcial").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "pomodoro", 50, Some("Foco".into()), None, None, None)
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "pomodoro", 50, None, None, Some("Foco".into()), None, None, None)
                 .await
                 .unwrap();
 
@@ -453,7 +619,7 @@ mod tests {
         async fn atualizar_bloco_rejects_an_invalid_activity_without_touching_the_row() {
             let (state, data_dir) = estado_com_banco("patch-atividade-invalida").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None, None, None).await.unwrap();
             let patch = BlocoPatchInput { activity: Some("almoço".into()), ..Default::default() };
 
             let result = atualizar_bloco_inner(&state, bloco.id, patch).await;
@@ -476,7 +642,7 @@ mod tests {
         async fn remover_bloco_deletes_and_a_second_removal_reports_not_found() {
             let (state, data_dir) = estado_com_banco("remover").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 10, None, None, None, None, None, None).await.unwrap();
             remover_bloco_inner(&state, bloco.id).await.unwrap();
 
             let semana = semana_de_estudo_inner(&state, "2026-08-31").await.unwrap();
@@ -613,6 +779,8 @@ mod tests {
                 "2026-08-31",
                 "other",
                 30,
+                None,
+                None,
                 Some("Química".into()),
                 None,
                 None,
@@ -636,7 +804,7 @@ mod tests {
         async fn criar_bloco_without_a_start_time_has_no_derived_end_time() {
             let (state, data_dir) = estado_com_banco("fim-sem-inicio").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "reading", 30, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "reading", 30, None, None, None, None, None, None).await.unwrap();
 
             assert!(bloco.end_local_time.is_none());
             assert!(!bloco.crosses_midnight);
@@ -648,7 +816,7 @@ mod tests {
         async fn atualizar_bloco_setting_a_start_time_derives_the_end_time() {
             let (state, data_dir) = estado_com_banco("fim-derivado").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 60, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 60, None, None, None, None, None, None).await.unwrap();
             let patch = BlocoPatchInput { start_local_time: Some("08:00".into()), ..Default::default() };
             let atualizado = atualizar_bloco_inner(&state, bloco.id, patch).await.unwrap();
 
@@ -665,7 +833,7 @@ mod tests {
         async fn atualizar_bloco_start_time_crossing_midnight_sets_the_flag() {
             let (state, data_dir) = estado_com_banco("fim-atravessa-meia-noite").await;
 
-            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 30, None, None, None, None).await.unwrap();
+            let bloco = criar_bloco_inner(&state, "2026-08-31", "other", 30, None, None, None, None, None, None).await.unwrap();
             let patch = BlocoPatchInput { start_local_time: Some("23:45".into()), ..Default::default() };
             let atualizado = atualizar_bloco_inner(&state, bloco.id, patch).await.unwrap();
 
@@ -680,12 +848,12 @@ mod tests {
             let (state, data_dir) = estado_com_banco("copiar-semana").await;
 
             // Segunda (offset 0) e quarta (offset 2) da semana de origem.
-            let segunda = criar_bloco_inner(&state, "2026-08-31", "other", 30, Some("Segunda".into()), None, None, None)
+            let segunda = criar_bloco_inner(&state, "2026-08-31", "other", 30, None, None, Some("Segunda".into()), None, None, None)
                 .await
                 .unwrap();
             let patch_segunda = BlocoPatchInput { start_local_time: Some("08:00".into()), ..Default::default() };
             atualizar_bloco_inner(&state, segunda.id, patch_segunda).await.unwrap();
-            criar_bloco_inner(&state, "2026-09-02", "other", 45, Some("Quarta".into()), None, None, None).await.unwrap();
+            criar_bloco_inner(&state, "2026-09-02", "other", 45, None, None, Some("Quarta".into()), None, None, None).await.unwrap();
 
             let copiados = copiar_semana_inner(&state, "2026-08-31", "2026-09-07").await.unwrap();
             assert_eq!(copiados.len(), 2, "os dois blocos da semana de origem foram copiados");

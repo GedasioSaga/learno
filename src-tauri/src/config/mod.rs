@@ -1,269 +1,172 @@
-//! Dados e regras da conexão Postgres do usuário: o formato que o assistente de
-//! primeira execução preenche, a validação desses campos, e a montagem das
-//! opções de conexão do sqlx a partir deles.
+//! Onde os dados do usuário moram, e a validação dessa escolha.
 //!
-//! Este módulo não fala com o Postgres nem com o `tauri-plugin-store` — isso é
-//! trabalho do `ipc`, que empresta os comandos de `#[tauri::command]`. Aqui só
-//! fica a lógica pura, testável sem banco e sem app Tauri de pé.
+//! Antes da migração para SQLite (05/09/2026, ver `docs/MIGRACAO-SQLITE.md`)
+//! este módulo descrevia uma conexão de rede: host, porta, usuário, senha,
+//! nome do banco no servidor. Nada disso existe mais. O banco é um arquivo
+//! dentro de uma pasta de trabalho, então a configuração inteira do app se
+//! reduz a uma pergunta — em que pasta? — e ela tem uma resposta padrão boa
+//! (`AppHandle::path().app_data_dir()`), que é justamente o que faz o app
+//! abrir na primeira execução em qualquer máquina sem assistente nenhum.
+//!
+//! Este módulo não fala com o SQLite nem com o `tauri-plugin-store` — isso é
+//! trabalho do `ipc`, que empresta os comandos de `#[tauri::command]`. Aqui
+//! só fica a lógica pura, testável sem banco e sem app Tauri de pé.
 
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::{Error, Result};
 
-/// Porta padrão do Postgres, usada quando o assistente não recebe outra.
-pub const DEFAULT_PORT: u16 = 5432;
-
-/// Tempo máximo de espera ao testar uma conexão no assistente de primeira
-/// execução — o usuário está olhando para a tela, então isso precisa falhar
-/// rápido em vez de travar a UI esperando um host que não responde.
-pub const CONNECTION_TEST_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Nome do arquivo do `tauri-plugin-store` onde a conexão fica salva.
+/// Nome do arquivo do `tauri-plugin-store` onde a configuração fica salva.
 pub const STORE_FILE: &str = "config.json";
 
-/// Chave, dentro do store acima, onde o valor serializado de [`AppConfig`] mora.
-pub const CONFIG_STORE_KEY: &str = "postgres_connection";
-
-/// Chave, no mesmo store, onde a pasta de dados que o assistente de primeira
-/// execução coletou (PLT-016) fica salva. Fica fora de [`AppConfig`] de
-/// propósito: aquele tipo é reconstruído por struct-literal em módulos que
-/// não são deste PR (`backup::dump`, `ipc::state`), e uma chave separada
-/// evita quebrar essas construções só para acrescentar este campo opcional.
+/// Chave, dentro do store acima, onde a pasta de trabalho escolhida pelo
+/// usuário (PLT-016) fica salva. A antiga `postgres_connection` deixou de
+/// existir junto com o assistente de conexão.
 pub const DATA_DIR_STORE_KEY: &str = "app_data_dir";
 
-/// O que persiste em disco depois que o assistente de primeira execução roda
-/// com sucesso. Nunca tem uma senha — essa é pedida de novo a cada sessão que
-/// precisar abrir conexão, e nunca toca o disco.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub host: String,
-    pub port: u16,
-    pub database: String,
-    pub user: String,
-}
+/// Chave, no mesmo store, onde o tema escolhido fica salvo.
+///
+/// O tema morava em `localStorage` da WebView, e era a única configuração do
+/// app fora daqui: não migrava junto com a pasta de trabalho, não entrava em
+/// backup e o Rust não a enxergava. Agora segue o mesmo caminho dos vizinhos.
+/// O `localStorage` continua sendo escrito do lado do frontend, mas como
+/// **cache de primeiro paint** — ler por IPC é assíncrono e chegaria tarde
+/// demais para evitar a tela piscar no tema errado.
+pub const THEME_STORE_KEY: &str = "theme";
 
-/// O que o assistente de primeira execução manda para testar uma conexão.
-/// Inclui a senha porque o teste precisa autenticar de verdade — mas o `Debug`
-/// abaixo é escrito à mão para nunca deixá-la escapar num log.
-#[derive(Deserialize)]
-pub struct ConnectionTestInput {
-    pub host: String,
-    pub port: u16,
-    pub database: String,
-    pub user: String,
-    pub password: String,
-}
+/// Quantos caracteres um id de tema pode ter. Os ids reais são curtos
+/// (`ambar-noturno`, `alto-contraste`); o teto existe só para um valor
+/// absurdo não ir parar no `config.json`.
+const MAX_THEME_ID_BYTES: usize = 40;
 
-// Debug manual em vez do derive: precisa custar bem para omitir a senha do
-// próprio código-fonte, não confiar em disciplina de quem chama `{:?}` depois.
-impl std::fmt::Debug for ConnectionTestInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConnectionTestInput")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("database", &self.database)
-            .field("user", &self.user)
-            .field("password", &"<redacted>")
-            .finish()
+/// Confere que `theme` tem forma de id de tema antes de ir para o disco.
+///
+/// Valida FORMA, não pertencimento a uma lista. A lista de temas é do
+/// frontend (`src/lib/themes.ts`), que é quem sabe pintar cada um; repeti-la
+/// aqui criaria duas fontes da verdade em duas linguagens, e a segunda ficaria
+/// para trás na primeira vez que alguém acrescentasse um tema. Um id
+/// desconhecido não é perigoso — o seletor `:root[data-theme="..."]` não casa
+/// e o app cai no tema padrão. O que seria ruim é gravar algo que nem parece
+/// um id, e é isso que esta função barra.
+///
+/// `save_theme` é um comando de IPC, alcançável por qualquer script rodando
+/// dentro da WebView, então a entrada é hostil por padrão (regra 11).
+pub fn validate_theme_id(theme: &str) -> Result<()> {
+    if theme.is_empty() {
+        return Err(Error::Invalid("tema não pode ser vazio".into()));
     }
+    if theme.len() > MAX_THEME_ID_BYTES {
+        return Err(Error::Invalid(format!(
+            "id de tema não pode passar de {MAX_THEME_ID_BYTES} bytes (recebido: {} bytes)",
+            theme.len()
+        )));
+    }
+    if !theme.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err(Error::Invalid(
+            "id de tema só pode ter letras minúsculas (a-z), dígitos e hífen".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Nome do arquivo do banco dentro da pasta de trabalho. Fixo de propósito:
+/// deixar o usuário nomear o arquivo só criaria um jeito de o app não achar
+/// o próprio banco depois de um rename fora dele.
+pub const DATABASE_FILE_NAME: &str = "learno.sqlite";
+
+/// Onde o banco vive dentro de uma pasta de trabalho qualquer.
+pub fn database_path_in(data_dir: &Path) -> PathBuf {
+    data_dir.join(DATABASE_FILE_NAME)
+}
+
+/// A configuração inteira do app, do jeito que persiste em disco.
+///
+/// Um campo só, e nenhum segredo: com o banco em arquivo local não há
+/// credencial a guardar nem a esquecer entre sessões. Continua sendo uma
+/// struct (em vez de uma `String` solta) porque é o que o cache de
+/// `ipc::state::AppState` guarda e o que o frontend recebe de
+/// `get_app_config` — e porque os caminhos derivados (pasta, arquivo do
+/// banco) têm um dono óbvio assim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub data_dir: String,
 }
 
 impl AppConfig {
-    /// Confere que os campos exibidos e editados pelo assistente fazem sentido
-    /// antes de gravar no store. Não valida a senha — ela nem chega até aqui.
+    pub fn new(data_dir: impl Into<String>) -> Self {
+        Self { data_dir: data_dir.into() }
+    }
+
+    /// Confere que a pasta faz sentido antes de gravar no store.
     pub fn validate(&self) -> Result<()> {
-        if self.host.trim().is_empty() {
-            return Err(Error::Invalid("host não pode ser vazio".into()));
-        }
-        if self.port == 0 {
-            return Err(Error::Invalid("porta precisa ser maior que zero".into()));
-        }
-        if self.database.trim().is_empty() {
-            return Err(Error::Invalid("nome do banco não pode ser vazio".into()));
-        }
-        if self.user.trim().is_empty() {
-            return Err(Error::Invalid("usuário não pode ser vazio".into()));
-        }
-        Ok(())
+        validate_data_dir(&self.data_dir)
+    }
+
+    /// A pasta de trabalho como caminho.
+    pub fn data_dir_path(&self) -> PathBuf {
+        PathBuf::from(&self.data_dir)
+    }
+
+    /// O arquivo do banco dentro dela — o que `db::pool` abre.
+    pub fn database_path(&self) -> PathBuf {
+        database_path_in(&self.data_dir_path())
     }
 }
 
-impl From<&ConnectionTestInput> for AppConfig {
-    /// Extrai a parte persistível de um teste de conexão bem-sucedido — sem a senha.
-    fn from(input: &ConnectionTestInput) -> Self {
-        AppConfig {
-            host: input.host.clone(),
-            port: input.port,
-            database: input.database.clone(),
-            user: input.user.clone(),
-        }
-    }
-}
-
-/// PLT-016: confere que a pasta de dados informada no assistente não é só
-/// espaço em branco antes de persistir. Só valida forma — não confere que o
-/// caminho existe nem que é gravável; isso é responsabilidade de quem de
-/// fato ler/escrever nela (PLT-008, a tela de configurações, ainda não
-/// implementada), não do assistente de primeira execução.
+/// PLT-016: confere que a pasta de trabalho informada é utilizável antes de
+/// o app mover o banco para lá e persistir a escolha.
+///
+/// Exigir caminho **absoluto** é a parte que importa para segurança, e ela
+/// espelha `ipc::backup_commands::validate_backup_output_dir`, que já fazia o
+/// mesmo pelo mesmo motivo. `save_data_dir` é um `#[tauri::command]`, e todo
+/// comando de IPC é alcançável por qualquer script rodando dentro da WebView
+/// — não só pelo diálogo nativo que a tela de Configurações abre. Um caminho
+/// relativo (`"x"`) seria resolvido contra o diretório de trabalho do
+/// processo, que num app empacotado é imprevisível: o banco vivo seria
+/// copiado para lá, o caminho relativo ficaria gravado no store, e toda
+/// abertura seguinte reabriria um banco diferente conforme o cwd daquela
+/// execução.
+///
+/// `..` é recusado pela mesma razão que em `validate_export_target`: o
+/// diálogo nativo sempre devolve caminho já resolvido, então um componente
+/// `..` só aparece quando alguém montou a string à mão.
+///
+/// O que esta função deliberadamente NÃO faz: conferir que o caminho existe
+/// ou que é gravável. Isso é de quem de fato abre o banco lá
+/// (`db::pool::connect_and_migrate`, que cria a pasta e propaga o erro de I/O
+/// real), não de uma função pura.
 pub fn validate_data_dir(data_dir: &str) -> Result<()> {
-    if data_dir.trim().is_empty() {
+    let cortado = data_dir.trim();
+    if cortado.is_empty() {
         return Err(Error::Invalid("pasta de dados não pode ser vazia".into()));
     }
-    Ok(())
-}
 
-/// Limite real do Postgres para comprimento de identificador, em bytes
-/// (`NAMEDATALEN` menos um). Usado abaixo para rejeitar um nome de banco
-/// longo demais antes de tentar `CREATE DATABASE` com ele.
-const MAX_POSTGRES_IDENTIFIER_BYTES: usize = 63;
-
-/// Confere que `name` é seguro para entrar sem bind em `CREATE DATABASE
-/// "<name>"` — Postgres não aceita identificador de DDL como parâmetro
-/// parametrizado, então isso é a primeira das duas defesas que
-/// `db::pool::create_database` usa antes de montar aquele SQL (a segunda é
-/// escapar aspas duplas por dobramento, como defesa em profundidade caso
-/// esta validação um dia seja pulada).
-///
-/// Deliberadamente mais estrito do que o próprio Postgres aceita: só letra
-/// ASCII minúscula, dígito e underscore, começando por letra, até
-/// [`MAX_POSTGRES_IDENTIFIER_BYTES`] bytes. Um identificador Postgres de
-/// verdade admite bem mais (maiúsculas entre aspas, acento, `$`), mas nada
-/// disso é necessário para um nome de banco de estudo e cada caractere a
-/// mais que se aceita é mais superfície para escapar errado.
-pub fn validate_database_identifier(name: &str) -> Result<()> {
-    if name.is_empty() {
-        return Err(Error::Invalid("nome do banco não pode ser vazio".into()));
+    let caminho = Path::new(cortado);
+    if !caminho.is_absolute() {
+        return Err(Error::Invalid("pasta de dados precisa ser um caminho absoluto".into()));
     }
-    if name.len() > MAX_POSTGRES_IDENTIFIER_BYTES {
-        return Err(Error::Invalid(format!(
-            "nome do banco não pode passar de {MAX_POSTGRES_IDENTIFIER_BYTES} bytes (recebido: {} bytes)",
-            name.len()
-        )));
-    }
-
-    let mut chars = name.chars();
-    // `.next()` não pode devolver `None` aqui — o `is_empty()` acima já
-    // garantiu que há ao menos um caractere.
-    let first = chars.next().unwrap_or_default();
-    if !first.is_ascii_lowercase() {
-        return Err(Error::Invalid(
-            "nome do banco precisa começar com uma letra minúscula de a a z".into(),
-        ));
-    }
-    if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-        return Err(Error::Invalid(
-            "nome do banco só pode ter letras minúsculas (a-z), dígitos e underscore".into(),
-        ));
+    if caminho.components().any(|componente| componente == std::path::Component::ParentDir) {
+        return Err(Error::Invalid("pasta de dados não pode conter '..'".into()));
     }
 
     Ok(())
-}
-
-/// Monta as opções de conexão do sqlx a partir do que o assistente coletou.
-/// Função pura — não abre socket nenhum, só existe para ser testável sem rede.
-pub fn build_connect_options(input: &ConnectionTestInput) -> SqliteConnectOptions {
-    SqliteConnectOptions::new()
-        .host(&input.host)
-        .port(input.port)
-        .username(&input.user)
-        .password(&input.password)
-        .database(&input.database)
 }
 
 #[cfg(test)]
 mod tests {
+    // A regra 3 isenta `#[cfg(test)]` do banimento de unwrap/expect; o lint do
+    // clippy não conhece essa exceção, então ela é escrita aqui.
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
-    fn sample_input() -> ConnectionTestInput {
-        ConnectionTestInput {
-            host: "localhost".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "postgres".into(),
-            password: "segredo".into(),
-        }
-    }
-
-    #[test]
-    fn build_connect_options_copies_every_field_except_password() {
-        let input = sample_input();
-        let options = build_connect_options(&input);
-
-        assert_eq!(options.get_host(), "localhost");
-        assert_eq!(options.get_port(), 5432);
-        assert_eq!(options.get_username(), "postgres");
-        assert_eq!(options.get_database(), Some("learno"));
-    }
-
-    #[test]
-    fn app_config_from_connection_test_input_drops_password() {
-        let input = sample_input();
-        let config = AppConfig::from(&input);
-
-        assert_eq!(config.host, "localhost");
-        assert_eq!(config.port, 5432);
-        assert_eq!(config.database, "learno");
-        assert_eq!(config.user, "postgres");
-        // Não há campo `password` em AppConfig — se houvesse, este teste
-        // pegaria a regressão na primeira vez que alguém tentasse adicionar um.
-    }
-
-    #[test]
-    fn validate_rejects_empty_host() {
-        let config = AppConfig {
-            host: "  ".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "postgres".into(),
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_zero_port() {
-        let config = AppConfig {
-            host: "localhost".into(),
-            port: 0,
-            database: "learno".into(),
-            user: "postgres".into(),
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_empty_database() {
-        let config = AppConfig {
-            host: "localhost".into(),
-            port: 5432,
-            database: "".into(),
-            user: "postgres".into(),
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_empty_user() {
-        let config = AppConfig {
-            host: "localhost".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "".into(),
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn validate_accepts_well_formed_config() {
-        let config = AppConfig {
-            host: "localhost".into(),
-            port: 5432,
-            database: "learno".into(),
-            user: "postgres".into(),
-        };
-        assert!(config.validate().is_ok());
+    /// Um caminho absoluto do sistema onde o teste roda — `C:\...` no Windows
+    /// não é absoluto no Linux e vice-versa, e a regra que se quer provar não
+    /// é sobre a sintaxe de um sistema operacional específico.
+    fn caminho_absoluto() -> String {
+        std::env::temp_dir().join("learno-teste").to_string_lossy().into_owned()
     }
 
     #[test]
@@ -274,54 +177,67 @@ mod tests {
 
     #[test]
     fn validate_data_dir_accepts_a_real_looking_path() {
-        assert!(validate_data_dir(r"C:\Users\alguem\Learno").is_ok());
+        assert!(validate_data_dir(&caminho_absoluto()).is_ok());
+    }
+
+    /// A defesa que importa: `save_data_dir` é um comando de IPC, alcançável
+    /// por qualquer script na WebView, não só pelo diálogo nativo. Um caminho
+    /// relativo seria resolvido contra o diretório de trabalho do processo, e
+    /// o banco inteiro iria parar num lugar imprevisível.
+    #[test]
+    fn validate_data_dir_rejects_a_relative_path() {
+        assert!(validate_data_dir("x").is_err());
+        assert!(validate_data_dir("dados/learno").is_err());
+        assert!(validate_data_dir(r"dados\learno").is_err());
     }
 
     #[test]
-    fn validate_database_identifier_rejects_empty_string() {
-        assert!(validate_database_identifier("").is_err());
+    fn validate_data_dir_rejects_a_path_climbing_out_with_dotdot() {
+        let subindo = std::env::temp_dir().join("..").join("outro-lugar");
+        assert!(validate_data_dir(&subindo.to_string_lossy()).is_err());
     }
 
     #[test]
-    fn validate_database_identifier_rejects_name_starting_with_a_digit() {
-        assert!(validate_database_identifier("2_bancos").is_err());
+    fn validate_theme_id_accepts_the_real_ids() {
+        for id in ["ambar-noturno", "papel", "grafite", "meia-noite", "alto-contraste", "sistema"] {
+            assert!(validate_theme_id(id).is_ok(), "{id} deveria ser aceito");
+        }
     }
 
     #[test]
-    fn validate_database_identifier_rejects_double_quote() {
-        // The exact character `CREATE DATABASE "<name>"` would need escaped
-        // if this ever slipped through — proving it never even gets there.
-        assert!(validate_database_identifier("learno\"").is_err());
-        assert!(validate_database_identifier("a\"; DROP DATABASE learno; --").is_err());
+    fn validate_theme_id_rejects_what_is_not_an_id() {
+        assert!(validate_theme_id("").is_err());
+        assert!(validate_theme_id("Ambar Noturno").is_err(), "maiúscula e espaço");
+        assert!(validate_theme_id("../../etc/passwd").is_err(), "caminho");
+        assert!(validate_theme_id("tema\"]{color:red}").is_err(), "fuga de seletor CSS");
+        assert!(validate_theme_id(&"a".repeat(41)).is_err(), "longo demais");
     }
 
     #[test]
-    fn validate_database_identifier_rejects_semicolon() {
-        assert!(validate_database_identifier("learno;drop_table").is_err());
+    fn config_validation_delegates_to_the_same_rule() {
+        assert!(AppConfig::new("  ").validate().is_err());
+        assert!(AppConfig::new("relativo").validate().is_err());
+        assert!(AppConfig::new(caminho_absoluto()).validate().is_ok());
     }
 
     #[test]
-    fn validate_database_identifier_rejects_space() {
-        assert!(validate_database_identifier("meu banco").is_err());
+    fn database_path_is_the_fixed_file_name_inside_the_chosen_folder() {
+        let config = AppConfig::new(r"C:\Users\alguem\Learno");
+        let path = config.database_path();
+
+        assert_eq!(path.file_name().and_then(|name| name.to_str()), Some(DATABASE_FILE_NAME));
+        assert_eq!(path.parent(), Some(Path::new(r"C:\Users\alguem\Learno")));
     }
 
+    /// A configuração serializada não pode ganhar um campo de segredo por
+    /// descuido: com o banco em arquivo não existe senha nenhuma a guardar, e
+    /// este teste cai na primeira vez que alguém tentar acrescentar uma.
     #[test]
-    fn validate_database_identifier_rejects_a_name_longer_than_63_bytes() {
-        let too_long = "a".repeat(64);
-        assert!(validate_database_identifier(&too_long).is_err());
-    }
+    fn serialized_config_carries_only_the_data_dir() {
+        let json = serde_json::to_value(AppConfig::new("/tmp/learno")).unwrap();
+        let object = json.as_object().unwrap();
 
-    #[test]
-    fn validate_database_identifier_accepts_real_looking_schema_names() {
-        assert!(validate_database_identifier("learno_dev").is_ok());
-        assert!(validate_database_identifier("meu_banco_2").is_ok());
-    }
-
-    #[test]
-    fn debug_output_never_contains_the_password() {
-        let input = sample_input();
-        let formatted = format!("{input:?}");
-        assert!(!formatted.contains("segredo"));
-        assert!(formatted.contains("<redacted>"));
+        assert_eq!(object.len(), 1);
+        assert_eq!(object.get("data_dir").and_then(|value| value.as_str()), Some("/tmp/learno"));
     }
 }

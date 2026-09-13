@@ -20,8 +20,10 @@
 // caminho de listener que uma colagem real usaria. Cada teste abre sua
 // própria página nova (nunca editada) para garantir um bloco vazio "de
 // fábrica" sem precisar navegar o cursor por cima de um bookmark (nó atômico).
-import { TEST_DB } from "../lib/env.mjs";
-import { psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
+// Este spec não lê nem escreve no banco (não há SELECT para provar EDT-030 -
+// tudo é DOM: o menu aparecer, o cartão nascer, o texto inline aparecer), por
+// isso não importa nada de `e2e/lib/db.mjs`. A única sobra do Postgres aqui
+// era a limpeza pelo `after` (ver comentário no bloco `describe` abaixo).
 
 const STAMP = Date.now();
 const PAGE_MENU_TITLE = `E2E Bookmark Menu ${STAMP}`;
@@ -29,10 +31,6 @@ const PAGE_CARD_TITLE = `E2E Bookmark Card ${STAMP}`;
 const PAGE_MENTION_TITLE = `E2E Bookmark Mention ${STAMP}`;
 const BOOKMARK_URL = "https://exemplo-e2e.test/pagina";
 const BOOKMARK_HOSTNAME = "exemplo-e2e.test";
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -92,26 +90,24 @@ function bookmarkCardLink() {
 
 describe("EDT-030 — menu de escolha ao colar URL sobre bloco vazio", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
-    await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
+    // Não existe mais assistente de primeira execução (FirstRunWizard foi
+    // apagado) - o app abre direto no workspace: `openWorkspace()` já achou
+    // (ou criou) o arquivo `.sqlite` e rodou as migrações antes da UI
+    // aparecer. Timeout generoso porque essa primeira abertura, quando o
+    // arquivo ainda não existe, paga o custo de criar o banco e migrar.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
 
     await createRootPage(PAGE_MENU_TITLE);
     await createRootPage(PAGE_CARD_TITLE);
     await createRootPage(PAGE_MENTION_TITLE);
   });
 
-  after(() => {
-    const titles = [PAGE_MENU_TITLE, PAGE_CARD_TITLE, PAGE_MENTION_TITLE].map(sqlLiteral).join(", ");
-    psqlQuiet(`delete from pages where title in (${titles})`);
-  });
+  // Sem `after` de limpeza: `db.mjs` abre o banco só para leitura de
+  // propósito (testar o app, não o SQL de teste) e o arquivo inteiro é
+  // descartado entre sessões pelo `wdio.conf.mjs`, então não há por que
+  // apagar linha por linha. Os três títulos já carregam `STAMP` (timestamp
+  // da carga do módulo), então não colidem com outra rodada nem com outro
+  // spec rodando no mesmo banco.
 
   it("EDT-030: URL colada em bloco vazio abre o menu oferecendo Criar bookmark e Criar link/menção", async () => {
     await openPage(PAGE_MENU_TITLE);

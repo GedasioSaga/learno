@@ -14,6 +14,7 @@ import type { JSONContent } from "@tiptap/core";
 import { Editor } from "@tiptap/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Block } from "../../contract";
+import { collectTurnIntoItems } from "../../core/block-spec";
 import { buildEditorExtensions } from "../../core/extensions";
 import { blocksToDoc, docToFlatBlocks } from "../../core/serialize";
 import "./register";
@@ -221,5 +222,45 @@ describe("BlockSpec: persistência", () => {
 
     const [flat] = docToFlatBlocks(doc);
     expect(flat.plainText).toBe("");
+  });
+});
+
+describe('EDT-049: "Transformar em" > Código', () => {
+  it("está registrado", () => {
+    expect(collectTurnIntoItems().find((i) => i.id === "blocks:turn:code")).toMatchObject({ title: "Código" });
+  });
+
+  it("transforma um parágrafo com texto em bloco de código - o documento resultante tem o nó certo e o texto sobrevive", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "a" }, content: [{ type: "text", text: "const x = 1" }] }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("a") + 1);
+    const item = collectTurnIntoItems().find((i) => i.id === "blocks:turn:code");
+    if (!item) throw new Error('item "blocks:turn:code" não registrado');
+
+    expect(item.run(editor)).toBe(true);
+
+    const node = contentOf(json().content![0]);
+    expect(node.type).toBe("codeBlock");
+    expect(node.attrs?.language).toBe(DEFAULT_CODE_LANGUAGE);
+    expect(node.content).toEqual([{ type: "text", text: "const x = 1" }]);
+  });
+
+  it("transforma de volta para texto sem perder o id do bloco", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "codeBlock", attrs: { id: "a", language: "js" }, content: [{ type: "text", text: "1 + 1" }] }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("a"));
+    const paragraphItem = collectTurnIntoItems().find((i) => i.id === "core:turn:paragraph");
+    if (!paragraphItem) throw new Error('item "core:turn:paragraph" não registrado');
+
+    expect(paragraphItem.run(editor)).toBe(true);
+
+    const node = contentOf(json().content![0]);
+    expect(node.type).toBe("paragraph");
+    expect(node.attrs?.id).toBe("a");
+    expect(node.content).toEqual([{ type: "text", text: "1 + 1" }]);
   });
 });

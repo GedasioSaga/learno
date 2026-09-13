@@ -44,26 +44,35 @@ export function ExportMarkdownButton({ pageId, pageTitle }: ExportMarkdownButton
     }
   }
 
+  // `inline-flex`, e não `flex flex-col`: este botão mora numa barra de ações
+  // ao lado de outros, e um contêiner de bloco o esticava para a largura
+  // inteira do cabeçalho — o controle mais raramente usado da tela virava o
+  // maior. O status aparece ao lado, não abaixo, pelo mesmo motivo.
   return (
-    <div className="flex flex-col gap-2">
+    <span className="inline-flex items-center gap-2">
+      {/* Texto visível curto, nome acessível inteiro: numa barra de ações ao
+          lado de "Histórico", a palavra "Exportar" basta para o olho, mas um
+          leitor de tela anuncia o botão fora desse contexto e "Exportar" sozinho
+          não diz exportar o quê, para qual formato. */}
       <button
         type="button"
+        aria-label="Exportar como Markdown"
         disabled={status === "exporting"}
         onClick={() => void handleExport()}
-        className="rounded-sm border border-border bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
+        className="rounded-sm px-2 py-1 text-sm text-ink-muted transition-colors duration-150 ease-out hover:bg-surface-raised hover:text-ink disabled:pointer-events-none disabled:opacity-50"
       >
-        {status === "exporting" ? "Exportando…" : "Exportar como Markdown"}
+        {status === "exporting" ? "Exportando…" : "Exportar"}
       </button>
       {status === "done" ? (
-        <p role="status" className="text-sm text-mint-ink">
+        <span role="status" className="text-xs text-mint-ink">
           Página exportada.
-        </p>
+        </span>
       ) : null}
       {status === "error" && message ? (
-        <p role="alert" className="text-sm text-terracotta-ink">
+        <span role="alert" className="max-w-48 truncate text-xs text-terracotta-ink" title={message}>
           {message}
-        </p>
+        </span>
       ) : null}
-    </div>
+    </span>
   );
 }

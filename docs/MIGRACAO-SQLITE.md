@@ -87,7 +87,7 @@ sqlx. Ligar o SQLite não acrescenta superfície de supply chain nenhuma.
 | `ON CONFLICT` | Suportado |
 | `ON DELETE CASCADE` | Suportado, **mas só com `PRAGMA foreign_keys = ON`** — ver abaixo |
 
-### As quatro armadilhas que quebram em silêncio
+### As armadilhas que quebram em silêncio (as quatro previstas, e as três que a execução revelou)
 
 1. **`PRAGMA foreign_keys = ON` é por conexão e vem DESLIGADO por padrão.** Sem ele, todo
    `ON DELETE CASCADE` deste schema simplesmente não acontece, sem erro nenhum: apagar uma
@@ -103,6 +103,39 @@ sqlx. Ligar o SQLite não acrescenta superfície de supply chain nenhuma.
    significa que uma transação longa (o backfill de 50.000 linhas de fórmula) bloqueia
    escritas. O backfill em lotes, que a arquitetura já exige por outro motivo, também
    resolve este.
+
+5. **`sqlx` codifica `Uuid` como BLOB, e o schema guarda id como TEXT.** Esta não estava
+   prevista quando o contrato foi escrito; apareceu na primeira execução dos testes e é a
+   armadilha mais cara da porta inteira. `sqlx-sqlite` empurra `SqliteArgumentValue::Blob`
+   de 16 bytes para um `Uuid` e decodifica com `Uuid::from_slice`
+   (`sqlx-sqlite/src/types/uuid.rs`), enquanto a tabela de equivalências acima manda guardar
+   id como TEXT canônico. As duas decisões juntas quebram nos dois sentidos — e, graças a
+   `STRICT`, quebram alto, não em silêncio:
+
+   - gravar: `cannot store BLOB value in TEXT column pages.id` (código 3091);
+   - ler: `ColumnDecode { source: ParseByteLength { len: 36 } }`.
+
+   A saída é `src/db/ids.rs`: `DbId`/`DbIdOpt`, que são TEXT dos dois lados, mais o trait
+   `IdBind` (`.bind(page_id.db())`). Toda struct de leitura declara
+   `#[sqlx(try_from = "DbId")]` no campo, sem mudar o tipo dele. São 189 pontos de ligação
+   no projeto; concentrar isso num módulo é o que torna a regra revisável em um lugar só.
+
+6. **Um `Encode` que devolve `IsNull::Yes` NÃO pode empurrar valor nenhum.** O
+   `SqliteArguments::add` do `sqlx` empurra o `Null` ele mesmo ao receber essa resposta, e
+   **não trunca** o que o `encode` tiver deixado no vetor. Empurrar também produz DOIS
+   argumentos para um placeholder só e desloca todos os seguintes. O sintoma aparece longe
+   da causa: o primeiro sinal disto foi `NOT NULL constraint failed: pages.title` num INSERT
+   cujo título estava perfeitamente preenchido — o `parent_id` nulo tinha comido o
+   placeholder do título. Fica pinado pelo teste
+   `id_nulo_consome_um_placeholder_so_e_nao_desloca_os_seguintes` em `src/db/ids.rs`.
+
+7. **`$1` continua funcionando, e reusar `$1` consome UM argumento.** O SQLite trata `$1`
+   como parâmetro *nomeado*, indexado pela ordem de primeira aparição — então `$1, $2, $3`
+   em ordem crescente se comporta exatamente como posicional, e as 249 ocorrências de `$N`
+   do projeto não precisaram ser reescritas. O que muda é o reuso: em Postgres, repetir
+   `$1` referencia o mesmo argumento; em SQLite também — mas quem lê o SQL esperando
+   "um `?` por argumento" erra a conta. Só um lugar do projeto reusa (`blocks.rs`,
+   `id = $1 OR synced_source_id = $1`), e ele está correto.
 
 ### Os quatro pontos difíceis, e o que fazer com cada um
 

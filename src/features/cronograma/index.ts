@@ -1,0 +1,1 @@
+export { ConteudoDeCronograma } from "./ConteudoDeCronograma";

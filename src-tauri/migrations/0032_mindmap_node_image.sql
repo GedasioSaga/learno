@@ -1,0 +1,17 @@
+-- Fase 5, mapa mental: imagem no cartão do nó (referências SimpleMind e
+-- Heptabase mostram nó com foto — defeito B do relatório do usuário).
+--
+-- Coluna NOVA, não reaproveitamento de `icon`: `icon` (0013_mindmap.sql) é
+-- um glifo de emoji curto, isto é o nome de um arquivo dentro da mesma pasta
+-- `media/` que o editor de blocos já usa (ver `media-storage.ts` — o valor
+-- gravado aqui é sempre "<hash><extensão>", nunca um caminho absoluto).
+-- Enfiar os dois na mesma coluna daria ao mesmo dado dois significados sem
+-- nenhum jeito de o código (ou a próxima pessoa lendo a linha) distinguir
+-- qual é qual.
+--
+-- `ADD COLUMN` simples: diferente de `0025_mapa_mental_avulso.sql` (que
+-- precisou do procedimento de 12 passos por causa de um `NOT NULL` saindo
+-- de uma FK referenciada), esta coluna nasce opcional (`TEXT`, sem
+-- `NOT NULL`) — SQLite suporta `ALTER TABLE ... ADD COLUMN` nullable direto,
+-- sem reconstruir a tabela nem mexer em `PRAGMA foreign_keys`.
+ALTER TABLE mindmap_nodes ADD COLUMN image TEXT;

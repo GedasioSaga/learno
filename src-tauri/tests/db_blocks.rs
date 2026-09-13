@@ -1,12 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Integration tests for `db::blocks` against a real Postgres instance.
+//! Integration tests for `db::blocks` contra um banco SQLite real.
 //!
-//! `#[ignore]`d like every other `db_*.rs` file here: needs a live cluster
-//! (`scripts/dev-db.ps1 start`), then `cargo test -- --ignored` with
-//! `LEARNO_TEST_DATABASE_URL` set. Each test provisions its own database via
-//! `support::IsolatedDatabase`. The pure decision logic (`neighbours_for`,
-//! `position_between`) is covered without a database by the `#[cfg(test)]`
-//! module next to it in `src/db/blocks.rs`.
+//! Nenhum teste aqui precisa de `#[ignore]`: cada um cria seu próprio
+//! arquivo SQLite descartável via `support::IsolatedDatabase`, já migrado,
+//! numa pasta temporária — então a suíte roda direto num `cargo test`
+//! limpo, em qualquer máquina, sem cluster nenhum para subir antes. Isso
+//! veio da migração para SQLite (`docs/MIGRACAO-SQLITE.md`); antes disso
+//! era Postgres, com `LEARNO_TEST_DATABASE_URL` e `scripts/dev-db.ps1` como
+//! pré-requisito. A lógica pura de que este repositório depende
+//! (`neighbours_for`, `position_between`) continua coberta sem banco pelo
+//! módulo `#[cfg(test)]` ao lado dela em `src/db/blocks.rs`.
 
 mod support;
 
@@ -35,7 +38,6 @@ fn new_paragraph(page_id: Uuid, parent_block_id: Option<Uuid>, after_block_id: O
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deep_chain_of_blocks_lists_in_document_order() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -63,7 +65,6 @@ async fn deep_chain_of_blocks_lists_in_document_order() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn sibling_order_is_respected_within_the_same_parent() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -88,7 +89,6 @@ async fn sibling_order_is_respected_within_the_same_parent() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn moving_a_block_into_its_own_descendant_is_rejected() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -120,7 +120,6 @@ async fn moving_a_block_into_its_own_descendant_is_rejected() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn moving_a_block_across_pages_cascades_page_id_to_descendants() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -155,7 +154,6 @@ async fn moving_a_block_across_pages_cascades_page_id_to_descendants() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deleting_a_block_with_children_hides_the_whole_subtree() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -189,7 +187,6 @@ async fn deleting_a_block_with_children_hides_the_whole_subtree() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn a_batch_with_a_conflicting_change_fails_atomically() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -233,7 +230,6 @@ async fn a_batch_with_a_conflicting_change_fails_atomically() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn a_valid_batch_applies_create_update_delete_and_move_together() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -282,7 +278,6 @@ async fn a_valid_batch_applies_create_update_delete_and_move_together() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn create_block_rejects_a_parent_from_a_different_page() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -307,7 +302,6 @@ async fn create_block_rejects_a_parent_from_a_different_page() {
 /// o segundo `apply_block_changes` mandaria UPDATE de uma linha inexistente.
 /// Ver `NewBlockInput::id` e `src/features/editor/core/use-blocks-document.test.tsx`.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn create_honours_the_id_the_client_already_assigned() {
     let db = IsolatedDatabase::setup("blocks").await;
     let pages = PageRepository::new(db.pool.clone());

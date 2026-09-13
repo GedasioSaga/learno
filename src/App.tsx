@@ -1,29 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AppShell } from "./components/AppShell";
-import { EmptyState } from "./components/EmptyState";
-import { FirstRunWizard } from "./components/FirstRunWizard";
-import { BackupSettings, RecoveryBanner } from "./features/backup";
-import { ImportApkgSection } from "./features/import";
-import { CheckDatabaseSection } from "./features/integrity";
+import { BotaoDeIcone } from "./components/BotaoDeIcone";
+import { RecoveryBanner } from "./features/backup";
+import { ConteudoDeBiblioteca, PainelDeBiblioteca } from "./features/biblioteca";
+import { ConteudoDeCronograma } from "./features/cronograma";
+import { ConteudoDeHoje } from "./features/hoje";
+import { IconeConfiguracoes } from "./features/navegacao/icones";
+import { ConteudoDeCartoes, PainelDeCartoes } from "./features/cartoes";
+import { montarSecoes } from "./features/navegacao/catalogo";
+import { ConteudoDeNotas, PainelDeNotas } from "./features/navegacao/secao-notas";
+import { ConteudoDeMapaMental, PainelDeMapaMental } from "./features/mapa-mental";
+import { useNavegacaoStore, type OrigemDaTroca } from "./features/navegacao/store";
+import { SettingsScreen } from "./features/settings";
 import { SearchPalette } from "./features/search";
-import { PageTree } from "./features/pages/PageTree";
-import { PageWorkspace } from "./features/pages/PageWorkspace";
+import { ConteudoDeTrilha, PainelDeTrilha } from "./features/trilha";
 import { usePageTreeStore } from "./features/pages/store";
-import { getAppConfig, TOGGLE_THEME_EVENT, type AppConfig } from "./lib/ipc";
+import { openWorkspace, TOGGLE_THEME_EVENT } from "./lib/ipc";
 import { useThemeStore } from "./lib/theme-store";
 
+// Depois da migração para SQLite não existe mais estado intermediário entre
+// "abrindo" e "pronto": o banco é um arquivo dentro da pasta de trabalho, e a
+// pasta tem um padrão bom (a pasta de dados do app no sistema operacional).
+// Sumiram com o Postgres o `needs-setup` (o assistente que coletava
+// host/porta/usuário/banco) e o `needs-reconnect` (que existia só porque a
+// senha nunca era persistida e precisava ser redigitada a cada abertura).
 type LoadState =
   | { status: "loading" }
-  | { status: "needs-setup" }
-  // `AppConfig` existe no store, mas a senha nunca é persistida (ver o
-  // comentário do tipo em `src/lib/ipc.ts`) — esta execução do processo
-  // ainda não chamou `connectDatabase`, então nenhum comando de IPC que
-  // precise do banco funciona ainda. `config` prefila host/porta/banco/
-  // usuário na tela de reconexão; só a senha falta.
-  | { status: "needs-reconnect"; config: AppConfig }
   | { status: "ready" }
   | { status: "load-failed"; message: string };
+
+/**
+ * As sete seções do app, ligadas às telas que existem.
+ *
+ * Para ligar uma seção nova: acrescente a entrada dela aqui —
+ * `cartoes: { Painel: PainelDeCartoes, Conteudo: ConteudoDeCartoes }` — e
+ * nada mais. Seção sem entrada continua no rail com o estado "em construção"
+ * do catálogo (`features/navegacao/catalogo.tsx`).
+ */
+const SECOES = montarSecoes({
+  hoje: { Conteudo: ConteudoDeHoje },
+  notas: { Painel: PainelDeNotas, Conteudo: ConteudoDeNotas },
+  cartoes: { Painel: PainelDeCartoes, Conteudo: ConteudoDeCartoes },
+  "mapa-mental": { Painel: PainelDeMapaMental, Conteudo: ConteudoDeMapaMental },
+  trilha: { Painel: PainelDeTrilha, Conteudo: ConteudoDeTrilha },
+  cronograma: { Conteudo: ConteudoDeCronograma },
+  biblioteca: { Painel: PainelDeBiblioteca, Conteudo: ConteudoDeBiblioteca },
+});
 
 function App() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -34,7 +57,7 @@ function App() {
     // ele emite um evento em vez de mudar o DOM ele mesmo, porque o estado do
     // tema mora no lado React — o Rust só avisa que o clique aconteceu.
     const unlisten = listen(TOGGLE_THEME_EVENT, () => {
-      useThemeStore.getState().toggle();
+      useThemeStore.getState().alternar();
     }).catch(() => {
       // Sem runtime Tauri (ex.: testes em jsdom) — o botão da UI continua funcionando.
       return undefined;
@@ -48,19 +71,19 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    getAppConfig()
-      .then((config) => {
+    // PLT-002: abre o banco (criando o arquivo na primeira execução) e aplica
+    // as migrações pendentes antes de liberar qualquer comando que precise
+    // dele. Sem entrada nenhuma do usuário — é o que faz o app abrir e
+    // funcionar numa máquina onde nunca rodou.
+    openWorkspace()
+      .then(() => {
         if (cancelled) return;
-        // Ter `AppConfig` salvo não significa ter conexão: a senha nunca
-        // toca o disco, então toda abertura do processo — não só a
-        // primeira — precisa passar pela tela que a recolhe antes de
-        // liberar o resto do app (ver PLT-002).
-        setState(config ? { status: "needs-reconnect", config } : { status: "needs-setup" });
+        setState({ status: "ready" });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         const message =
-          error instanceof Error ? error.message : "Não foi possível ler a configuração salva.";
+          error instanceof Error ? error.message : "Não foi possível abrir o banco de dados.";
         setState({ status: "load-failed", message });
       });
 
@@ -83,7 +106,7 @@ function App() {
     return (
       <div className="flex h-screen items-center justify-center bg-paper px-6 text-center">
         <div>
-          <h1 className="font-display text-xl text-ink">Não deu para abrir a configuração</h1>
+          <h1 className="font-display text-xl text-ink">Não deu para abrir o banco de dados</h1>
           <p role="alert" className="mt-2 text-sm text-terracotta-ink">
             {state.message}
           </p>
@@ -92,35 +115,30 @@ function App() {
     );
   }
 
-  if (state.status === "needs-setup") {
-    return <FirstRunWizard mode="setup" onComplete={() => setState({ status: "ready" })} />;
-  }
-
-  if (state.status === "needs-reconnect") {
-    return (
-      <FirstRunWizard
-        mode="reconnect"
-        savedConfig={state.config}
-        onComplete={() => setState({ status: "ready" })}
-      />
-    );
-  }
-
   return <Workspace />;
 }
 
 /**
- * Só existe separado de `App` para poder chamar `usePageTreeStore` — um hook
- * de store não pode ser condicional, e os retornos antecipados acima
- * (carregando/erro/assistente) tornariam a chamada condicional se ficasse
- * dentro do próprio `App`.
+ * Só existe separado de `App` para poder chamar as stores — um hook de store
+ * não pode ser condicional, e os retornos antecipados acima (carregando/erro)
+ * tornariam a chamada condicional se ficasse dentro do próprio `App`.
  */
 function Workspace() {
-  const selectedPageId = usePageTreeStore((state) => state.selectedPageId);
   const selectPage = usePageTreeStore((state) => state.selectPage);
   const rename = usePageTreeStore((state) => state.rename);
+  const irPara = useNavegacaoStore((estado) => estado.irPara);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const settingsDialogRef = useRef<HTMLDialogElement>(null);
+
+  /**
+   * Abrir uma página vinda de fora de Notas (busca global, faixa de
+   * recuperação) precisa levar o app até a seção Notas primeiro — senão a
+   * página fica selecionada na store e invisível atrás de outra aba.
+   */
+  function abrirPagina(pageId: string, origem: OrigemDaTroca) {
+    irPara("notas", origem);
+    selectPage(pageId);
+  }
 
   useEffect(() => {
     // Mesmo padrão de `MoveToDialog`: `showModal`/`close` existem de verdade
@@ -149,82 +167,48 @@ function Workspace() {
           discarding it. */}
       <RecoveryBanner
         onRestore={(entry) => {
-          selectPage(entry.page_id);
+          abrirPagina(entry.page_id, "ponteiro");
           return rename(entry.page_id, entry.title);
         }}
       />
-      <AppShell sidebar={<PageTree />}>
-        {selectedPageId ? (
-          <PageWorkspace pageId={selectedPageId} />
-        ) : (
-          <EmptyState
-            title="Bem-vindo ao Learno"
-            description="Escolha ou crie uma página na barra lateral para começar a estudar."
-          />
-        )}
-      </AppShell>
+      <AppShell
+        secoes={SECOES}
+        acoes={
+          <BotaoDeIcone rotulo="Configurações" onClick={() => setSettingsOpen(true)}>
+            <IconeConfiguracoes />
+          </BotaoDeIcone>
+        }
+      />
       {/* FUN-037: sobreposta a qualquer tela, ativada por Ctrl/Cmd+K — fica
           fora do `main` do AppShell de propósito, já que não é conteúdo da
-          página atual. */}
-      <SearchPalette onNavigate={selectPage} />
+          seção atual. Navegar por ela é gesto de teclado, então a troca de
+          seção não anima. */}
+      <SearchPalette onNavigate={(pageId) => abrirPagina(pageId, "teclado")} />
 
-      <button
-        type="button"
-        aria-label="Configurações"
-        onClick={() => setSettingsOpen(true)}
-        className="fixed bottom-4 right-4 z-30 grid size-10 place-items-center rounded-full border border-border bg-surface text-lg shadow-hard-sm transition-transform hover:-translate-y-px active:translate-y-0"
-      >
-        <span aria-hidden="true">⚙️</span>
-      </button>
-
-      {/* PLT-011/PLT-013: único ponto de entrada real de `BackupSettings` —
-          sem isto, o comando de backup manual (correto e testado em
-          `backup::dump`) fica só acionável a partir do próprio teste do
-          componente, nunca pelo usuário do app rodando de verdade. */}
+      {/* Único ponto de entrada das Configurações. Cada seção lá dentro é o
+          único caminho de UI para um comando que existe e funciona no backend
+          — backup manual (PLT-011/013), pasta de trabalho (PLT-016),
+          verificação de integridade (PLT-014) e import de `.apkg` (PLT-004).
+          Este projeto já perdeu quatro features por elas existirem sem clique
+          que as alcançasse; ver `docs/ACHADOS-FASE-3.md`. */}
       <dialog
         ref={settingsDialogRef}
         aria-label="Configurações"
-        className="w-[min(32rem,90vw)] rounded-sm border border-border bg-paper p-6 text-ink shadow-hard-sm backdrop:bg-ink/40"
+        className="m-auto h-[min(40rem,85vh)] w-[min(52rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-paper p-0 text-ink shadow-hard open:flex backdrop:bg-ink/50"
         onClose={() => setSettingsOpen(false)}
       >
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
           <h2 className="font-display text-lg text-ink">Configurações</h2>
           <button
             type="button"
             aria-label="Fechar configurações"
             onClick={() => setSettingsOpen(false)}
-            className="rounded-sm px-2 py-1 text-sm text-ink-muted"
+            className="rounded-md px-2 py-1 text-sm text-ink-muted transition-colors duration-150 ease-out hover:bg-surface-sunken hover:text-ink"
           >
             ✕
           </button>
         </div>
-        <div className="mt-4">
-          <BackupSettings />
-        </div>
-
-        {/* PLT-014: único ponto de entrada real de `CheckDatabaseSection` —
-            sem isto, a verificação de integridade (correta e testada em
-            `db::integrity::IntegrityRepository`) ficava acionável só a
-            partir do próprio teste do repositório, nunca por uma ação do
-            usuário rodando o app de verdade. */}
-        <div className="mt-6 border-t border-border pt-6">
-          <h2 className="font-display text-lg text-ink">Verificar banco de dados</h2>
-          <div className="mt-4">
-            <CheckDatabaseSection />
-          </div>
-        </div>
-
-        {/* PLT-004: único ponto de entrada real do import de `.apkg` — sem
-            isto, `import_apkg` (comprovadamente funcional contra o sidecar
-            Python empacotado) não tinha seletor de arquivo nem botão que o
-            alcançasse a partir da UI; um grep por "apkg" em `src/` não
-            achava nada além deste comentário. */}
-        <div className="mt-6 border-t border-border pt-6">
-          <h2 className="font-display text-lg text-ink">Importar do Anki</h2>
-          <div className="mt-4">
-            <ImportApkgSection />
-          </div>
-        </div>
+        <SettingsScreen />
       </dialog>
     </>
   );

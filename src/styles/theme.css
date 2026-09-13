@@ -1,92 +1,319 @@
 /*
- * Tema do Learno — "cozy-produtivo".
+ * Tema do Learno — cinco temas, um contrato.
  *
- * A paleta vem do ícone do app (pilha de livros em pixel art): âmbar, menta,
- * esmeralda escuro, terracota, marrom e um quase-preto puxado pro marrom.
- * A tipografia e a densidade seguem uma ferramenta séria — pensada pra ficar
- * na tela por horas — não uma landing page.
+ * A paleta nasceu do ícone do app (pilha de livros em pixel art): âmbar,
+ * menta, esmeralda, terracota, marrom. A repaginada mudou o ponto de partida:
+ * o tema padrão agora é o "Âmbar noturno" — escuro, quente, com o âmbar só
+ * como acento. Ele não é o tema claro invertido: foi desenhado no escuro,
+ * porque o uso real é de horas seguidas, muitas vezes à noite. Os outros
+ * quatro (Papel, Grafite, Meia-noite, Alto contraste) compartilham os mesmos
+ * nomes de token e trocam só os valores.
  *
- * Cada cor "-ink" é uma variante mais escura (ou, no escuro, mais clara) da
- * mesma cor de marca, pensada especificamente para texto: as cores puras do
- * ícone (âmbar, terracota) não têm contraste AA suficiente como texto sobre
- * o papel de fundo, mas continuam corretas para ícone, borda ou fundo de
- * selo — onde a regra de contraste é outra (3:1, não 4.5:1).
+ * Como o tema é aplicado
+ * ----------------------
+ * Cada tema é um bloco `[data-theme="<id>"]` (sem `:root` na frente, de
+ * propósito): assim um `<div data-theme="grafite">` no meio da página herda o
+ * bloco inteiro e a tela de Aparência pinta uma amostra real de cada tema sem
+ * repetir um hex sequer em TypeScript. "Seguir o sistema" é resolvido em JS,
+ * que escreve o id do tema claro ou escuro correspondente — aqui não existe
+ * `@media (prefers-color-scheme)`, porque com cinco temas isso viraria dez
+ * blocos.
+ *
+ * ATENÇÃO À ORDEM: `:root` e `[data-theme="x"]` têm a mesma especificidade
+ * (0,1,0). O bloco padrão fica no topo e os nomeados vêm depois; é a ordem no
+ * arquivo que faz o tema escolhido vencer o padrão. Não reordene.
+ *
+ * `light` e `dark` são aliases legados de `papel` e `ambar-noturno`: o
+ * `theme-store.ts` ainda escreve esses dois ids. Quando ele migrar para os
+ * ids novos, os aliases podem sair.
+ *
+ * Papel de cada token
+ * -------------------
+ * - `paper` é o fundo da janela; `surface` é card/painel; `surface-sunken` é
+ *   a barra lateral, o campo de código, a área rebaixada; `surface-raised` é
+ *   a linha em hover, o chip, o que se ergue um degrau acima do card.
+ * - `border` é a borda de CONTROLE (botão, campo, card com borda). Mira 3:1
+ *   contra `surface` porque um controle precisa ser encontrado sem depender
+ *   do texto dentro dele. `hairline` é o divisor decorativo, o traço entre
+ *   seções, a linha de dentro das sombras — de propósito abaixo de 3:1,
+ *   porque divisor forte demais vira ruído numa tela densa.
+ * - Cada cor "-ink" é a variante da mesma cor de marca pensada para TEXTO
+ *   (≥ 4.5:1 sobre paper e surface). A cor pura (`amber`, `mint`,
+ *   `terracotta`) é para ícone, borda e fundo de selo, onde a regra é 3:1.
+ * - `emerald` + `on-emerald` = botão primário. É a única cor que muda de
+ *   papel no Alto contraste (fica clara com texto preto), porque 7:1 com
+ *   texto claro exigiria um verde escuro demais para ser um botão.
+ * - `focus` é o anel de foco. Antes ele pegava `emerald` emprestado, e um
+ *   tema que mudasse essa cor apagava o foco sem ninguém perceber. Agora é
+ *   token próprio, e cada tema escolhe a cor mais visível sobre os seus
+ *   fundos.
+ * - `color-scheme-do-tema` (`light` | `dark`) diz à WebView2 como pintar
+ *   barra de rolagem e controle nativo. Só é APLICADO na raiz (ver
+ *   `@layer base`): uma amostra escura dentro de uma página clara não pode
+ *   repintar os controles nativos dentro dela.
+ *
+ * Todo hex aqui foi medido (razão WCAG 2.x), não estimado. A tabela completa
+ * está em docs/DESIGN-TOKENS.md — se mexer num valor, meça de novo e atualize
+ * a tabela.
  */
 
 @import "tailwindcss";
 
-:root {
-  --paper: #f6efdf;
-  --surface: #fffbf2;
-  --surface-sunken: #ece0c5;
-  --border: #c9a877;
-  --ink: #1c0f08;
-  --ink-muted: #5b4630;
+/* =========================================================================
+ * Âmbar noturno — escuro, quente. PADRÃO de instalação nova, e o que vale
+ * antes de o JS escrever `data-theme` (por isso o `:root` na lista: evita a
+ * piscada de um tema errado no primeiro quadro).
+ * ========================================================================= */
+:root,
+[data-theme="ambar-noturno"],
+[data-theme="dark"] {
+  --color-scheme-do-tema: dark;
 
-  --amber: #d69436;
-  --amber-ink: #8a5a1c;
-  --mint: #59d68a;
-  --mint-ink: #1f6b45;
-  --emerald: #0d564d;
-  --terracotta: #9f582e;
-  --terracotta-ink: #7a3f1f;
-  --brown: #7d3912;
-  --on-emerald: #fbf4e4;
+  --paper: #12100e;
+  --surface: #1b1815;
+  --surface-sunken: #0c0a09;
+  --surface-raised: #24201b;
+  --hairline: #2e2823;
+  --border: #736553;
+  --ink: #efe7d8;
+  --ink-muted: #a99c86;
 
-  --shadow-ink: rgb(18 0 0 / 35%);
+  --amber: #e0a44e;
+  --amber-ink: #e8b265;
+  --mint: #6fcf97;
+  --mint-ink: #86daa8;
+  --emerald: #1d7864;
+  --on-emerald: #fbf6ea;
+  --terracotta: #e0705b;
+  --terracotta-ink: #ee8e7b;
+  --brown: #9a7a5c;
+
+  --focus: #e0a44e;
+
+  /* No escuro, sombra preta some contra fundo preto. A sombra fica mais
+     opaca e mais difusa, e ganha um fio de luz na aresta de cima
+     (`--shadow-glow`) — é ele que diz "isto está acima" quando a sombra em
+     si mal aparece. */
+  --shadow-ink: rgb(0 0 0 / 55%);
+  --shadow-glow: rgb(255 255 255 / 5%);
 }
 
-/* Escolha explícita do usuário via alternador de tema (data-theme="dark" na
-   raiz) sempre vence a preferência do sistema. */
-:root[data-theme="dark"] {
-  --paper: #16100a;
-  --surface: #201811;
-  --surface-sunken: #0f0b07;
-  --border: #4a3a26;
-  --ink: #f2e8d5;
-  --ink-muted: #b8a583;
+/* =========================================================================
+ * Papel — claro, quente. Não é o Âmbar noturno invertido: o papel é um
+ * creme levemente mais neutro que o antigo, para o âmbar não competir com
+ * o fundo, e a borda de controle escureceu até 3:1 (a antiga ficava em ~2:1
+ * e sumia em monitor claro).
+ * ========================================================================= */
+[data-theme="papel"],
+[data-theme="light"] {
+  --color-scheme-do-tema: light;
 
-  --amber: #e9ac53;
-  --amber-ink: #e9ac53;
-  --mint: #7bdba0;
-  --mint-ink: #7bdba0;
-  --emerald: #14705f;
-  --terracotta: #c97b4a;
-  --terracotta-ink: #e2a67c;
-  --brown: #a9713f;
-  --on-emerald: #fbf4e4;
+  --paper: #f3ebdb;
+  --surface: #fcf8ef;
+  --surface-sunken: #e7dcc3;
+  --surface-raised: #ffffff;
+  --hairline: #d9cbae;
+  --border: #8a7657;
+  --ink: #1e150c;
+  --ink-muted: #5c4a35;
+
+  --amber: #b5771c;
+  --amber-ink: #7b5015;
+  --mint: #2a985d;
+  --mint-ink: #1b6a43;
+  --emerald: #0f5b50;
+  --on-emerald: #fbf5e6;
+  --terracotta: #b05a33;
+  --terracotta-ink: #8a3f1b;
+  --brown: #7d3912;
+
+  --focus: #0f5b50;
+
+  /* No claro, o brilho de aresta é quase branco: dá o leve "verniz" de
+     papel encerado na borda de cima de um popover, sem parecer plástico. */
+  --shadow-ink: rgb(40 24 8 / 18%);
+  --shadow-glow: rgb(255 255 255 / 60%);
+}
+
+/* =========================================================================
+ * Grafite — escuro, neutro, frio. Para quem acha o âmbar quente demais
+ * à noite. Os cinzas puxam levemente pro azul; o acento continua âmbar
+ * (é a marca), só um pouco dessaturado. O foco é claro, quase branco — em
+ * tema neutro, anel colorido parece erro de tema.
+ * ========================================================================= */
+[data-theme="grafite"] {
+  --color-scheme-do-tema: dark;
+
+  --paper: #141516;
+  --surface: #1c1e21;
+  --surface-sunken: #0e0f10;
+  --surface-raised: #25282c;
+  --hairline: #2b2f33;
+  --border: #676d74;
+  --ink: #e9ebee;
+  --ink-muted: #a3a9b1;
+
+  --amber: #d3a052;
+  --amber-ink: #ddb06a;
+  --mint: #6ccb93;
+  --mint-ink: #84d6a5;
+  --emerald: #1f7b6b;
+  --on-emerald: #f2f4f5;
+  --terracotta: #e07460;
+  --terracotta-ink: #ef9280;
+  --brown: #8e8074;
+
+  --focus: #e9ebee;
+
+  --shadow-ink: rgb(0 0 0 / 55%);
+  --shadow-glow: rgb(255 255 255 / 6%);
+}
+
+/* =========================================================================
+ * Meia-noite — escuro, frio, bem contrastado. Fundo azul-marinho profundo;
+ * texto e borda um degrau acima dos outros escuros para quem precisa de
+ * mais separação sem ir até o Alto contraste. O foco é azul-claro, a cor
+ * mais visível sobre marinho e coerente com a temperatura do tema.
+ * ========================================================================= */
+[data-theme="meia-noite"] {
+  --color-scheme-do-tema: dark;
+
+  --paper: #0b1120;
+  --surface: #121a2b;
+  --surface-sunken: #060b15;
+  --surface-raised: #1a2438;
+  --hairline: #223049;
+  --border: #74869f;
+  --ink: #f2f5fa;
+  --ink-muted: #b0bbcf;
+
+  --amber: #f0b457;
+  --amber-ink: #f5c470;
+  --mint: #7ee0a8;
+  --mint-ink: #90e8b5;
+  --emerald: #1a7e6a;
+  --on-emerald: #f6f9ff;
+  --terracotta: #f07d66;
+  --terracotta-ink: #f89d8a;
+  --brown: #a48b70;
+
+  --focus: #8ab4f8;
 
   --shadow-ink: rgb(0 0 0 / 60%);
+  --shadow-glow: rgb(255 255 255 / 6%);
 }
 
-/* Sem escolha explícita (sem `data-theme`), segue o sistema operacional. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --paper: #16100a;
-    --surface: #201811;
-    --surface-sunken: #0f0b07;
-    --border: #4a3a26;
-    --ink: #f2e8d5;
-    --ink-muted: #b8a583;
+/* =========================================================================
+ * Alto contraste — acessibilidade. Mira 7:1 em todo texto (AAA) e nunca
+ * depende de sombra: elevação é só borda, e a borda é clara. O botão
+ * primário inverte (verde claro, texto preto) porque texto claro sobre
+ * verde escuro não chega a 7:1 sem o verde virar quase preto. Foco amarelo,
+ * como nos temas de alto contraste do Windows.
+ * ========================================================================= */
+[data-theme="alto-contraste"] {
+  --color-scheme-do-tema: dark;
 
-    --amber: #e9ac53;
-    --amber-ink: #e9ac53;
-    --mint: #7bdba0;
-    --mint-ink: #7bdba0;
-    --emerald: #14705f;
-    --terracotta: #c97b4a;
-    --terracotta-ink: #e2a67c;
-    --brown: #a9713f;
-    --on-emerald: #fbf4e4;
+  --paper: #050505;
+  --surface: #121212;
+  --surface-sunken: #000000;
+  --surface-raised: #1c1c1c;
+  --hairline: #707070;
+  --border: #c4c4c4;
+  --ink: #ffffff;
+  --ink-muted: #d9d9d9;
 
-    --shadow-ink: rgb(0 0 0 / 60%);
-  }
+  --amber: #ffc65c;
+  --amber-ink: #ffd27a;
+  --mint: #7df0ae;
+  --mint-ink: #9cf5c0;
+  --emerald: #2ed2ad;
+  --on-emerald: #000000;
+  --terracotta: #ff8a6e;
+  --terracotta-ink: #ffa592;
+  --brown: #cfae92;
+
+  --focus: #ffeb3b;
+
+  /* Sombra desligada: quem usa alto contraste quer aresta, não sugestão de
+     profundidade. A borda (`--border`, 10:1) faz o papel sozinha. */
+  --shadow-ink: transparent;
+  --shadow-glow: transparent;
+}
+
+/* =========================================================================
+ * Matizes — camada de matiz, independente de tema.
+ *
+ * `option-colors.css` (etiqueta de select/multi_select) e `palette.ts`
+ * (paleta de cor do editor) cada uma tinha sua própria paleta paralela ao
+ * tema, com RGB/hex escritos à mão para o valor de luminosidade do tema
+ * CLARO — então no escuro (e agora nos outros três temas) o fundo e a borda
+ * ficavam presos naquele valor claro, sem erro nenhum aparecendo na tela.
+ *
+ * A correção: separar TOM de LUMINOSIDADE. O tom (a matiz — "isto é azul",
+ * "isto é roxo") não muda de tema para tema, então mora aqui, uma vez só,
+ * fora dos cinco blocos acima. A luminosidade continua vindo do tema ativo:
+ * cada consumidor mistura a matiz com um token do tema (`--surface`,
+ * `--ink`) via `color-mix()`, então um tema escuro produz resultado escuro e
+ * um tema claro produz resultado claro, automaticamente — sem um único
+ * override por tema, e sem precisar saber quantos temas existem.
+ *
+ * Só entram aqui matizes que a marca não cobre. Vermelho/amarelo/azul/verde
+ * são os quatro extras da paleta de texto/destaque do editor; roxo é a
+ * segunda cor extra da etiqueta de banco de dados (a primeira, azul, já
+ * cobre os dois). Onde já existe cor de marca (âmbar, menta, esmeralda,
+ * terracota, marrom) o consumidor mistura `var(--amber)` etc. diretamente —
+ * ela já é a matiz, e já segue o tema por si.
+ *
+ * `in srgb` (não `oklab`, como o `::selection` abaixo) porque é o espaço que
+ * dá o resultado mais prévisível ao misturar uma cor saturada com um tom
+ * quase neutro (`--ink`/`--surface`): a mistura anda em linha reta entre os
+ * dois, sem o realce de saturação que `oklab` daria no meio do caminho —
+ * aqui o objetivo é a matiz ficar mais clara/escura, não mais viva.
+ * ========================================================================= */
+:root {
+  --matiz-vermelho: #dc2626;
+  --matiz-amarelo: #eab308;
+  --matiz-azul: #3b82f6;
+  --matiz-verde: #22c55e;
+  --matiz-roxo: #8b5cf6;
+}
+
+/* =========================================================================
+ * Réguas que não mudam com o tema.
+ * ========================================================================= */
+:root {
+  /* Movimento (regras de Emil Kowalski, tratadas como restrição):
+     - toda transição de UI abaixo de 300ms; 180ms costuma parecer melhor
+       que 400ms, e ação de alta frequência (menu que abre dez vezes por
+       hora) prefere o `fast`;
+     - entrada/saída da tela: ease-out; movimento na tela: ease-in-out;
+       `ease-in` nunca, em UI;
+     - entrada nasce em scale(0.95), nunca em 0 — "pular do nada" é o que
+       faz uma animação parecer barata;
+     - pressionado: scale(0.97), o suficiente para o botão responder ao
+       dedo sem parecer que encolheu. */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --motion-scale-in: 0.95;
+  --motion-scale-press: 0.97;
+
+  /* Largura máxima de leitura corrida: acima de ~65 caracteres o olho perde
+     a linha na volta. Vale para prosa do editor e para diálogo com texto
+     explicativo, não para tabela nem barra lateral. */
+  --measure: 65ch;
+
+  /* Alvo mínimo de toque/clique. Um controle pode DESENHAR menor que isso,
+     mas a área que reage não. */
+  --hit-min: 44px;
 }
 
 @theme {
   --color-paper: var(--paper);
   --color-surface: var(--surface);
   --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
   --color-border: var(--border);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
@@ -100,11 +327,31 @@
   --color-terracotta-ink: var(--terracotta-ink);
   --color-brown: var(--brown);
   --color-on-emerald: var(--on-emerald);
+  --color-focus: var(--focus);
 
-  /* Sombra sólida (sem blur) no lugar do soft-shadow padrão — o mesmo jeito
-     de sombrear sem gradiente que a pixel art do ícone usa. */
-  --shadow-hard-sm: 2px 2px 0 0 var(--shadow-ink);
-  --shadow-hard: 4px 4px 0 0 var(--shadow-ink);
+  /* Elevação. Os nomes `shadow-hard` e `shadow-hard-sm` ficaram POR
+     COMPATIBILIDADE — 16 usos em JSX — mas a sombra dura de 2px/4px sem blur
+     saiu. Hoje significam:
+     - `shadow-hard-sm` = nível 1, "isto é um controle": botão, card, chip.
+       Um fio de sombra logo abaixo, e só.
+     - `shadow-hard`    = nível 2, "isto está flutuando": diálogo, popover,
+       menu de contexto, paleta de busca. Duas sombras (uma curta e densa,
+       uma longa e difusa) mais o brilho na aresta de cima, que é o que
+       ainda se enxerga quando a sombra some contra fundo escuro.
+     A borda 3:1 (`border-border`) que esses elementos já carregam completa
+     o recorte; a sombra não precisa fazer o trabalho sozinha. */
+  --shadow-hard-sm: 0 1px 2px 0 var(--shadow-ink);
+  --shadow-hard:
+    inset 0 1px 0 0 var(--shadow-glow),
+    0 4px 12px -2px var(--shadow-ink),
+    0 16px 40px -12px var(--shadow-ink);
+
+  /* Curvas com mais caráter que as nativas do CSS (`ease-out` padrão do
+     Tailwind é cubic-bezier(0,0,.2,1), morno). Sobrescrever aqui muda os
+     utilitários `ease-out`/`ease-in-out` já usados no JSX — de propósito:
+     a régua vale para todo mundo, não só para quem lembrar de escolher. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
   /* Serifada pros títulos — o lado "livro" do ícone; a fonte nativa do SO
      pra interface — o lado "ferramenta densa" que se lê por horas, sem
@@ -115,9 +362,52 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+/* =========================================================================
+ * O elo que faz um tema ANINHADO funcionar de verdade.
+ *
+ * O `@theme` acima declara `--color-paper: var(--paper)` — e essa indireção é
+ * resolvida UMA vez, em `:root`, onde `var(--paper)` vale o tema da raiz. O
+ * valor computado que desce por herança já é a cor final, não a referência.
+ * Consequência: um `<div data-theme="grafite">` no meio da página troca
+ * `--paper`, mas `--color-paper` continua com a cor da raiz, e o utilitário
+ * `bg-paper` — que lê `--color-paper` — não muda nada.
+ *
+ * Foi exatamente isso que aconteceu na primeira execução: as seis amostras da
+ * tela de Aparência saíram todas com a cara do tema ativo, cada uma dizendo
+ * ser um tema diferente. Amostra que mente sobre o tema é pior que amostra
+ * nenhuma.
+ *
+ * A correção é refazer a indireção em todo elemento que carrega `data-theme`,
+ * incluindo a própria raiz. Regra sem `@layer` de propósito: fora de camada
+ * ela vence o `theme` do Tailwind independentemente da ordem do arquivo.
+ * ========================================================================= */
+[data-theme] {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-amber: var(--amber);
+  --color-amber-ink: var(--amber-ink);
+  --color-mint: var(--mint);
+  --color-mint-ink: var(--mint-ink);
+  --color-emerald: var(--emerald);
+  --color-terracotta: var(--terracotta);
+  --color-terracotta-ink: var(--terracotta-ink);
+  --color-brown: var(--brown);
+  --color-on-emerald: var(--on-emerald);
+  --color-focus: var(--focus);
+}
+
 @layer base {
   html {
-    color-scheme: light dark;
+    /* Só a raiz manda nos controles nativos; uma amostra de tema aninhada
+       troca cor, não `color-scheme`. */
+    color-scheme: var(--color-scheme-do-tema);
     font-family: var(--font-sans);
     font-size: 15px;
   }
@@ -130,9 +420,53 @@
 
   /* Foco visível em qualquer controle nativo, sem depender de cada
      componente lembrar de estilizar `:focus` — teclado precisa sempre
-     enxergar onde está. */
+     enxergar onde está. A cor é token próprio de cada tema (≥ 3:1 sobre
+     paper, surface e sunken, medido). */
   :focus-visible {
-    outline: 2px solid var(--color-emerald);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
+
+  /* Seleção de texto na cor de interação do tema. Num app cujo centro é um
+     editor, a seleção padrão azul do sistema é a primeira coisa a denunciar
+     "isto é uma WebView". */
+  ::selection {
+    background-color: color-mix(in oklab, var(--focus) 28%, transparent);
+  }
+
+  /* Quem pediu menos movimento no SO não vê transição nem animação. A
+     duração vai a 0.01ms em vez de 0 porque `transitionend`/`animationend`
+     ainda precisam disparar — código que espera o fim de uma transição
+     para desmontar um elemento não pode ficar pendurado para sempre. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Zera o posicionamento que a folha do agente do usuário dá a todo `[popover]`
+   — `position: fixed; inset: 0; margin: auto`, que centraliza o painel na
+   janela.
+
+   Fora de camada de propósito: uma regra sem `@layer` vence qualquer regra
+   dentro de uma, e as classes utilitárias do Tailwind v4 moram em camada.
+   Se esta regra estivesse em camada, o `inset: 0` da folha do agente
+   continuaria valendo para `right` e `bottom` mesmo depois de
+   `usePosicaoAncorada` cravar `left` e `top`, e o painel seria esticado
+   contra os quatro lados da janela.
+
+   Quem posiciona os painéis é `src/features/pages/use-posicao-ancorada.ts`,
+   por medida do gatilho. O comentário de lá conta por que medir foi
+   necessário: dentro da top layer do popover, `absolute top-full` abria os
+   menus uma altura de janela inteira abaixo da área visível, o que do lado de
+   fora parecia um botão que não faz nada. */
+[popover] {
+  inset: auto;
+  margin: 0;
 }

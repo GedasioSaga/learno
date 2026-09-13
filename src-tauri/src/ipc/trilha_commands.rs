@@ -8,6 +8,7 @@
 use tauri::State;
 use uuid::Uuid;
 
+use crate::db::pages::PageRow;
 use crate::db::trilha::TrilhaRecemCriada;
 use crate::db::{
     ConfiguracaoTrilha, Decisao, Etapa, Flecha, ImpactoDaTroca, MaterialDaEtapa, ProgressoDaEtapa, Raia, Trilha,
@@ -135,6 +136,17 @@ async fn definir_raia_recolhida_inner(state: &AppState, view_id: Uuid, lane_valu
     trilha_repository(state)?.definir_raia_recolhida(view_id, lane_value, recolhida).await
 }
 
+/// Apaga a raia — as etapas que estavam nela NÃO somem, ficam sem raia
+/// (TRL-014). Ver o comentário de `TrilhaRepository::remover_raia`.
+#[tauri::command]
+pub async fn remover_raia(state: State<'_, AppState>, view_id: Uuid, lane_value: String) -> Result<()> {
+    remover_raia_inner(&state, view_id, &lane_value).await
+}
+
+async fn remover_raia_inner(state: &AppState, view_id: Uuid, lane_value: &str) -> Result<()> {
+    trilha_repository(state)?.remover_raia(view_id, lane_value).await
+}
+
 /// Move a etapa para outra raia — grava outro valor na propriedade de
 /// agrupamento (TRL-009), não mexe em `trail_lanes`.
 #[tauri::command]
@@ -208,6 +220,19 @@ pub async fn remover_material_etapa(state: State<'_, AppState>, material_id: Uui
 
 async fn remover_material_etapa_inner(state: &AppState, material_id: Uuid) -> Result<()> {
     trilha_repository(state)?.remover_material_etapa(material_id).await
+}
+
+/// Apaga (manda para a lixeira) a etapa — reversível via `restore_page`. Ver
+/// o comentário de `TrilhaRepository::remover_etapa` para as decisões de
+/// cascata (flechas apagadas nas duas direções, sem religação automática;
+/// progresso/materiais/decisão preservados para a restauração).
+#[tauri::command]
+pub async fn remover_etapa(state: State<'_, AppState>, step_id: Uuid) -> Result<PageRow> {
+    remover_etapa_inner(&state, step_id).await
+}
+
+async fn remover_etapa_inner(state: &AppState, step_id: Uuid) -> Result<PageRow> {
+    trilha_repository(state)?.remover_etapa(step_id).await
 }
 
 /// Cria a flecha (dependência) entre dois registros da mesma database — ver
@@ -429,6 +454,18 @@ mod tests {
         async fn criar_etapa_reports_not_connected() {
             let state = AppState::new();
             assert!(matches!(criar_etapa_inner(&state, Uuid::now_v7(), "Databricks", "").await, Err(Error::Config(_))));
+        }
+
+        #[tokio::test]
+        async fn remover_etapa_reports_not_connected() {
+            let state = AppState::new();
+            assert!(matches!(remover_etapa_inner(&state, Uuid::now_v7()).await, Err(Error::Config(_))));
+        }
+
+        #[tokio::test]
+        async fn remover_raia_reports_not_connected() {
+            let state = AppState::new();
+            assert!(matches!(remover_raia_inner(&state, Uuid::now_v7(), "T.I.").await, Err(Error::Config(_))));
         }
     }
 

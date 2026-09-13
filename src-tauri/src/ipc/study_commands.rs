@@ -16,7 +16,9 @@
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::{AnswerOutcome, CardRepository, CardToStudy, DeckCounts, DiaPrevisto, ReviewLogRepository, StudyStats};
+use crate::db::{
+    AnswerOutcome, CardRepository, CardToStudy, DeckCounts, DeckMaturity, DiaPrevisto, ReviewLogRepository, StudyStats,
+};
 use crate::error::Result;
 use crate::ipc::state::AppState;
 
@@ -39,6 +41,20 @@ pub async fn deck_counts(state: State<'_, AppState>, deck_id: Option<Uuid>) -> R
 
 async fn deck_counts_inner(state: &AppState, deck_id: Option<Uuid>) -> Result<DeckCounts> {
     card_repository(state)?.deck_counts(deck_id).await
+}
+
+/// Quanto do baralho `deck_id` (exato, sem descer para subbaralhos — ver o
+/// comentário de `db::DeckMaturity`) já amadureceu — a peça que a Trilha usa
+/// para responder "o baralho anexado a esta etapa já foi de fato aprendido",
+/// em vez de só "quantos cartões tem". Erra com `Error::NotFound` se
+/// `deck_id` não existir.
+#[tauri::command]
+pub async fn deck_maturity(state: State<'_, AppState>, deck_id: Uuid) -> Result<DeckMaturity> {
+    deck_maturity_inner(&state, deck_id).await
+}
+
+async fn deck_maturity_inner(state: &AppState, deck_id: Uuid) -> Result<DeckMaturity> {
+    card_repository(state)?.deck_maturity(deck_id).await
 }
 
 /// O próximo cartão a estudar, ou `None` quando a fila (no escopo pedido)
@@ -114,6 +130,12 @@ mod tests {
         async fn deck_counts_reports_not_connected() {
             let state = AppState::new();
             assert!(matches!(deck_counts_inner(&state, None).await, Err(Error::Config(_))));
+        }
+
+        #[tokio::test]
+        async fn deck_maturity_reports_not_connected() {
+            let state = AppState::new();
+            assert!(matches!(deck_maturity_inner(&state, Uuid::now_v7()).await, Err(Error::Config(_))));
         }
 
         #[tokio::test]

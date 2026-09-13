@@ -74,16 +74,13 @@ const CADENCE_LABEL: Record<BackupCadence, string> = {
  * critério de aceite é "cargo-test" (a lógica de agendamento e retenção em
  * `backup::schedule` é o que prova o comportamento); esta seção só precisa
  * dar ao usuário um jeito real de ligar/ajustar isso e de confirmar que
- * rodou, reaproveitando a senha que `BackupSettings` já pede para o backup
- * manual — nenhum backup automático de verdade roda sem alguém com a senha
- * em mãos disparando esta checagem, já que o app nunca persiste uma (ver
- * `config::AppConfig`).
+ * rodou. Com o banco em SQLite não há credencial nenhuma a informar — o
+ * botão "Checar agora" só depende de a checagem não estar rodando.
  */
 function AutomaticBackupSection() {
   const [config, setConfig] = useState<BackupScheduleConfig | null>(null);
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [password, setPassword] = useState("");
   const [checkStatus, setCheckStatus] = useState<CheckStatus>({ kind: "idle" });
 
   useEffect(() => {
@@ -117,7 +114,7 @@ function AutomaticBackupSection() {
   async function handleCheckNow() {
     setCheckStatus({ kind: "running" });
     try {
-      const path = await runDueScheduledBackup(password);
+      const path = await runDueScheduledBackup();
       setCheckStatus(path ? { kind: "ran", path } : { kind: "not-due" });
     } catch (error) {
       setCheckStatus({ kind: "error", message: errorMessage(error, "Não foi possível checar o backup automático.") });
@@ -211,14 +208,10 @@ function AutomaticBackupSection() {
       </div>
 
       <div className="flex flex-col gap-2 border-t border-border pt-4">
-        <p className="text-sm text-ink-muted">
-          O app não guarda a senha do Postgres — para rodar a checagem de backup automático agora, informe-a aqui.
-        </p>
-        <Field label="Senha do Postgres" type="password" value={password} onChange={setPassword} />
         <div>
           <button
             type="button"
-            disabled={password.length === 0 || checkStatus.kind === "running"}
+            disabled={checkStatus.kind === "running"}
             onClick={() => void handleCheckNow()}
             className="rounded-sm border border-border bg-surface px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
           >
@@ -246,17 +239,16 @@ function AutomaticBackupSection() {
 }
 
 /**
- * PLT-011: manual backup and restore of the local Postgres database. The
- * password never gets stored by this component (or anywhere on disk) — it
- * lives only in this form's state for the duration of one backup/restore
- * call, same as `FirstRunWizard`'s connection test.
+ * PLT-011: backup e restauração manuais do banco local. Backup é um
+ * `VACUUM INTO` na própria conexão SQLite — sem processo externo, sem
+ * credencial — que grava um arquivo `.sqlite`; restaurar troca o banco atual
+ * por esse arquivo depois de verificá-lo, e deixa uma cópia do banco anterior
+ * ao lado antes da troca.
  */
 export function BackupSettings() {
-  const [backupPassword, setBackupPassword] = useState("");
   const [outputDir, setOutputDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<BackupStatus>({ kind: "idle" });
 
-  const [restorePassword, setRestorePassword] = useState("");
   const [dumpPath, setDumpPath] = useState("");
   const [restoreStatus, setRestoreStatus] = useState<RestoreStatus>({ kind: "idle" });
 
@@ -268,7 +260,7 @@ export function BackupSettings() {
   async function pickDumpFile() {
     const selected = await open({
       title: "Selecionar arquivo de backup",
-      filters: [{ name: "Backup do Learno", extensions: ["dump"] }],
+      filters: [{ name: "Backup do Learno", extensions: ["sqlite"] }],
     });
     if (typeof selected === "string") setDumpPath(selected);
   }
@@ -276,7 +268,7 @@ export function BackupSettings() {
   async function handleCreateBackup() {
     setBackupStatus({ kind: "running" });
     try {
-      const path = await createBackup(backupPassword, outputDir);
+      const path = await createBackup(outputDir);
       setBackupStatus({ kind: "done", path });
     } catch (error) {
       setBackupStatus({ kind: "error", message: errorMessage(error, "Não foi possível criar o backup.") });
@@ -286,15 +278,15 @@ export function BackupSettings() {
   async function handleRestore() {
     setRestoreStatus({ kind: "running" });
     try {
-      await restoreBackup(restorePassword, dumpPath);
+      await restoreBackup(dumpPath);
       setRestoreStatus({ kind: "done" });
     } catch (error) {
       setRestoreStatus({ kind: "error", message: errorMessage(error, "Não foi possível restaurar o backup.") });
     }
   }
 
-  const canBackup = backupPassword.length > 0 && outputDir.length > 0 && backupStatus.kind !== "running";
-  const canRestore = restorePassword.length > 0 && dumpPath.length > 0 && restoreStatus.kind !== "running";
+  const canBackup = outputDir.length > 0 && backupStatus.kind !== "running";
+  const canRestore = dumpPath.length > 0 && restoreStatus.kind !== "running";
 
   return (
     <div className="flex flex-col gap-8">
@@ -308,7 +300,6 @@ export function BackupSettings() {
           </p>
         </div>
 
-        <Field label="Senha do Postgres" type="password" value={backupPassword} onChange={setBackupPassword} />
         <Field
           label="Pasta de destino"
           value={outputDir}
@@ -346,17 +337,16 @@ export function BackupSettings() {
             Restaurar backup
           </h2>
           <p className="mt-1 text-sm text-ink-muted">
-            Substitui o conteúdo atual do banco pelo conteúdo do arquivo selecionado. Esta ação não pode ser
-            desfeita.
+            Substitui o conteúdo atual do banco pelo conteúdo do arquivo selecionado. O arquivo é verificado antes
+            da troca, e o banco atual fica copiado ao lado — mas a ação não pode ser desfeita pelo app.
           </p>
         </div>
 
-        <Field label="Senha do Postgres" type="password" value={restorePassword} onChange={setRestorePassword} />
         <Field
           label="Arquivo de backup"
           value={dumpPath}
           onChange={setDumpPath}
-          placeholder="Escolha um arquivo .dump"
+          placeholder="Escolha um arquivo .sqlite"
           action={{ label: "Escolher arquivo", onClick: () => void pickDumpFile() }}
         />
 

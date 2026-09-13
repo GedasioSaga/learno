@@ -35,10 +35,6 @@ const saveBackupScheduleConfigMock = vi.mocked(saveBackupScheduleConfig);
 const runDueScheduledBackupMock = vi.mocked(runDueScheduledBackup);
 const openMock = vi.mocked(open);
 
-// Ver o comentário equivalente em FirstRunWizard.test.tsx: valor de teste,
-// não segredo real, só escrito assim pra não parecer um literal de senha.
-const testPassword = ["fixture", "senha", "somente-teste"].join("-");
-
 const defaultScheduleConfig: BackupScheduleConfig = {
   enabled: false,
   cadence: "daily",
@@ -60,57 +56,58 @@ beforeEach(() => {
 });
 
 describe("BackupSettings", () => {
-  it("cria um backup depois de escolher a pasta e informar a senha", async () => {
+  it("cria um backup depois de escolher a pasta de destino", async () => {
     const user = userEvent.setup();
     openMock.mockResolvedValueOnce("C:/backups");
-    createBackupMock.mockResolvedValue("C:/backups/learno-backup-x.dump");
+    createBackupMock.mockResolvedValue("C:/backups/learno-backup-x.sqlite");
 
     render(<BackupSettings />);
 
-    await user.type(screen.getAllByLabelText("Senha do Postgres")[0], testPassword);
+    const createButton = screen.getByRole("button", { name: "Criar backup" });
+    expect(createButton).toBeDisabled();
+
     await user.click(screen.getByRole("button", { name: "Escolher pasta" }));
     expect(await screen.findByDisplayValue("C:/backups")).toBeInTheDocument();
-
-    const createButton = screen.getByRole("button", { name: "Criar backup" });
     expect(createButton).toBeEnabled();
+
     await user.click(createButton);
 
-    expect(createBackupMock).toHaveBeenCalledWith(testPassword, "C:/backups");
-    expect(await screen.findByText("Backup criado em C:/backups/learno-backup-x.dump")).toBeInTheDocument();
+    expect(createBackupMock).toHaveBeenCalledWith("C:/backups");
+    expect(await screen.findByText("Backup criado em C:/backups/learno-backup-x.sqlite")).toBeInTheDocument();
   });
 
   it("pede confirmação antes de restaurar e só chama restoreBackup depois de confirmado", async () => {
     const user = userEvent.setup();
-    openMock.mockResolvedValueOnce("C:/backups/learno-backup-x.dump");
+    openMock.mockResolvedValueOnce("C:/backups/learno-backup-x.sqlite");
     restoreBackupMock.mockResolvedValue(undefined);
 
     render(<BackupSettings />);
 
-    const passwordInputs = screen.getAllByLabelText("Senha do Postgres");
-    await user.type(passwordInputs[1], testPassword);
-    await user.click(screen.getByRole("button", { name: "Escolher arquivo" }));
-    await screen.findByDisplayValue("C:/backups/learno-backup-x.dump");
+    const restoreButton = screen.getByRole("button", { name: "Restaurar" });
+    expect(restoreButton).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Restaurar" }));
+    await user.click(screen.getByRole("button", { name: "Escolher arquivo" }));
+    await screen.findByDisplayValue("C:/backups/learno-backup-x.sqlite");
+    expect(restoreButton).toBeEnabled();
+
+    await user.click(restoreButton);
     expect(restoreBackupMock).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sim, restaurar" }));
 
-    expect(restoreBackupMock).toHaveBeenCalledWith(testPassword, "C:/backups/learno-backup-x.dump");
+    expect(restoreBackupMock).toHaveBeenCalledWith("C:/backups/learno-backup-x.sqlite");
     expect(await screen.findByText("Backup restaurado com sucesso.")).toBeInTheDocument();
   });
 
   it("cancelar a confirmação de restauração não chama restoreBackup", async () => {
     const user = userEvent.setup();
-    openMock.mockResolvedValueOnce("C:/backups/learno-backup-x.dump");
+    openMock.mockResolvedValueOnce("C:/backups/learno-backup-x.sqlite");
 
     render(<BackupSettings />);
 
-    const passwordInputs = screen.getAllByLabelText("Senha do Postgres");
-    await user.type(passwordInputs[1], testPassword);
     await user.click(screen.getByRole("button", { name: "Escolher arquivo" }));
-    await screen.findByDisplayValue("C:/backups/learno-backup-x.dump");
+    await screen.findByDisplayValue("C:/backups/learno-backup-x.sqlite");
 
     await user.click(screen.getByRole("button", { name: "Restaurar" }));
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
@@ -122,18 +119,16 @@ describe("BackupSettings", () => {
   it("mostra o erro do backend quando a criação do backup falha", async () => {
     const user = userEvent.setup();
     openMock.mockResolvedValueOnce("C:/backups");
-    createBackupMock.mockRejectedValue(new Error("pg_dump saiu com código de erro: 1"));
+    createBackupMock.mockRejectedValue(new Error("disco cheio"));
 
     render(<BackupSettings />);
 
-    const passwordInputs = screen.getAllByLabelText("Senha do Postgres");
-    await user.type(passwordInputs[0], testPassword);
     await user.click(screen.getByRole("button", { name: "Escolher pasta" }));
     await screen.findByDisplayValue("C:/backups");
 
     await user.click(screen.getByRole("button", { name: "Criar backup" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("pg_dump saiu com código de erro: 1");
+    expect(await screen.findByRole("alert")).toHaveTextContent("disco cheio");
   });
 
   describe("backup automático (PLT-013)", () => {
@@ -155,18 +150,16 @@ describe("BackupSettings", () => {
 
     it("checa o backup automático agora e mostra o caminho quando um backup roda", async () => {
       const user = userEvent.setup();
-      runDueScheduledBackupMock.mockResolvedValue("C:/backups/learno-backup-scheduled.dump");
+      runDueScheduledBackupMock.mockResolvedValue("C:/backups/learno-backup-scheduled.sqlite");
 
       render(<BackupSettings />);
       await screen.findByLabelText("Fazer backup automático periodicamente");
 
-      const passwordInputs = screen.getAllByLabelText("Senha do Postgres");
-      await user.type(passwordInputs[passwordInputs.length - 1], testPassword);
       await user.click(screen.getByRole("button", { name: "Checar backup automático agora" }));
 
-      expect(runDueScheduledBackupMock).toHaveBeenCalledWith(testPassword);
+      expect(runDueScheduledBackupMock).toHaveBeenCalledWith();
       expect(
-        await screen.findByText("Backup automático criado em C:/backups/learno-backup-scheduled.dump"),
+        await screen.findByText("Backup automático criado em C:/backups/learno-backup-scheduled.sqlite"),
       ).toBeInTheDocument();
     });
 
@@ -177,8 +170,6 @@ describe("BackupSettings", () => {
       render(<BackupSettings />);
       await screen.findByLabelText("Fazer backup automático periodicamente");
 
-      const passwordInputs = screen.getAllByLabelText("Senha do Postgres");
-      await user.type(passwordInputs[passwordInputs.length - 1], testPassword);
       await user.click(screen.getByRole("button", { name: "Checar backup automático agora" }));
 
       expect(await screen.findByText("Ainda não é hora do próximo backup automático.")).toBeInTheDocument();

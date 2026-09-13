@@ -20,21 +20,10 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 const importApkgMock = vi.mocked(importApkg);
 const openMock = vi.mocked(open);
 
-// Placeholder de teste — nunca uma credencial real, só o que
-// `ImportApkgSection` manda de volta como `password` para `importApkg`.
-const FAKE_INPUT_FOR_TEST = "x7k9-test-only";
-
 beforeEach(() => {
   importApkgMock.mockReset();
   openMock.mockReset();
 });
-
-// PLT-013: o botão de import fica desabilitado até algo ser digitado no
-// campo de senha — o backend precisa dele para o backup pré-import (ver
-// `canImport` no componente).
-async function fillField(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Senha do Postgres"), FAKE_INPUT_FOR_TEST);
-}
 
 describe("ImportApkgSection", () => {
   it("abre o diálogo de arquivo filtrado por .apkg e importa o caminho escolhido", async () => {
@@ -43,16 +32,12 @@ describe("ImportApkgSection", () => {
     importApkgMock.mockResolvedValue({ notes_imported: 0 });
 
     render(<ImportApkgSection />);
-    await fillField(user);
     await user.click(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" }));
 
     expect(openMock).toHaveBeenCalledWith(
       expect.objectContaining({ filters: [{ name: "Baralho do Anki", extensions: ["apkg"] }] }),
     );
-    expect(importApkgMock).toHaveBeenCalledWith(
-      "C:\\Users\\estudante\\Desktop\\baralho-historia.apkg",
-      FAKE_INPUT_FOR_TEST,
-    );
+    expect(importApkgMock).toHaveBeenCalledWith("C:\\Users\\estudante\\Desktop\\baralho-historia.apkg");
     expect(
       await screen.findByText('"baralho-historia.apkg": 0 nota(s) importada(s).'),
     ).toBeInTheDocument();
@@ -63,19 +48,9 @@ describe("ImportApkgSection", () => {
     openMock.mockResolvedValue(null);
 
     render(<ImportApkgSection />);
-    await fillField(user);
     await user.click(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" }));
 
     expect(importApkgMock).not.toHaveBeenCalled();
-  });
-
-  // PLT-013: sem nada digitado ali, o backend não teria como fazer o backup
-  // antes do import — o botão precisa continuar desabilitado.
-  it("mantém o botão de import desabilitado enquanto o campo de senha está vazio", () => {
-    render(<ImportApkgSection />);
-
-    expect(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" })).toBeDisabled();
-    expect(openMock).not.toHaveBeenCalled();
   });
 
   it("mostra o erro tipado do backend quando o sidecar rejeita o arquivo", async () => {
@@ -84,27 +59,25 @@ describe("ImportApkgSection", () => {
     importApkgMock.mockRejectedValue(new Error("[apkg_invalido] não é um pacote .apkg válido"));
 
     render(<ImportApkgSection />);
-    await fillField(user);
     await user.click(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("não é um pacote .apkg válido");
   });
 
   // PLT-013: também cobre o erro que o backup pré-import em si pode
-  // produzir (pg_dump ausente, disco cheio) — o sidecar nem chega a ser
-  // chamado nesse caso.
+  // produzir (disco cheio, permissão negada na pasta) — o sidecar nem chega
+  // a ser chamado nesse caso.
   it("mostra o erro quando o backup pré-import falha e nunca chega a chamar o sidecar", async () => {
     const user = userEvent.setup();
     openMock.mockResolvedValue("C:\\baralho.apkg");
     importApkgMock.mockRejectedValue(
-      new Error("pg_dump não encontrado no PATH — instale as ferramentas de cliente do Postgres"),
+      new Error("disco cheio — não foi possível gravar a cópia de segurança antes do import"),
     );
 
     render(<ImportApkgSection />);
-    await fillField(user);
     await user.click(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("pg_dump não encontrado no PATH");
+    expect(await screen.findByRole("alert")).toHaveTextContent("disco cheio");
   });
 
   // Prova o critério de aceite de PLT-004 na UI: enquanto o sidecar ainda
@@ -128,7 +101,6 @@ describe("ImportApkgSection", () => {
       </div>,
     );
 
-    await fillField(user);
     await user.click(screen.getByRole("button", { name: "Importar baralho do Anki (.apkg)" }));
 
     // Ainda em andamento: o botão de import virou o rótulo de progresso...

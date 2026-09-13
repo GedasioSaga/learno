@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { useNavegacaoStore } from "./features/navegacao/store";
 import { usePageTreeStore } from "./features/pages/store";
+import { useTrilhaStore } from "./features/trilha/store";
 import {
   autosaveClearPending,
   autosaveListRecoverable,
   autosaveMergeWithSaved,
   autosaveWritePending,
-  connectDatabase,
-  getAppConfig,
   getPageBreadcrumb,
   listPageTree,
   listPageVersions,
+  openWorkspace,
   renamePage,
-  testDatabaseConnection,
   type AutosaveJournalEntry,
   type PageRow,
 } from "./lib/ipc";
@@ -24,9 +24,7 @@ vi.mock("./lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./lib/ipc")>();
   return {
     ...actual,
-    getAppConfig: vi.fn(),
-    testDatabaseConnection: vi.fn(),
-    connectDatabase: vi.fn(),
+    openWorkspace: vi.fn(),
     listPageTree: vi.fn(),
     getPageBreadcrumb: vi.fn(),
     listPageVersions: vi.fn(),
@@ -45,9 +43,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
-const getAppConfigMock = vi.mocked(getAppConfig);
-const testDatabaseConnectionMock = vi.mocked(testDatabaseConnection);
-const connectDatabaseMock = vi.mocked(connectDatabase);
+const openWorkspaceMock = vi.mocked(openWorkspace);
 const listPageTreeMock = vi.mocked(listPageTree);
 const getPageBreadcrumbMock = vi.mocked(getPageBreadcrumb);
 const listPageVersionsMock = vi.mocked(listPageVersions);
@@ -57,89 +53,79 @@ const autosaveClearPendingMock = vi.mocked(autosaveClearPending);
 const autosaveListRecoverableMock = vi.mocked(autosaveListRecoverable);
 const autosaveMergeWithSavedMock = vi.mocked(autosaveMergeWithSaved);
 
-const savedConfig = {
-  host: "localhost",
-  port: 5432,
-  database: "learno",
-  user: "postgres",
-};
-
-// Mesmo padrão de `FirstRunWizard.test.tsx`: nunca um literal `password:
-// "..."` inline, pra não acionar varredura de segredo por engano.
-const testFormPassword = ["fixture", "senha", "reconexao"].join("-");
+// Depois da migração para SQLite, `AppConfig` só guarda a pasta de trabalho —
+// não há mais host/porta/usuário/senha a espelhar aqui.
+const savedConfig = { data_dir: "C:\\Users\\fixture\\AppData\\Roaming\\Learno" };
 
 beforeEach(() => {
-  getAppConfigMock.mockReset();
-  testDatabaseConnectionMock.mockReset();
-  connectDatabaseMock.mockReset();
+  openWorkspaceMock.mockReset();
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
-  useThemeStore.setState({ preference: "system", effective: "light" });
+  useThemeStore.setState({ preferencia: "papel", temaEfetivo: "papel", ultimoEscuro: "ambar-noturno" });
+  useNavegacaoStore.setState({ secaoAtiva: "notas", painelRecolhido: false, ultimaTrocaPor: null });
+  // Sem isto, uma Trilha "criada" (ponteiro em localStorage) ou um erro de um
+  // teste anterior sobreviveria para o próximo `it` — o store do zustand é um
+  // módulo, não algo que `render(<App/>)` recria a cada teste.
+  useTrilhaStore.setState({ status: "carregando", viewId: null, trilha: null, errorMessage: null });
 });
 
 describe("App", () => {
-  it("mostra o assistente de primeira execução quando não há configuração salva", async () => {
-    getAppConfigMock.mockResolvedValue(null);
+  it("mostra a tela de carregamento enquanto o workspace ainda está abrindo", async () => {
+    // Uma promise que nunca resolve dentro do teste mantém o app parado em
+    // "loading" — é exatamente esse estado intermediário que este teste prova.
+    openWorkspaceMock.mockReturnValue(new Promise(() => {}));
 
     render(<App />);
 
-    expect(
-      await screen.findByRole("heading", { name: "Conectar ao Postgres" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Carregando…")).toBeInTheDocument();
   });
 
-  it("PLT-002: mostra a tela de reconexão (nunca direto a casca) quando já existe configuração salva mas a sessão ainda não conectou", async () => {
-    // A senha nunca é persistida: ter `AppConfig` salvo não significa ter
-    // pool nenhum nesta execução do processo. Antes da correção, este mesmo
-    // cenário ia direto para `Workspace` sem jamais chamar `connectDatabase`
-    // — todo comando de página falharia em silêncio assim que o usuário
-    // tentasse usá-lo. Ver `src-tauri/src/ipc/state.rs`.
-    getAppConfigMock.mockResolvedValue(savedConfig);
+  it("libera a casca do app assim que o workspace abre", async () => {
+    openWorkspaceMock.mockResolvedValue(savedConfig);
 
     render(<App />);
 
-    expect(
-      await screen.findByRole("heading", { name: "Conectar ao Postgres" }),
-    ).toBeInTheDocument();
-    // Host/porta/banco/usuário já vêm preenchidos da config salva — só a
-    // senha falta.
-    expect(screen.getByLabelText("Host")).toHaveValue(savedConfig.host);
-    expect(screen.getByLabelText("Senha")).toHaveValue("");
-    // A pasta de dados já foi coletada na primeira execução — não pergunta de novo.
-    expect(screen.queryByLabelText("Pasta de dados (opcional)")).not.toBeInTheDocument();
-    expect(connectDatabaseMock).not.toHaveBeenCalled();
-  });
-
-  it("PLT-002: libera a casca do app depois que a reconexão (senha digitada de novo) funciona", async () => {
-    const user = userEvent.setup();
-    getAppConfigMock.mockResolvedValue(savedConfig);
-    testDatabaseConnectionMock.mockResolvedValue(undefined);
-    connectDatabaseMock.mockResolvedValue(savedConfig);
-
-    render(<App />);
-
-    await user.type(await screen.findByLabelText("Senha"), testFormPassword);
-    await user.click(screen.getByRole("button", { name: "Testar conexão" }));
-    await screen.findByText("Conexão bem-sucedida.");
-    await user.click(screen.getByRole("button", { name: "Continuar" }));
-
-    expect(connectDatabaseMock).toHaveBeenCalledWith({
-      host: savedConfig.host,
-      port: savedConfig.port,
-      database: savedConfig.database,
-      user: savedConfig.user,
-      password: testFormPassword,
-    });
     expect(await screen.findByText("Bem-vindo ao Learno")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Páginas" })).toBeInTheDocument();
+    expect(openWorkspaceMock).toHaveBeenCalledWith();
   });
 
-  it("mostra um erro claro quando a configuração salva não pôde ser lida", async () => {
-    getAppConfigMock.mockRejectedValue(new Error("armazenamento local corrompido"));
+  it("mostra um erro claro quando o banco de dados não pôde ser aberto", async () => {
+    openWorkspaceMock.mockRejectedValue(new Error("disco cheio"));
 
     render(<App />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("armazenamento local corrompido");
+    expect(await screen.findByRole("alert")).toHaveTextContent("disco cheio");
+  });
+
+  it("o rail tem as sete seções, na ordem certa, e trocar de seção troca o conteúdo", async () => {
+    openWorkspaceMock.mockResolvedValue(savedConfig);
+    listPageTreeMock.mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText("Bem-vindo ao Learno");
+
+    const rail = screen.getByRole("navigation", { name: "Seções" });
+    expect(
+      within(rail)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Hoje", "Notas", "Cartões", "Mapa mental", "Trilha", "Cronograma", "Biblioteca"]);
+    expect(within(rail).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
+
+    // Trilha é a seção mais nova das sete (ver `features/trilha/`) — sem
+    // ponteiro de Trilha salvo (o `localStorage.clear()` do `beforeEach`
+    // cuida disso), o convite de criar aparece sem chamada de IPC nenhuma.
+    await user.click(within(rail).getByRole("button", { name: "Trilha" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Nenhuma trilha ainda" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Criar minha primeira trilha" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Páginas" })).not.toBeInTheDocument();
+
+    // Voltar a Notas devolve a árvore, sem recarregar nada.
+    await user.click(within(rail).getByRole("button", { name: "Notas" }));
+    expect(screen.getByRole("navigation", { name: "Páginas" })).toBeInTheDocument();
   });
 });
 
@@ -175,9 +161,7 @@ describe("PLT-005: o rascunho de uma edição não confirmada sobrevive a uma qu
   beforeEach(() => {
     journalDisk = null;
 
-    getAppConfigMock.mockReset().mockResolvedValue(savedConfig);
-    testDatabaseConnectionMock.mockReset().mockResolvedValue(undefined);
-    connectDatabaseMock.mockReset().mockResolvedValue(savedConfig);
+    openWorkspaceMock.mockReset().mockResolvedValue(savedConfig);
     listPageTreeMock.mockReset().mockResolvedValue([pageRow(originalTitle)]);
     getPageBreadcrumbMock.mockReset().mockResolvedValue([pageRow(originalTitle)]);
     listPageVersionsMock.mockReset().mockResolvedValue([]);
@@ -196,28 +180,24 @@ describe("PLT-005: o rascunho de uma edição não confirmada sobrevive a uma qu
     autosaveMergeWithSavedMock.mockReset().mockImplementation(async (entry) => entry);
   });
 
-  async function connectThroughReconnectScreen(user: ReturnType<typeof userEvent.setup>) {
-    await user.type(await screen.findByLabelText("Senha"), testFormPassword);
-    await user.click(screen.getByRole("button", { name: "Testar conexão" }));
-    await screen.findByText("Conexão bem-sucedida.");
-    await user.click(screen.getByRole("button", { name: "Continuar" }));
-  }
-
   it("edição no título sem confirmar, queda do processo, reabertura: o conteúdo volta sozinho", async () => {
     const user = userEvent.setup();
 
     // --- Session 1: the user edits the title and the process dies before
     // the blur (and therefore `renamePage`) ever happens. ---
     const { unmount } = render(<App />);
-    await connectThroughReconnectScreen(user);
 
     // Not `getByRole("treeitem", { name })`: the treeitem's accessible name
     // concatenates the neighboring buttons' `aria-label`s (icon, "Add
     // subpage to..."), so it's never just the bare title (same reason
     // `PageTree.test.tsx` uses a regex instead of an exact string on that
     // role). The title button itself has only the bare text — `getByText`
-    // isolates it without that ambiguity.
-    await user.click(await screen.findByText(originalTitle));
+    // isolates it without that ambiguity. Scoped to the page tree because
+    // "Cronograma" is also the label of a section in the rail — an unscoped
+    // `findByText` resolves on the rail (rendered synchronously) before the
+    // tree finishes loading, and clicks the wrong thing.
+    const arvore = await screen.findByRole("navigation", { name: "Páginas" });
+    await user.click(await within(arvore).findByText(originalTitle));
 
     const titleField = await screen.findByLabelText("Título da página");
     expect(titleField).toHaveValue(originalTitle);
@@ -248,10 +228,10 @@ describe("PLT-005: o rascunho de uma edição não confirmada sobrevive a uma qu
     renamePageMock.mockResolvedValue(pageRow(draftedTitle));
 
     render(<App />);
-    await connectThroughReconnectScreen(user);
 
-    // Postgres never got the edit — the tree still shows the old title.
-    expect(await screen.findByText(originalTitle)).toBeInTheDocument();
+    // The database never got the edit — the tree still shows the old title.
+    const arvoreReaberta = await screen.findByRole("navigation", { name: "Páginas" });
+    expect(await within(arvoreReaberta).findByText(originalTitle)).toBeInTheDocument();
 
     // The banner shows up on its own (no click caused this), displaying
     // exactly what was typed before the crash, not a fixed test value.

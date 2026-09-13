@@ -56,7 +56,7 @@ const CORE_SPECS: BlockSpec[] = [
     serialization: {
       attrs: (blockType) => {
         const level = Number(blockType.slice("heading_".length));
-        return { level: Number.isFinite(level) && level >= 1 && level <= 3 ? level : 1 };
+        return { level: Number.isFinite(level) && level >= 1 && level <= 4 ? level : 1 };
       },
       blockType: (attrs) => `heading_${Number(attrs.level) || 1}`,
       content: (attrs, nodeContent) => ({ level: Number(attrs.level) || 1, inline: nodeContent }),
@@ -94,7 +94,7 @@ registerSlashMenuItem([
     order: 0,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.paragraph),
   },
-  ...[1, 2, 3].map((level) => ({
+  ...[1, 2, 3, 4].map((level) => ({
     id: `core:heading_${level}`,
     title: `Título ${level}`,
     keywords: ["titulo", "heading", `h${level}`, "cabecalho"],
@@ -110,7 +110,7 @@ registerSlashMenuItem([
     keywords: ["lista", "marcador", "bullet", "list"],
     group: BASIC,
     icon: "•",
-    order: 4,
+    order: 5,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.bulletedListItem),
   },
   {
@@ -119,7 +119,7 @@ registerSlashMenuItem([
     keywords: ["lista", "numerada", "numbered", "ordered"],
     group: BASIC,
     icon: "1.",
-    order: 5,
+    order: 6,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.numberedListItem),
   },
   {
@@ -128,7 +128,7 @@ registerSlashMenuItem([
     keywords: ["tarefa", "todo", "checkbox", "checklist"],
     group: BASIC,
     icon: "☑",
-    order: 6,
+    order: 7,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.todoItem, { checked: false }),
   },
   {
@@ -137,7 +137,7 @@ registerSlashMenuItem([
     keywords: ["toggle", "alternavel", "colapsavel", "recolher"],
     group: BASIC,
     icon: "▸",
-    order: 7,
+    order: 8,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.toggle, { collapsed: false }),
   },
   {
@@ -146,7 +146,7 @@ registerSlashMenuItem([
     keywords: ["citacao", "quote", "blockquote"],
     group: BASIC,
     icon: "❝",
-    order: 8,
+    order: 9,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.quote),
   },
   {
@@ -155,7 +155,7 @@ registerSlashMenuItem([
     keywords: ["destaque", "callout", "aviso", "nota"],
     group: BASIC,
     icon: "💡",
-    order: 9,
+    order: 10,
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.callout, { emoji: "💡" }),
   },
   {
@@ -164,7 +164,7 @@ registerSlashMenuItem([
     keywords: ["divisor", "divider", "linha", "separador"],
     group: BASIC,
     icon: "—",
-    order: 10,
+    order: 11,
     // A divider holds no text, so it never *converts* a block with content -
     // `insertBlockHere` puts it below instead, which is what the user means.
     run: (editor) => insertBlockHere(editor, NODE_NAMES.divider),
@@ -180,7 +180,7 @@ registerTurnIntoItem([
     run: (editor) => turnCurrentBlockInto(editor, NODE_NAMES.paragraph),
     isActive: (editor) => editor.state.selection.$from.parent.type.name === NODE_NAMES.paragraph,
   },
-  ...[1, 2, 3].map((level) => ({
+  ...[1, 2, 3, 4].map((level) => ({
     id: `core:turn:heading_${level}`,
     title: `Título ${level}`,
     group: BASIC,
@@ -205,7 +205,7 @@ registerTurnIntoItem([
     id: `core:turn:${key}`,
     title,
     group: BASIC,
-    order: 4 + index,
+    order: 5 + index,
     run: (editor: Parameters<typeof turnCurrentBlockInto>[0]) =>
       turnCurrentBlockInto(editor, nodeName, { ...attrs }),
     isActive: (editor: Parameters<typeof turnCurrentBlockInto>[0]) =>

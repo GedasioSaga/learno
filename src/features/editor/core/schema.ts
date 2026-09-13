@@ -110,7 +110,7 @@ export const Heading = Node.create({
     return { ...idAttribute, level: { default: 1 } };
   },
   parseHTML() {
-    return [1, 2, 3].map((level) => ({
+    return [1, 2, 3, 4].map((level) => ({
       tag: `div[data-block-type="${NODE_NAMES.heading}"][data-level="${level}"]`,
       attrs: { level },
     }));
@@ -130,7 +130,12 @@ export const Heading = Node.create({
     ];
   },
   addInputRules() {
-    return [1, 2, 3].map((level) =>
+    // Os quatro níveis, iguais ao `parseHTML` logo acima. O nível 4 chegou
+    // depois e esta lista ficou em três: o Título 4 existia no menu de barra,
+    // no "Transformar em" e na persistência, e só o atalho de markdown —
+    // digitar `#### ` — não o alcançava. Manter as duas listas com os mesmos
+    // níveis é o invariante.
+    return [1, 2, 3, 4].map((level) =>
       blockShortcutRule({
         find: new RegExp(`^#{${level}}\\s$`),
         type: () => this.type,

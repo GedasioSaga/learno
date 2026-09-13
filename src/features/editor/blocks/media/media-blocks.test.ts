@@ -13,7 +13,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Slice } from "@tiptap/pm/model";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Block } from "../../contract";
-import { collectSlashMenuItems } from "../../core/block-spec";
+import { collectSlashMenuItems, collectTurnIntoItems } from "../../core/block-spec";
 import { buildEditorExtensions } from "../../core/extensions";
 import { blocksToDoc, docToFlatBlocks } from "../../core/serialize";
 import { clampImageWidth, IMAGE_MAX_WIDTH_PERCENT, IMAGE_MIN_WIDTH_PERCENT } from "./media-nodes";
@@ -63,6 +63,12 @@ function firstNodeOfType(typeName: string): { pos: number; node: PMNode } | null
 function slashItem(id: string) {
   const item = collectSlashMenuItems().find((entry) => entry.id === id);
   if (!item) throw new Error(`item de menu "${id}" não registrado`);
+  return item;
+}
+
+function turnIntoItem(id: string) {
+  const item = collectTurnIntoItems().find((entry) => entry.id === id);
+  if (!item) throw new Error(`item de "Transformar em" "${id}" não registrado`);
   return item;
 }
 
@@ -317,5 +323,33 @@ describe("Validação de arquivo (EDT-024/025/026/027): tipo MIME e teto de tama
     expect(after?.node.attrs.uploadToken).toBeNull();
     expect(after?.node.attrs.fileName).toBe("aula.mp4");
     expect(String(after?.node.attrs.src)).not.toBe("");
+  });
+});
+
+describe('"Transformar em" > Imagem', () => {
+  it("num bloco vazio, converte no lugar - o documento resultante tem o nó image", () => {
+    editor = createEditor();
+    editor.commands.setTextSelection(startOfBlock("p1"));
+
+    expect(turnIntoItem("blocks-media:turn:image").run(editor)).toBe(true);
+
+    expect(firstNodeOfType("image")).not.toBeNull();
+    // Converteu no lugar - não sobrou um segundo bloco.
+    expect(editor.getJSON().content).toHaveLength(1);
+  });
+
+  it("num bloco com texto, o texto sobrevive (a imagem entra como próximo irmão, não substitui)", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Legenda" }] }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("p1") + 1);
+
+    expect(turnIntoItem("blocks-media:turn:image").run(editor)).toBe(true);
+
+    const doc = editor.getJSON();
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content?.[0]?.content?.[0]).toMatchObject({ type: "paragraph", content: [{ text: "Legenda" }] });
+    expect(firstNodeOfType("image")).not.toBeNull();
   });
 });

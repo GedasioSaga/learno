@@ -3,23 +3,22 @@
 //!
 //! This is deliberately layered like the rest of `backup`: the decisions
 //! ("is a backup due right now?", "which old backups should be deleted?")
-//! are pure functions below, each provable without touching disk or
-//! Postgres; the only I/O is [`ScheduleManifest`], a small JSON file under
+//! are pure functions below, each provable without touching disk or the
+//! database; the only I/O is [`ScheduleManifest`], a small JSON file under
 //! the app's data directory that remembers which files this scheduler
 //! created and why — never the manual backups from PLT-011's `create_backup`,
 //! which PLT-013's acceptance criterion keeps explicitly distinct ("distinto
 //! do backup manual sob comando explícito").
 //!
-//! What this module does not do, and why: run itself unattended with no one
-//! at the keyboard. `dump::run_backup` needs a live Postgres password, and
-//! this codebase's config never persists one (`config::AppConfig` has no
-//! password field, by design — see its module doc). So every function here
-//! that actually spawns `pg_dump` still takes a `password` argument from a
-//! caller that has one in memory; what this module adds is the *decision*
-//! of whether that call should happen at all (`is_due`) and what to do with
-//! the backups it accumulates (`select_prune_candidates`), so the caller
-//! never has to reimplement either. See `ipc::backup_commands` for how the
-//! two IPC commands built on top of this wire a password in.
+//! A migração para SQLite (05/09/2026) removeu a restrição que este módulo
+//! documentava aqui: um backup precisava de senha, então nada podia rodar
+//! sem alguém ao teclado. Com `VACUUM INTO` o backup só precisa do pool que
+//! o app já tem aberto, e [`trigger_risky_operation_backup`] passou a
+//! receber `&SqlitePool` em vez de config mais senha. O agendamento
+//! automático de fato (PLT-013 rodando sozinho) continua sendo trabalho de
+//! quem chama; o que este módulo dá é a *decisão* de se a chamada deve
+//! acontecer (`is_due`) e o que fazer com os backups acumulados
+//! (`select_prune_candidates`).
 
 use std::collections::HashSet;
 use std::fs;
@@ -27,9 +26,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 use super::dump;
-use crate::config::AppConfig;
 use crate::error::{Error, Result};
 
 /// Key, inside `config::STORE_FILE`, where the serialized [`ScheduleConfig`] lives.
@@ -164,8 +163,8 @@ fn prune_bucket(mut records: Vec<ScheduledBackupRecord>, keep: u32) -> Vec<Sched
     records.split_off(keep)
 }
 
-/// PLT-013's actual risky-operation trigger: runs a real `pg_dump` against
-/// `config`/`password` into `backup_dir`, then records it in the manifest at
+/// PLT-013's actual risky-operation trigger: runs a real `VACUUM INTO`
+/// through `pool` into `backup_dir`, then records it in the manifest at
 /// `manifest_path` under its own `keep_risky_operation` retention bucket —
 /// the single choke point every risky-operation caller should go through
 /// instead of calling `dump::run_backup` directly and losing PLT-013's
@@ -186,14 +185,13 @@ fn prune_bucket(mut records: Vec<ScheduledBackupRecord>, keep: u32) -> Vec<Sched
 /// a caller that just propagates the error (as every current caller does)
 /// cannot go on to run the risky operation while believing it is protected.
 pub async fn trigger_risky_operation_backup(
-    config: &AppConfig,
-    password: &str,
+    pool: &SqlitePool,
     backup_dir: &Path,
     manifest_path: &Path,
     schedule_config: &ScheduleConfig,
     operation: &str,
 ) -> Result<PathBuf> {
-    let path = dump::run_backup(config, password, backup_dir).await?;
+    let path = dump::run_backup(pool, backup_dir).await?;
 
     let manifest = ScheduleManifest::new(manifest_path);
     manifest.record(ScheduledBackupRecord {
@@ -391,30 +389,30 @@ mod tests {
         assert!(ScheduleConfig { keep_risky_operation: 0, ..ScheduleConfig::default() }.validate().is_err());
     }
 
-    // A real `pg_dump` run needs a live Postgres (covered by the `#[ignore]`d
-    // integration test in `tests/backup_dump.rs` and by `db::pool`'s own
-    // `live_database` tests); what belongs here, with no database at all, is
-    // proving the failure contract: when the underlying backup fails, this
-    // function must return `Err` and must not touch the manifest — the
-    // "never let the caller think it's protected" half of the requirement.
+    // O contrato de falha, que é o que pertence a este arquivo: quando o
+    // backup por baixo falha, esta função devolve `Err` e NÃO toca o
+    // manifesto — a metade "nunca deixe quem chamou achar que está
+    // protegido" do requisito. O sucesso do `VACUUM INTO` em si é provado em
+    // `backup::dump`, contra um banco de verdade.
     #[tokio::test]
     async fn trigger_risky_operation_backup_reports_the_backup_failure_and_leaves_the_manifest_untouched() {
         let manifest_scratch = ScratchFile::new("trigger-failure");
+        let db_path = std::env::temp_dir().join(format!("learno-trigger-db-{}.sqlite", Uuid::new_v4()));
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path).create_if_missing(true),
+            )
+            .await
+            .unwrap();
+
+        // Um ARQUIVO onde o backup espera uma pasta: `create_dir_all` falha
+        // sem ambiguidade nos dois sistemas operacionais, então a falha é do
+        // backup mesmo e não de um estado acidental da máquina.
         let backup_dir = std::env::temp_dir().join(format!("learno-trigger-backup-test-{}", Uuid::new_v4()));
-        // A port nothing listens on, deliberately not 5432/5433 — this must
-        // fail on its own merits (connection refused) without depending on,
-        // or touching, whatever real Postgres happens to be reachable on
-        // this machine.
-        let config = AppConfig {
-            host: "127.0.0.1".into(),
-            port: 59999,
-            database: "learno_nao_existe".into(),
-            user: "postgres".into(),
-        };
+        fs::write(&backup_dir, b"nao sou uma pasta").unwrap();
 
         let result = trigger_risky_operation_backup(
-            &config,
-            "unused",
+            &pool,
             &backup_dir,
             &manifest_scratch.0,
             &ScheduleConfig::default(),
@@ -422,14 +420,12 @@ mod tests {
         )
         .await;
 
-        // `pg_dump` either isn't on this machine's PATH or has nothing to
-        // connect to at `localhost:5432` under this made-up config — either
-        // way it must fail, and this asserts the manifest never sees a
-        // record for a backup that didn't actually happen.
-        assert!(result.is_err(), "expected the backup itself to fail with no real Postgres to dump");
-        assert!(!manifest_scratch.0.exists(), "a failed backup must not write a manifest record");
+        assert!(result.is_err(), "esperava a falha do próprio backup");
+        assert!(!manifest_scratch.0.exists(), "um backup que falhou não pode escrever registro no manifesto");
 
-        let _ = fs::remove_dir_all(&backup_dir);
+        pool.close().await;
+        let _ = fs::remove_file(&backup_dir);
+        let _ = fs::remove_file(&db_path);
     }
 
     #[test]

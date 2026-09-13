@@ -14,6 +14,7 @@ import { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Block } from "../../contract";
+import { collectSlashMenuItems, collectTurnIntoItems } from "../../core/block-spec";
 import { buildEditorExtensions } from "../../core/extensions";
 import { blocksToDoc, docToFlatBlocks } from "../../core/serialize";
 import "./register";
@@ -208,6 +209,87 @@ describe("wrapCurrentBlockInColumns (EDT-033, caminho sem mouse)", () => {
     editor.commands.keyboardShortcut("Mod-Alt-2");
 
     expect(contentOf(json().content![0]).type).toBe("columnList");
+  });
+
+  it("EDT-033/item 4: aceita N colunas - wrapCurrentBlockInColumns(editor, 3) cria três, não duas", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [
+        { type: "block", content: [{ type: "paragraph", attrs: { id: "a" }, content: [{ type: "text", text: "Olá" }] }] },
+      ],
+    });
+    editor.commands.setTextSelection(startOfBlock("a") + 1);
+
+    expect(wrapCurrentBlockInColumns(editor, 3)).toBe(true);
+
+    const columnListWrapper = json().content![0];
+    expect(contentOf(columnListWrapper).type).toBe("columnList");
+    const columns = childrenOf(columnListWrapper);
+    expect(columns).toHaveLength(3);
+    // A original ("a", com seu texto) é sempre a primeira coluna - conteúdo
+    // nunca some ao envolver.
+    expect(contentOf(childrenOf(columns[0])[0])).toMatchObject({ attrs: { id: "a" }, content: [{ text: "Olá" }] });
+    // As outras duas nascem parágrafos vazios, com ids novos e distintos.
+    const otherIds = [1, 2].map((i) => contentOf(childrenOf(columns[i])[0]).attrs?.id);
+    expect(new Set(otherIds).size).toBe(2);
+    expect(otherIds).not.toContain("a");
+    // Largura dividida em partes iguais entre as três (não 0.5 fixo, que só faz sentido para duas).
+    for (const column of columns) {
+      expect(contentOf(column).attrs?.width).toBeCloseTo(1 / 3);
+    }
+  });
+
+  it("recusa columnCount menor que 2 sem tocar a transação", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "a" } }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("a") + 1);
+
+    expect(wrapCurrentBlockInColumns(editor, 1)).toBe(false);
+    expect(contentOf(json().content![0]).type).toBe("paragraph"); // doc intacto
+  });
+});
+
+describe('"Transformar em" > Duas colunas / Três colunas', () => {
+  it("os dois itens estão registrados no menu \"/\" e em \"Transformar em\"", () => {
+    expect(collectSlashMenuItems().find((i) => i.id === "blocks:columns:three")).toMatchObject({ title: "Três colunas" });
+    expect(collectTurnIntoItems().find((i) => i.id === "blocks:turn:columns:two")).toMatchObject({ title: "Duas colunas" });
+    expect(collectTurnIntoItems().find((i) => i.id === "blocks:turn:columns:three")).toMatchObject({ title: "Três colunas" });
+  });
+
+  it("\"Transformar em\" > \"Duas colunas\" aplicado a um parágrafo com texto - o documento resultante tem columnList e o texto sobrevive", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "a" }, content: [{ type: "text", text: "Conteúdo" }] }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("a") + 1);
+    const item = collectTurnIntoItems().find((i) => i.id === "blocks:turn:columns:two");
+    if (!item) throw new Error('item "blocks:turn:columns:two" não registrado');
+
+    expect(item.run(editor)).toBe(true);
+
+    const columnListWrapper = json().content![0];
+    expect(contentOf(columnListWrapper).type).toBe("columnList");
+    const columns = childrenOf(columnListWrapper);
+    expect(columns).toHaveLength(2);
+    expect(contentOf(childrenOf(columns[0])[0])).toMatchObject({ attrs: { id: "a" }, content: [{ text: "Conteúdo" }] });
+  });
+
+  it("\"Transformar em\" > \"Três colunas\" aplicado a um parágrafo vazio - o documento resultante tem columnList com três colunas", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "a" } }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("a") + 1);
+    const item = collectTurnIntoItems().find((i) => i.id === "blocks:turn:columns:three");
+    if (!item) throw new Error('item "blocks:turn:columns:three" não registrado');
+
+    expect(item.run(editor)).toBe(true);
+
+    const columnListWrapper = json().content![0];
+    expect(contentOf(columnListWrapper).type).toBe("columnList");
+    expect(childrenOf(columnListWrapper)).toHaveLength(3);
   });
 });
 

@@ -76,14 +76,14 @@ Todos os 66 itens da Fase 2 estão marcados Feito, e essa marcação vale mais q
 | ID | Feature | Critério de aceite | Teste | Essencial | Feito |
 |---|---|---|---|---|---|
 | PLT-001 | **Shell da janela Tauri v2 com menu nativo** — Janela desktop com menu nativo e ciclo de vida controlado pelo Tauri | Dado o app iniciado, quando a janela abre, então o menu nativo do SO aparece no topo; quando o usuário clica em Fechar, o processo Tauri encerra sem deixar processo/sidecar órfão em execução; quando clica em Minimizar, a janela some da área de trabalho mas o processo continua ativo (visível no gerenciador de tarefas); quando clica em Maximizar, a janela passa a ocupar 100% da área útil do monitor atual e o botão de Maximizar vira "Restaurar", que devolve exatamente à posição/tamanho anteriores ao maximizar. | manual-visual | Sim | Sim |
-| PLT-002 | **Conexão e migrações Postgres 18 local via sqlx** — Núcleo Rust conecta ao Postgres local e aplica migrações versionadas | Dado banco vazio, quando o app inicia pela 1ª vez, então o sqlx aplica todas as migrações pendentes e a conexão fica disponível ao restante do app | cargo-test | Sim | Sim |
+| PLT-002 | **Banco local SQLite e migrações via sqlx** — Núcleo Rust abre o arquivo do banco na pasta de trabalho (criando-o se não existir) e aplica migrações versionadas | Dado banco vazio, quando o app inicia pela 1ª vez, então o sqlx aplica todas as migrações pendentes e a conexão fica disponível ao restante do app | cargo-test | Sim | Sim |
 | PLT-003 | **Sidecar Python 3.12 empacotado (PyInstaller) iniciado pelo Tauri** — Processo Python empacotado sobe junto com o app, sem Python do sistema | Dado o app iniciado numa máquina sem Python instalado, quando o sidecar é invocado, então ele responde a um comando de health-check | cargo-test | Sim | Sim |
 | PLT-005 | **Autosave local com recuperação após queda do app** — Estado em edição é salvo periodicamente e recuperável após crash | Dado edição em andamento quando o processo é encerrado abruptamente, quando o app é reaberto, então o conteúdo não commitado do último autosave é recuperável | cargo-test | Sim | Sim |
-| PLT-011 | **Backup/restauração manual da base Postgres local** — Comando de backup gera um dump local restaurável | Dado o comando de backup acionado, quando executado, então um arquivo de dump é criado e, restaurado numa base vazia, recupera todo o conteúdo | cargo-test | Sim | Sim |
+| PLT-011 | **Backup/restauração manual do banco local** — Comando de backup grava uma cópia completa do arquivo (`VACUUM INTO`), restaurável | Dado o comando de backup acionado, quando executado, então um arquivo `.sqlite` é criado e, restaurado numa base vazia, recupera todo o conteúdo | cargo-test | Sim | Sim |
 | PLT-013 | **Backup automático periódico com retenção configurável e gatilho por operação de risco** | Dado o app configurado para backups diário/semanal/mensal com retenção de N cópias por cadência, quando o intervalo correspondente decorre — ou uma operação de risco ocorre (import de `.colpkg`, "Check Database" ou sync one-way) — então um novo backup automático é criado sem intervenção manual, e backups além da retenção configurada para aquela cadência são descartados automaticamente, distinto do backup manual sob comando explícito já coberto por PLT-011. | cargo-test | Sim | Sim |
 | PLT-014 | **Check Database — verificação de integridade da coleção local** | Dado uma base local com uma inconsistência introduzida artificialmente (ex.: um cartão órfão sem nota correspondente), quando "Check Database" é executado, então o problema é detectado e corrigido automaticamente, e um relatório final lista quantos e quais problemas foram corrigidos, sem exigir que o usuário edite o banco manualmente. | cargo-test | Sim | Sim |
-| PLT-016 | **Assistente de primeira execução para conectar ao Postgres local** | Dado uma máquina sem Postgres acessível na porta padrão configurada, quando o app inicia pela primeira vez, então um assistente detecta a ausência ou falha de conexão, permite informar host/porta/credenciais/pasta de dados, testa a conexão antes de prosseguir e orienta a instalação do Postgres quando nenhuma instância é encontrada — em vez de o app travar numa tela em branco ou crashar sem explicação. | e2e-webdriverio | Sim | Sim |
-| PLT-020 | **Migração de schema Postgres em upgrade com dados existentes, com rollback em caso de falha** | Dado um banco populado numa versão N do schema, quando o app é atualizado para a versão N+1 com uma migração pendente, então a migração roda sobre os dados existentes preservando-os integralmente; se a migração falhar no meio da execução, um backup automático pré-migração (criado por PLT-013) é restaurado automaticamente e o app permanece íntegro na versão de schema anterior, nunca em estado parcialmente migrado. | cargo-test | Sim | Sim |
+| PLT-016 | **Primeira execução sem configuração: o app abre e funciona** | Dado uma máquina onde o app nunca rodou, quando ele inicia pela primeira vez, então o banco é criado na pasta de dados do sistema operacional, as migrações são aplicadas e o app abre direto na árvore de páginas — sem assistente, sem pedir host/porta/credencial, sem tela em branco. A pasta de trabalho continua trocável depois, nas Configurações, e trocá-la leva o banco junto quando a pasta nova está vazia. | e2e-webdriverio | Sim | Sim |
+| PLT-020 | **Migração de schema em upgrade com dados existentes, com rollback em caso de falha** | Dado um banco populado numa versão N do schema, quando o app é atualizado para a versão N+1 com uma migração pendente, então a migração roda sobre os dados existentes preservando-os integralmente; se a migração falhar no meio da execução, um backup automático pré-migração (criado por PLT-013) é restaurado automaticamente e o app permanece íntegro na versão de schema anterior, nunca em estado parcialmente migrado. | cargo-test | Sim | Sim |
 
 ---
 
@@ -863,3 +863,47 @@ Motivada pelos três erros só visíveis depois que a Fase 1 foi construída, ap
 **4. Coluna Feito (Fase 1):** adicionada às duas tabelas da Fase 1 (Área FUN e Área PLT), com a convenção explicada na nova seção "Convenção da coluna Feito" logo acima da Fase 1. Todos os 29 itens que permaneceram na Fase 1 foram conferidos contra o código do repositório (não contra a existência de um arquivo de teste) e marcados **Feito: Sim** — inclusive PLT-016, cujo bug do achado #1 (campo Senha nativamente `required` barrando o clique em silêncio) foi conferido em `src/components/FirstRunWizard.tsx` e está corrigido (o campo agora usa só `aria-required`, e `blankRequiredFieldMessage()` explicitamente não exige Senha) — achado #1 marcado como resolvido em `docs/ACHADOS-FASE-1.md`.
 
 **5. Nota de contagem — o "183" citado em `docs/ACHADOS-FASE-1.md` e `docs/e2e.md` estava errado:** a contagem exata de linhas com `e2e-playwright` no corpo do documento, antes de qualquer edição desta revisão, era **180**, não 183 (os outros 3 eram menções na prosa das seções INVARIANTES e "Definição de pronto", não itens da tabela). Confirmado batendo a soma dos 5 tipos de teste (`vitest`+`cargo-test`+`pytest`+`e2e-playwright`+`manual-visual` = 146+207+10+180+20 = 563) contra o total de itens do documento. `docs/e2e.md` não foi alterado (fora do escopo desta revisão, que é só `docs/CHECKLIST.md` e `docs/ACHADOS-FASE-1.md`), mas o número certo fica registrado aqui para quem for atualizar aquele arquivo depois.
+
+---
+
+## Revisão de 05/09/2026 — o que a migração para SQLite mudou neste documento
+
+O banco deixou de ser PostgreSQL 18 e passou a ser um arquivo SQLite dentro da
+pasta de trabalho do app (`docs/MIGRACAO-SQLITE.md` tem o contrato completo da
+porta e as medições que a motivaram). Quatro itens tinham critério escrito em
+cima do banco antigo e foram reescritos:
+
+- **PLT-002** — "Conexão e migrações Postgres 18 local" virou "Banco local
+  SQLite e migrações via sqlx". O critério de aceite não mudou de exigência:
+  banco vazio, primeira abertura, migrações aplicadas, conexão disponível.
+- **PLT-011** — o backup deixou de ser um `pg_dump` (processo externo, senha
+  por variável de ambiente, binário no PATH) e passou a ser `VACUUM INTO`, uma
+  instrução SQL na própria conexão. O artefato agora é um `.sqlite` abrível por
+  qualquer ferramenta SQLite, não um `.dump` proprietário.
+- **PLT-016** — este mudou de *sentido*, e é a mudança mais visível do produto.
+  Era "assistente de primeira execução para conectar ao Postgres local"; virou
+  "primeira execução sem configuração: o app abre e funciona". Sem servidor não
+  há host, porta, usuário nem senha a coletar, então o assistente não foi
+  consertado — foi apagado (`src/components/FirstRunWizard.tsx` não existe
+  mais), e a prova e2e passou a ser o oposto da anterior: que a primeira
+  execução **não pede nada**
+  (`e2e/specs/primeira-execucao.e2e.mjs` substituiu
+  `e2e/specs/first-run-wizard.e2e.mjs`, citada na nota 2 acima). Escolher outra
+  pasta de trabalho continua possível nas Configurações, e agora leva o banco
+  junto quando a pasta escolhida está vazia.
+- **PLT-020** — só o título perdeu a palavra "Postgres"; o mecanismo (backup
+  automático antes de migrar sobre dado existente, restaurado se a migração
+  falhar) continua igual, agora por cópia de arquivo.
+
+Nenhum item foi criado, removido ou movido de fase nesta revisão — as tabelas
+de contagem continuam válidas como estão.
+
+**Efeito colateral que vale registrar:** todo teste de banco deste projeto
+deixou de ser `#[ignore]`. Antes eles exigiam um cluster PostgreSQL de pé e a
+variável `LEARNO_TEST_DATABASE_URL`, e na prática quase nunca rodavam; hoje
+cada um cria seu próprio arquivo SQLite temporário e roda num `cargo test`
+limpo. Foi assim que quatro defeitos reais da camada de dados apareceram —
+`now()` sobrevivente em `db/pages.rs`, `::float8` e `ON CONFLICT ON CONSTRAINT`
+em `db/record_values.rs`, `= ANY($2)` em `ipc/formula_commands.rs` e a busca
+global inteira ainda escrita em `tsvector` — todos corrigidos nesta mesma
+revisão.

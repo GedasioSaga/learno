@@ -3,6 +3,7 @@ import type { PageRow } from "../../lib/ipc";
 import { usePageTreeStore } from "./store";
 import { hidePopoverSafely } from "./dom-compat";
 import { useOpenTransition } from "./use-open-transition";
+import { usePosicaoAncorada } from "./use-posicao-ancorada";
 
 interface PageContextMenuProps {
   page: PageRow;
@@ -20,8 +21,10 @@ interface PageContextMenuProps {
 export function PageContextMenu({ page, onRequestRename, onRequestMoveTo }: PageContextMenuProps) {
   const panelId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const gatilhoRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const entered = useOpenTransition(open);
+  usePosicaoAncorada(gatilhoRef, panelRef, open, { alinhamento: "fim" });
   const setFavorite = usePageTreeStore((state) => state.setFavorite);
   const duplicate = usePageTreeStore((state) => state.duplicate);
   const trash = usePageTreeStore((state) => state.trash);
@@ -33,6 +36,7 @@ export function PageContextMenu({ page, onRequestRename, onRequestMoveTo }: Page
   return (
     <span className="relative inline-flex">
       <button
+        ref={gatilhoRef}
         type="button"
         popoverTarget={panelId}
         popoverTargetAction="toggle"
@@ -48,7 +52,7 @@ export function PageContextMenu({ page, onRequestRename, onRequestMoveTo }: Page
         popover="auto"
         role="menu"
         onToggle={(event) => setOpen(event.newState === "open")}
-        className={`absolute right-0 top-full m-0 mt-1 w-48 origin-top-right rounded-md border border-border
+        className={`w-48 origin-top-right rounded-md border border-border
           bg-surface p-1 shadow-hard transition duration-150 ease-out motion-reduce:transition-none
           ${entered ? "scale-100 opacity-100" : "scale-95 opacity-0"}`}
       >

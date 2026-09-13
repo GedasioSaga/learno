@@ -1,0 +1,108 @@
+-- Fase 5, Biblioteca: ordem personalizada dos livros na estante.
+--
+-- Título e autor NÃO precisam de migração — `library_books.metadata_title` e
+-- `metadata_author` já existem desde 0022 (linhas 99-100) e nunca tiveram
+-- escritor; o comando novo (`BibliotecaRepository::definir_metadados_do_livro`)
+-- só passa a gravar neles. Esta migração cuida só da terceira capacidade do
+-- pedido: ordem arrastável (dois "Percy Jackson" na ordem certa da série).
+--
+-- ============================================================================
+-- POR QUE `library_books` GANHA `position` E `library_annotations` NÃO — o
+-- MESMO projeto, duas respostas diferentes, e a diferença importa.
+-- ============================================================================
+--
+-- `0022_biblioteca.sql` (por volta da linha 271) documenta, para
+-- `library_annotations`, que a AUSÊNCIA de um índice fracionário ali é
+-- decisão, não esquecimento: "a regra do projeto vale para ordem entre irmãos
+-- definida pelo USUÁRIO (arrastar página, arrastar bloco). A ordem das
+-- anotações é a ordem do livro, derivada de `fraction`; um índice fracionário
+-- criaria uma segunda ordem, arrastável, que poderia discordar da posição
+-- real no texto."
+--
+-- Essa regra não muda aqui — ela CONTINUA valendo para `library_annotations`
+-- exatamente pelo motivo de lá. O que muda é qual das duas metades da regra
+-- se aplica a CADA tabela:
+--
+--   `library_annotations.fraction`  a ordem É o texto. Uma posição arrastável
+--                                    poderia discordar de onde o trecho está
+--                                    de verdade no livro — por isso NENHUMA
+--                                    coluna de posição arrastável existe ali.
+--   `library_books.position`        não existe um "texto" para a ORDEM DA
+--                                    ESTANTE discordar de. Dois exemplares de
+--                                    "Percy Jackson" não têm uma posição
+--                                    correta objetiva um em relação ao outro —
+--                                    só a que o usuário decidir (a ordem da
+--                                    série, por exemplo). Esta é exatamente a
+--                                    "ordem entre irmãos definida PELO
+--                                    USUÁRIO" que o comentário de 0022 CITA
+--                                    como o caso em que um índice fracionário
+--                                    é a ferramenta certa — só que aplicada a
+--                                    outra tabela.
+--
+-- Mesma técnica de `pages.position` (0003) e `library_categories.position`
+-- (0033): índice fracionário guardado como TEXT; reordenar escreve uma linha
+-- só (`BibliotecaRepository::mover_livro`), nunca renumera a estante inteira.
+--
+-- ============================================================================
+-- COMO a coluna entra NOT NULL numa tabela que já tem livro importado, sem
+-- reconstruir `library_books` (que `library_reading_progress`,
+-- `library_annotations`, `library_book_categories`, `library_chapter_notes` e
+-- `library_vocabulary` referenciam com `ON DELETE CASCADE` — reconstruir a
+-- tabela pai exigiria o procedimento de 12 passos que `0025_mapa_mental_avulso.sql`
+-- documenta, derrubando e recriando as cinco tabelas filhas na ordem certa
+-- para o `DROP` de `library_books` não cascatear a limpeza).
+--
+-- SQLite recusa `ALTER TABLE ... ADD COLUMN` com `NOT NULL` a menos que a
+-- coluna tenha um DEFAULT CONSTANTE (não uma expressão como `strftime(...)`,
+-- que é o motivo de `local_date`/`utc_offset_minutes` em
+-- `0024_cronograma.sql` terem nascido opcionais). Uma string literal É
+-- constante, então `DEFAULT ''` satisfaz a exigência sem precisar do
+-- procedimento de 12 passos. `''` nunca é uma posição de verdade — o
+-- `UPDATE` de backfill logo abaixo substitui `''` por um índice fracionário
+-- real em TODA linha existente, na mesma transação de migração (o `sqlx`
+-- roda cada arquivo de migração como uma transação só), e todo caminho de
+-- escrita futuro (`BibliotecaRepository::import`, `Self::mover_livro`) sempre
+-- passa um valor explícito — o default nunca é exercitado depois deste
+-- arquivo terminar.
+ALTER TABLE library_books ADD COLUMN position TEXT NOT NULL DEFAULT '';
+
+-- ============================================================================
+-- BACKFILL: todo livro que já existe ganha uma posição real, na ordem de
+-- hoje (`b.created_at DESC`, a mesma que `BibliotecaRepository::list_shelf`
+-- usava ANTES desta migração) — quem abrir o app depois de atualizar não vê
+-- a estante embaralhar.
+-- ============================================================================
+--
+-- Não há como chamar `fractional_index::FractionalIndex`/`db::position` (Rust)
+-- de dentro de uma migração SQL, então o backfill constrói o valor
+-- diretamente na forma que aquele crate aceita de volta: bytes terminados em
+-- `0x80`, codificados em hex minúsculo por `FractionalIndex::to_string`
+-- (`fract_index.rs`, `bytes_to_hex`). `FractionalIndex::from_string` só exige
+-- hex válido terminado em `0x80` — não importa COMO os bytes antes do
+-- terminador foram escolhidos — então um contador monotônico de 4 bytes
+-- (`printf('%08x', rank)`, 8 dígitos hex) seguido do terminador (`'80'`, o
+-- 5º byte) é uma [`FractionalIndex`] tão válida quanto uma produzida por
+-- `position::between` em série, e MUITO mais simples de montar em SQL puro:
+-- nenhuma aritmética de bytes vizinhos, só uma classificação.
+--
+-- `rank` = quantos OUTROS livros vêm ANTES deste na ordem de hoje
+-- (`created_at` maior primeiro; `id` como desempate determinístico e
+-- arbitrário para o caso raro de dois livros importados no mesmo
+-- microssegundo — sem desempate a ordem entre eles ficaria indefinida mesmo
+-- antes desta migração). `rank = 0` é o livro mais recente, que precisa da
+-- MENOR posição (a estante ordena por `position` ASCENDENTE depois desta
+-- migração) — exatamente o inverso de "mais recente primeiro" em
+-- `created_at`, por isso a contagem é de quem tem `created_at` MAIOR.
+--
+-- 8 dígitos hex cobrem mais de 4 bilhões de posições distintas — nenhuma
+-- estante de usuário chega perto disso; a largura só existe para toda
+-- posição gerada aqui ter o MESMO número de caracteres, condição para a
+-- comparação de TEXT (`ORDER BY position`) concordar com a comparação
+-- numérica do rank (mesma lógica de larguras fixas que `printf('%08x', ...)`
+-- já resolve sozinho).
+UPDATE library_books
+SET position = printf('%08x', (
+    SELECT COUNT(*) FROM library_books AS mais_recente
+    WHERE mais_recente.created_at > library_books.created_at
+       OR (mais_recente.created_at = library_books.created_at AND mais_recente.id < library_books.id)
+)) || '80';

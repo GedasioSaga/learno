@@ -1,0 +1,1383 @@
+/*
+ * Trilha — base visual. Só o vocabulário: etapa, flecha, raia, coluna de
+ * nível, canvas. Nenhum componente mora aqui; quem constrói a tela consome
+ * as classes listadas em docs/DESIGN-TRILHA.md (leia antes de usar).
+ *
+ * A regra que manda no desenho: o eixo horizontal é DEPENDÊNCIA, não tempo.
+ * A coluna de uma etapa é o nível dela no grafo — "está à direita" quer dizer
+ * "depende do que está à esquerda", nunca "acontece depois". Por isso a
+ * coluna de nível não tem tique, não tem linha de base, não tem data; a
+ * flecha tem ponta (uma linha do tempo não tem); e a etapa tem um soquete
+ * oco na esquerda (onde as dependências ENTRAM) e um pino cheio na direita
+ * (de onde ela alimenta as próximas).
+ *
+ * Cor: toda cor é `var(--token)` de src/styles/theme.css, exceto os tokens
+ * NOVOS declarados no topo deste arquivo — cinco cores categóricas por raia e
+ * a tinta da coluna de nível — que seguem a mesma forma de theme.css (um
+ * bloco por tema, padrão no topo, nomeados depois; ver o aviso de ORDEM lá).
+ * Cada hex novo foi medido contra paper, surface, coluna de nível, sunken e
+ * o fundo interno da etapa nos cinco temas (tabela em DESIGN-TRILHA.md);
+ * ≥ 3:1 para borda/aresta/alça (≥ 4.5:1 no Alto contraste), ≥ 4.5:1 para
+ * texto e glifo (≥ 7:1 no Alto contraste). Zero falhas na medição de
+ * 05/09/2026. Se mexer num valor, meça de novo.
+ *
+ * Por que as cores de raia NÃO reaproveitam mint/terracotta/amber/emerald:
+ * mint é "concluída", terracotta é "em ciclo", amber é "selecionado" e o
+ * anel de foco no tema padrão. Uma raia verde faria toda etapa disponível
+ * dela parecer concluída. As cinco famílias novas (azul, ciano, roxo,
+ * magenta, oliva) ficam fora dessas três famílias reservadas.
+ *
+ * Este arquivo fica FORA de qualquer `@layer`, de propósito, como
+ * mapa-mental.css: regra fora de camada vence utilitário Tailwind (que vive
+ * em `@layer utilities`) e vence o style.css do @xyflow/react independente da
+ * ordem de import. As variáveis `--xy-*` "sem -default" são as que a lib lê
+ * antes de cair nos hex fixos dela — ver node_modules/@xyflow/react/dist/style.css.
+ */
+
+/* =========================================================================
+ * Tokens novos por tema. Mesma forma de theme.css: o bloco padrão (Âmbar
+ * noturno) vem primeiro; `:root` e `[data-theme]` têm a mesma especificidade
+ * e é a ORDEM que faz o tema escolhido vencer. Não reordene.
+ *
+ * `--trilha-nivel-fundo` é a tinta da coluna de nível alternada. Ela anda
+ * SEMPRE para longe de `--ink`: nos temas escuros puxa para `surface-sunken`
+ * (mais escuro), no Papel puxa para `surface-raised` (mais claro). Assim o
+ * contraste de toda borda e aresta sobre a coluna SOBE em vez de cair — uma
+ * tinta na direção errada derrubava `--mint` no Papel de 3.08 para 2.70:1.
+ * Misturada com `transparent` para os pontos do fundo continuarem visíveis.
+ * ========================================================================= */
+:root,
+[data-theme="ambar-noturno"],
+[data-theme="dark"] {
+  --raia-azul: #7fb2ff;
+  --raia-ciano: #5cc8d8;
+  --raia-roxo: #b89cff;
+  --raia-magenta: #f090c8;
+  --raia-oliva: #b9c26a;
+
+  --trilha-nivel-fundo: color-mix(in srgb, var(--surface-sunken) 55%, transparent);
+  --trilha-nivel-separador: transparent;
+}
+
+[data-theme="papel"],
+[data-theme="light"] {
+  --raia-azul: #2456c4;
+  --raia-ciano: #0d7186;
+  --raia-roxo: #6b3fc0;
+  --raia-magenta: #b0246e;
+  --raia-oliva: #5d7a15;
+
+  --trilha-nivel-fundo: color-mix(in srgb, var(--surface-raised) 55%, transparent);
+  --trilha-nivel-separador: transparent;
+}
+
+[data-theme="grafite"] {
+  --raia-azul: #7fb0f5;
+  --raia-ciano: #5bc4d6;
+  --raia-roxo: #b49bf7;
+  --raia-magenta: #ee90c6;
+  --raia-oliva: #b7c06c;
+
+  --trilha-nivel-fundo: color-mix(in srgb, var(--surface-sunken) 55%, transparent);
+  --trilha-nivel-separador: transparent;
+}
+
+[data-theme="meia-noite"] {
+  --raia-azul: #8dbcff;
+  --raia-ciano: #6ad3e3;
+  --raia-roxo: #c2a9ff;
+  --raia-magenta: #f59dd0;
+  --raia-oliva: #c4cc74;
+
+  --trilha-nivel-fundo: color-mix(in srgb, var(--surface-sunken) 55%, transparent);
+  --trilha-nivel-separador: transparent;
+}
+
+/* Alto contraste: tinta não é sinal (o tema desliga sombra pelo mesmo
+   motivo). A coluna alternada fica opaca em `surface` e ganha um traço
+   `hairline` na esquerda — é a única situação em que a coluna tem linha,
+   e a linha continua sem tique e sem número: não vira régua. */
+[data-theme="alto-contraste"] {
+  --raia-azul: #9cc8ff;
+  --raia-ciano: #7fe3f2;
+  --raia-roxo: #cdb6ff;
+  --raia-magenta: #ffa8d9;
+  --raia-oliva: #d7e07f;
+
+  --trilha-nivel-fundo: var(--surface);
+  --trilha-nivel-separador: var(--hairline);
+}
+
+/* =========================================================================
+ * Réguas da Trilha. Em `rem` sobre a raiz de 15px (theme.css), alinhadas à
+ * régua de espaçamento do app (unidade = 3.75px). O layout em TypeScript
+ * (posição x/y dos nós) precisa espelhar estes valores — leia-os com
+ * getComputedStyle ou copie com comentário apontando para cá.
+ * ========================================================================= */
+.trilha-canvas {
+  --trilha-etapa-largura: 15rem;           /* 225px, 60 unidades */
+  --trilha-etapa-altura-min: 4rem;         /* 60px */
+  --trilha-etapa-faixa: 6px;               /* faixa da raia na borda esquerda da etapa */
+  --trilha-gap-coluna: 6rem;               /* 90px livres entre etapas de colunas vizinhas: a flecha precisa desse tanto para a curva e a ponta serem legíveis */
+  --trilha-gap-linha: 1.5rem;              /* 22.5px entre etapas da mesma raia */
+  --trilha-coluna-passo: calc(var(--trilha-etapa-largura) + var(--trilha-gap-coluna)); /* 21rem = 315px por nível */
+  --trilha-raia-cabecalho-altura: 2.5rem;  /* 37.5px */
+  --trilha-nivel-rotulo-altura: 1.75rem;   /* espaço reservado no topo do canvas para os rótulos de nível */
+  --trilha-alca-tamanho: 10px;
+  --trilha-marca-tamanho: 1.25rem;
+  --trilha-aresta-espessura: 2;
+  --trilha-aresta-espessura-selecionada: 3;
+  --trilha-aresta-tracejado-bloqueada: 7 5;
+  --trilha-aresta-tracejado-ciclo: 2 6;
+  --trilha-aresta-tracejado-morta: 3 3;
+  --trilha-aresta-opacidade-morta: 0.4;
+  --trilha-aresta-tracejado-esperando: 1 4;
+
+  /* Filho de `.trilha-secao` (coluna flex): ocupa o que sobra abaixo da
+     barra. `min-height: 0` é o que deixa o canvas encolher em vez de
+     empurrar a barra para fora da tela. */
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* A seção inteira: barra fixa em cima (`.trilha-barra`), canvas embaixo. */
+.trilha-secao {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
+}
+
+/* =========================================================================
+ * Barra da trilha — o cabeçalho ACIMA do canvas (item 4 do pedido). Antes,
+ * "Nova etapa"/"Nova raia" flutuavam num `<Panel>` por cima do cabeçalho da
+ * primeira raia, e o aviso de ciclo tapava "NÍVEL 3". Aqui tudo isso é
+ * chrome da tela, no nível de elevação de painel (surface + hairline
+ * embaixo), e o canvas começa limpo logo abaixo.
+ *
+ * Três zonas numa linha: progresso (esquerda), próximo passo (meio, cresce)
+ * e ações (direita). Em janela estreita a linha quebra e as três empilham.
+ * ========================================================================= */
+.trilha-barra {
+  flex: none;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.trilha-barra__linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  min-height: 3rem;
+  padding: 0.5rem 1rem;
+}
+
+.trilha-barra__progresso {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 9rem;
+}
+
+.trilha-barra__progresso-texto {
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.trilha-barra__progresso-texto strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Trilho de 3px, mesma régua da barra de progresso do cartão em andamento —
+   o preenchimento é mint porque "concluída" é mint na trilha inteira. */
+.trilha-barra__progresso-trilho {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--hairline);
+}
+
+.trilha-barra__progresso-cheio {
+  display: block;
+  height: 100%;
+  background: var(--mint);
+  transition: width var(--motion-base) var(--ease-in-out);
+}
+
+/* "Continue em: X" — é a resposta principal da barra, por isso é a zona
+   que cresce e o título é o texto mais pesado da linha. */
+.trilha-barra__agora {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+}
+
+.trilha-barra__agora-rotulo {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.trilha-barra__agora-titulo {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.trilha-barra__agora-raia {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.trilha-barra__agora-raia::before {
+  content: "·";
+  margin-right: 0.5rem;
+}
+
+.trilha-barra__ir {
+  margin-left: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--amber);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--amber-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.trilha-barra__ir:hover {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+
+.trilha-barra__ir:active {
+  transform: scale(var(--motion-scale-press));
+}
+
+.trilha-barra__acoes {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.trilha-barra__formulario {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.trilha-barra__campo {
+  height: 1.875rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.8125rem;
+}
+
+.trilha-barra__campo::placeholder {
+  color: var(--ink-muted);
+}
+
+.trilha-barra__enviar {
+  flex: none;
+  height: 1.875rem;
+  padding: 0 0.625rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: var(--emerald);
+  color: var(--on-emerald);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.trilha-barra__enviar:active {
+  transform: scale(var(--motion-scale-press));
+}
+
+.trilha-barra__enviar:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Faixa de ciclo (item 5): terracota como filete à esquerda + tinta de fundo
+   suave; o texto usa a variante -ink (4.5:1). */
+.trilha-barra__ciclo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--hairline);
+  border-left: 3px solid var(--terracotta);
+  background: color-mix(in srgb, var(--terracotta) 8%, var(--surface));
+  color: var(--terracotta-ink);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.trilha-barra__ciclo p {
+  margin: 0;
+}
+
+.trilha-barra__ciclo-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trilha-barra__ciclo-apagar {
+  flex: none;
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--terracotta-ink);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.trilha-barra__ciclo-apagar:active {
+  transform: scale(var(--motion-scale-press));
+}
+
+/* =========================================================================
+ * Rodapé do canvas: controles + legenda, lado a lado no canto inferior
+ * esquerdo (o `<Panel position="bottom-left">`).
+ * ========================================================================= */
+.trilha-rodape {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+/* Controles (item 8): coluna de botões no nível 1 de elevação do app —
+   surface + border + shadow-hard-sm — no lugar do desenho cru da lib.
+   Cada botão DESENHA 2rem; a área que reage é `--hit-min` (::after), a
+   mesma regra do botão de recolher raia. */
+.trilha-controles {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.trilha-controle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.trilha-controle:last-child {
+  border-bottom: 0;
+}
+
+.trilha-controle::after {
+  content: "";
+  position: absolute;
+  inset: calc((2rem - var(--hit-min)) / 2);
+}
+
+.trilha-controle:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.trilha-controle:active:not(:disabled) {
+  transform: scale(var(--motion-scale-press));
+}
+
+.trilha-controle:disabled {
+  color: var(--ink-muted);
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Legenda (item 6): as marcas são o MESMO ::before do cartão — as classes
+   `trilha-etapa--<estado>` só trocam variáveis, e o bloco de defaults é
+   compartilhado com `.trilha-etapa` abaixo. */
+.trilha-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.875rem;
+  margin: 0;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-hard-sm);
+  list-style: none;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--ink-muted);
+}
+
+.trilha-legenda__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+.trilha-legenda__marca {
+  --raia-cor: var(--border);
+}
+
+.trilha-legenda__marca::before {
+  content: var(--trilha-marca-glifo);
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--trilha-marca-borda);
+  border-radius: 9999px;
+  background: var(--trilha-marca-fundo);
+  color: var(--trilha-marca-cor);
+  font-family: "Segoe UI Symbol", var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* A amostra de "marco": um pedaço de cartão com a faixa larga. */
+.trilha-legenda__faixa-de-marco {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--ink-muted);
+  border-radius: 0.125rem;
+  background: var(--surface);
+}
+
+/* =========================================================================
+ * Cor por raia. UMA classe modificadora, aplicada a QUEM PRECISAR carregar a
+ * cor: a raia (`.trilha-raia`), cada etapa dela (`.trilha-etapa`, porque no
+ * @xyflow o nó filho não é descendente DOM do nó pai) e a aresta (o `<g>`
+ * `.react-flow__edge`, via `className` da edge). Tudo abaixo lê `--raia-cor`.
+ * Sem modificador, a cor cai em `--border`: neutro, nunca invisível.
+ * ========================================================================= */
+.trilha-canvas .trilha-cor--azul    { --raia-cor: var(--raia-azul); }
+.trilha-canvas .trilha-cor--ciano   { --raia-cor: var(--raia-ciano); }
+.trilha-canvas .trilha-cor--roxo    { --raia-cor: var(--raia-roxo); }
+.trilha-canvas .trilha-cor--magenta { --raia-cor: var(--raia-magenta); }
+.trilha-canvas .trilha-cor--oliva   { --raia-cor: var(--raia-oliva); }
+
+/* =========================================================================
+ * Canvas — o @xyflow vestido com os tokens do app. Mesmo fundo e mesmo
+ * padrão de pontos do mapa mental (paper + hairline), para as duas telas
+ * parecerem a mesma mesa de trabalho.
+ * ========================================================================= */
+.trilha-canvas .react-flow {
+  --xy-background-color: var(--paper);
+  --xy-background-pattern-color: var(--hairline);
+
+  --xy-node-color: var(--ink);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-background-color: var(--surface);
+  --xy-node-border-radius: 0.25rem;
+  --xy-node-boxshadow-hover: var(--shadow-hard-sm);
+  --xy-node-boxshadow-selected: none;
+
+  --xy-handle-background-color: var(--surface);
+  --xy-handle-border-color: var(--border);
+
+  --xy-edge-stroke: var(--border);
+  --xy-edge-stroke-width: var(--trilha-aresta-espessura);
+  --xy-edge-stroke-selected: var(--amber);
+  --xy-edge-label-background-color: var(--surface);
+  --xy-edge-label-color: var(--ink-muted);
+  --xy-connectionline-stroke: var(--amber);
+  --xy-connectionline-stroke-width: var(--trilha-aresta-espessura);
+
+  --xy-selection-background-color: color-mix(in oklab, var(--amber) 12%, transparent);
+  --xy-selection-border: 1px dashed var(--amber);
+
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-raised);
+  --xy-controls-button-color: var(--ink-muted);
+  --xy-controls-button-color-hover: var(--ink);
+  --xy-controls-button-border-color: var(--hairline);
+  --xy-controls-box-shadow: var(--shadow-hard-sm);
+
+  --xy-minimap-background-color: var(--surface-sunken);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--paper) 55%, transparent);
+  --xy-minimap-mask-stroke-color: var(--border);
+  --xy-minimap-mask-stroke-width: 1;
+  --xy-minimap-node-background-color: var(--border);
+  --xy-minimap-node-stroke-color: transparent;
+
+  --xy-attribution-background-color: transparent;
+
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* No Alto contraste os pontos do fundo são ruído sem função (a coluna
+   alternada já é opaca e recobre metade deles). */
+[data-theme="alto-contraste"] .trilha-canvas .react-flow {
+  --xy-background-pattern-color: transparent;
+}
+
+/* Anel de foco do teclado é o token global, não o azul da lib. A lib zera o
+   outline em `.react-flow__node.selectable:focus-visible` (style.css:450) —
+   especificidade (0,3,0), a MESMA de `.trilha-canvas .react-flow__node:focus-visible`
+   — e aí quem decide é a ordem de import. O segundo seletor repete
+   `.selectable` (0,4,0) para vencer sem depender de ordem; o primeiro cobre
+   nó que não é selecionável. */
+.trilha-canvas .react-flow__node:focus-visible,
+.trilha-canvas .react-flow__node.selectable:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* A lib crava `#999` no link de atribuição. */
+.trilha-canvas .react-flow__attribution a {
+  color: var(--ink-muted);
+}
+
+/* Linha de conexão (arrastando uma dependência nova): tracejada porque ainda
+   não é uma dependência — vira sólida quando solta num soquete. */
+.trilha-canvas .react-flow__connection-path {
+  stroke-dasharray: var(--trilha-aresta-tracejado-bloqueada);
+  stroke-linecap: round;
+}
+
+/* Os controles de zoom são próprios (`.trilha-controles`, acima) — o
+   `<Controls />` da lib não é mais montado, por isso não há regra para
+   `.react-flow__controls` aqui. */
+
+/* -------------------------------------------------------------------------
+ * Minimapa. Fundo rebaixado, moldura de controle. A cor dos nós no minimapa
+ * pode receber a cor da raia pela prop `nodeColor` do componente (opcional);
+ * o padrão neutro `--border` já é ≥ 3:1 sobre sunken em todo tema.
+ * ------------------------------------------------------------------------- */
+.trilha-canvas .react-flow__minimap {
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+/* =========================================================================
+ * Coluna de nível — profundidade no grafo, discreta de propósito.
+ * Uma faixa vertical por nível, alternando tinta (`--alternado`), sem linha
+ * entre colunas (fora do Alto contraste), sem tique, sem eixo embaixo. O
+ * rótulo fica dentro da coluna, no canto de cima, em caixa alta pequena e
+ * `ink-muted`: "raiz", "nível 1", "nível 2"… O componente escreve o texto;
+ * data nesse rótulo é proibido (DESIGN-TRILHA.md §3).
+ *
+ * Largura = um passo de coluna. A etapa da coluna n fica em
+ * x = n·passo + gap/2 — sobra gap/2 de cada lado e a distância entre etapas
+ * de colunas vizinhas é exatamente `--trilha-gap-coluna`.
+ *
+ * O componente só informa o nível: `style={{ "--nivel": n }}`. O `left` é
+ * calculado aqui, para o passo de coluna ter UMA fonte (esta folha) e o
+ * layout não desalinhar da faixa quando alguém mexer na régua.
+ * ========================================================================= */
+.trilha-nivel {
+  --nivel: 0;
+
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--nivel) * var(--trilha-coluna-passo));
+  box-sizing: border-box;
+  width: var(--trilha-coluna-passo);
+  border-left: 1px solid var(--trilha-nivel-separador);
+  pointer-events: none;
+}
+
+.trilha-nivel--alternado {
+  background: var(--trilha-nivel-fundo);
+}
+
+.trilha-nivel__rotulo {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.75rem;
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* A raiz é a única coluna sem nada à esquerda: o rótulo ganha um ponto cheio
+   na cor do texto, para o olho achar de onde a trilha parte. */
+.trilha-nivel--raiz .trilha-nivel__rotulo::before {
+  content: "";
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  margin-right: 0.375rem;
+  border-radius: 9999px;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+/* =========================================================================
+ * Raia — a faixa horizontal. Um fluxo de estudo por raia ("T.I." em cima,
+ * outro embaixo, totalmente diferente). Sem preenchimento colorido: qualquer
+ * tinta de paper na direção da cor derrubava borda de etapa abaixo de 3:1 em
+ * algum tema. A identidade fica no filete de 3px à esquerda (a altura toda
+ * da raia), no ponto antes do título, na faixa de cada etapa e nas flechas.
+ * Raias vizinhas se separam por `hairline` em cima.
+ *
+ * A raia PREENCHE o contêiner que a carrega (`inset: 0`): o nó de raia do
+ * @xyflow recebe largura e altura por style inline do componente, e este
+ * elemento só veste esse retângulo. Sem o `inset` ela encolheria ao tamanho
+ * do cabeçalho e o filete não desceria a altura toda.
+ * ========================================================================= */
+.trilha-raia {
+  --raia-cor: var(--border);
+
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border-top: 1px solid var(--hairline);
+  border-left: 3px solid var(--raia-cor);
+  pointer-events: none;
+}
+
+.trilha-raia__cabecalho {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: var(--trilha-raia-cabecalho-altura);
+  padding: 0 0.75rem;
+  pointer-events: auto;
+}
+
+/* Botão recolher/expandir. Desenha 1.75rem; a área que reage é `--hit-min`
+   (44px), via ::after — regra da régua de espaçamento (DESIGN-TOKENS §5). */
+.trilha-raia__alternar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.trilha-raia__alternar:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.trilha-raia__alternar::after {
+  content: "";
+  position: absolute;
+  inset: calc((1.75rem - var(--hit-min)) / 2);
+}
+
+/* Chevron desenhado com borda (não depende de fonte de ícone): aponta para
+   baixo aberto, para a direita recolhido. Movimento na tela: ease-in-out. */
+.trilha-raia__alternar::before {
+  content: "";
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: -0.2rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast) var(--ease-in-out);
+}
+
+.trilha-raia--recolhida .trilha-raia__alternar::before {
+  margin-top: 0;
+  margin-left: -0.2rem;
+  transform: rotate(-45deg);
+}
+
+.trilha-raia__titulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.trilha-raia__titulo::before {
+  content: "";
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--raia-cor);
+}
+
+.trilha-raia__resumo {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.trilha-raia__corpo {
+  position: absolute;
+  top: var(--trilha-raia-cabecalho-altura);
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* Recolhida: só o cabeçalho fica; o componente esconde os nós da raia
+   (`hidden: true`) e reduz a altura do nó da raia à do cabeçalho. A faixa
+   ganha uma hachura leve na cor da raia — "tem coisa dobrada aqui dentro" —
+   e o filete vira tracejado pelo mesmo motivo. */
+.trilha-raia--recolhida {
+  border-left-style: dashed;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--raia-cor) 14%, transparent) 6px 7px
+  );
+}
+
+.trilha-raia--recolhida .trilha-raia__corpo {
+  display: none;
+}
+
+/* =========================================================================
+ * Etapa — o cartão. Cinco estados que significam coisas diferentes e por
+ * isso têm FORMA diferente, não só cor:
+ *
+ *   disponível    borda 1px sólida `border`, fundo surface, marca ○ (vazio: "a fazer")
+ *   bloqueada     borda 1px TRACEJADA, fundo sunken (afundada, sem sombra),
+ *                 faixa da raia HACHURADA, texto ink-muted, marca ⊘
+ *   em andamento  borda 2px sólida na cor da raia, fundo surface + 12% raia,
+ *                 marca ◐ (meio cheio), barra de progresso no rodapé
+ *   concluída     borda 1px sólida `mint`, fundo surface + 10% mint, marca ✓
+ *   em ciclo      borda 5px DUPLA `terracotta` (duas linhas = "volta para
+ *                 si"), fundo surface + 10% terracotta, marca ↻
+ *
+ * Bloqueada nunca é só opacidade: tracejado + hachura + afundamento + glifo
+ * sobrevivem a baixa visão e a daltonismo. Nenhum estado usa `opacity`.
+ *
+ * A largura da borda muda por estado, então o padding compensa
+ * (`0.75rem + 1px − borda`): o texto não pula quando o estado muda.
+ *
+ * Tudo é variável para o estado só trocar valores; a marca é um ::before
+ * (o componente não precisa renderizar nada para ela). Glifos do Segoe UI
+ * Symbol, presente em todo Windows — o app é WebView2 no Windows.
+ * ========================================================================= */
+/* Defaults do cartão E da marca da legenda (`.trilha-legenda__marca`), para
+   as duas lerem as mesmas variáveis que os modificadores de estado trocam. */
+.trilha-etapa,
+.trilha-legenda__marca {
+  --raia-cor: var(--border);
+  --trilha-etapa-borda: 1px;
+  --trilha-etapa-borda-estilo: solid;
+  --trilha-etapa-borda-cor: var(--border);
+  --trilha-etapa-fundo: var(--surface);
+  --trilha-etapa-texto: var(--ink);
+  --trilha-etapa-faixa-imagem: linear-gradient(var(--raia-cor), var(--raia-cor));
+  --trilha-marca-glifo: "\25CB";
+  --trilha-marca-cor: var(--ink-muted);
+  --trilha-marca-borda: var(--border);
+  --trilha-marca-fundo: var(--surface);
+}
+
+.trilha-etapa {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--trilha-etapa-largura);
+  min-height: var(--trilha-etapa-altura-min);
+  padding: calc(0.75rem + 1px - var(--trilha-etapa-borda));
+  padding-right: calc(0.75rem + 1px - var(--trilha-etapa-borda) + var(--trilha-marca-tamanho) + 0.25rem);
+  padding-left: calc(0.75rem + 1px - var(--trilha-etapa-borda) + var(--trilha-etapa-faixa));
+  border: var(--trilha-etapa-borda) var(--trilha-etapa-borda-estilo) var(--trilha-etapa-borda-cor);
+  border-radius: 0.25rem;
+  color: var(--trilha-etapa-texto);
+  background-image: var(--trilha-etapa-faixa-imagem), linear-gradient(var(--trilha-etapa-fundo), var(--trilha-etapa-fundo));
+  background-size: var(--trilha-etapa-faixa) 100%, 100% 100%;
+  background-repeat: no-repeat;
+  background-origin: padding-box;
+  background-clip: padding-box;
+  box-shadow: var(--shadow-hard-sm);
+  font-family: var(--font-sans);
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+/* Hover sobe um degrau (translate, não fundo: o fundo já carrega estado). */
+.trilha-canvas .react-flow__node:hover .trilha-etapa {
+  transform: translateY(-1px);
+}
+
+/* Arrastando: nível 2 de elevação, "está flutuando". */
+.trilha-canvas .react-flow__node.dragging .trilha-etapa {
+  transform: none;
+  box-shadow: var(--shadow-hard);
+}
+
+/* Selecionada: acento como anel, não como fundo (DESIGN-TOKENS §8). Amber,
+   como a seleção do mapa mental. Delete apaga o que está com este anel. */
+.trilha-canvas .react-flow__node.selected .trilha-etapa {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.trilha-etapa::before {
+  content: var(--trilha-marca-glifo);
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: var(--trilha-marca-tamanho);
+  height: var(--trilha-marca-tamanho);
+  border: 1.5px solid var(--trilha-marca-borda);
+  border-radius: 9999px;
+  background: var(--trilha-marca-fundo);
+  color: var(--trilha-marca-cor);
+  font-family: "Segoe UI Symbol", var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.trilha-etapa__titulo {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.trilha-etapa__meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Barra de progresso: só existe em andamento. `--progresso` de 0 a 100,
+   posto pelo componente em style. Trilho hairline, preenchimento na raia. */
+.trilha-etapa__progresso {
+  --progresso: 0;
+
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: var(--trilha-etapa-faixa);
+  height: 3px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+
+.trilha-etapa__progresso::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: calc(var(--progresso) * 1%);
+  background: var(--raia-cor);
+  transition: width var(--motion-base) var(--ease-in-out);
+}
+
+.trilha-etapa:not(.trilha-etapa--em-andamento) .trilha-etapa__progresso {
+  display: none;
+}
+
+/* ---- os cinco estados ------------------------------------------------- */
+
+.trilha-etapa--disponivel {
+  /* é o estado base: valores padrão acima */
+}
+
+.trilha-etapa--bloqueada {
+  --trilha-etapa-borda-estilo: dashed;
+  --trilha-etapa-fundo: var(--surface-sunken);
+  --trilha-etapa-texto: var(--ink-muted);
+  --trilha-etapa-faixa-imagem: repeating-linear-gradient(
+    135deg,
+    var(--raia-cor) 0 3px,
+    var(--surface-sunken) 3px 7px
+  );
+  --trilha-marca-glifo: "\2298";
+  --trilha-marca-cor: var(--ink-muted);
+  --trilha-marca-borda: var(--border);
+  --trilha-marca-fundo: var(--surface-sunken);
+
+  /* afundada: abaixo do papel, não acima — sem sombra */
+  box-shadow: none;
+}
+
+.trilha-etapa--em-andamento {
+  --trilha-etapa-borda: 2px;
+  --trilha-etapa-borda-cor: var(--raia-cor);
+  --trilha-etapa-fundo: color-mix(in srgb, var(--raia-cor) 12%, var(--surface));
+  --trilha-marca-glifo: "\25D0";
+  --trilha-marca-cor: var(--ink);
+  --trilha-marca-borda: var(--raia-cor);
+  --trilha-marca-fundo: color-mix(in srgb, var(--raia-cor) 15%, var(--surface));
+}
+
+.trilha-etapa--concluida {
+  --trilha-etapa-borda-cor: var(--mint);
+  --trilha-etapa-fundo: color-mix(in srgb, var(--mint) 10%, var(--surface));
+  --trilha-marca-glifo: "\2713";
+  --trilha-marca-cor: var(--mint-ink);
+  --trilha-marca-borda: var(--mint);
+  --trilha-marca-fundo: color-mix(in srgb, var(--mint) 15%, var(--surface));
+}
+
+.trilha-etapa--em-ciclo {
+  --trilha-etapa-borda: 5px;
+  --trilha-etapa-borda-estilo: double;
+  --trilha-etapa-borda-cor: var(--terracotta);
+  --trilha-etapa-fundo: color-mix(in srgb, var(--terracotta) 10%, var(--surface));
+  --trilha-marca-glifo: "\21BB";
+  --trilha-marca-cor: var(--terracotta-ink);
+  --trilha-marca-borda: var(--terracotta);
+  --trilha-marca-fundo: color-mix(in srgb, var(--terracotta) 15%, var(--surface));
+}
+
+/* ---- alças (react-flow__handle) --------------------------------------- *
+ * Esquerda = alvo = SOQUETE oco (as dependências entram aqui).
+ * Direita = origem = PINO cheio (daqui ela alimenta as próximas).
+ * O par oco/cheio é o que diz "encaixa em", não "vem depois de".
+ * 10px em vez dos 6px da lib. A transição preserva o translate de
+ * posicionamento da lib, por isso é repetida por lado.                     */
+.trilha-etapa .react-flow__handle {
+  width: var(--trilha-alca-tamanho);
+  height: var(--trilha-alca-tamanho);
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--raia-cor);
+  border-radius: 9999px;
+  background: var(--surface);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.trilha-etapa .react-flow__handle.source {
+  border-color: var(--surface);
+  background: var(--raia-cor);
+}
+
+.trilha-etapa .react-flow__handle-left.connectionindicator:hover,
+.trilha-etapa .react-flow__handle-left.connectingfrom,
+.trilha-etapa .react-flow__handle-left.connectingto,
+.trilha-etapa .react-flow__handle-left.valid {
+  transform: translate(-50%, -50%) scale(1.3);
+}
+
+.trilha-etapa .react-flow__handle-right.connectionindicator:hover,
+.trilha-etapa .react-flow__handle-right.connectingfrom,
+.trilha-etapa .react-flow__handle-right.connectingto,
+.trilha-etapa .react-flow__handle-right.valid {
+  transform: translate(50%, -50%) scale(1.3);
+}
+
+/* Enquanto se arrasta uma dependência, o soquete que ACEITA a conexão
+   acende na cor de foco do tema (a mais visível sobre os fundos dele). */
+.trilha-etapa .react-flow__handle.valid {
+  border-color: var(--focus);
+}
+
+/* =========================================================================
+ * Os dois pesos de orientação (`orientacao.ts`) — ortogonais ao estado.
+ *
+ * MARCO (item 3): a etapa onde vários caminhos convergem. A referência
+ * (roadmap.sh) separa "caminho principal" de "detalhe" pela saturação do
+ * preenchimento; aqui o preenchimento já carrega ESTADO, então o peso vai
+ * para a faixa da raia (6px → 12px) e para o título (600 → 700). Mais um
+ * selo "Marco" em texto, para nunca ser só forma.
+ *
+ * PRÓXIMA (item 1): o único cartão da trilha com a bandeira "Continue
+ * aqui"/"Comece aqui" (texto, escrita pelo componente) e um halo âmbar
+ * suave — âmbar é o acento de "atenção" do app, e o halo é difuso de
+ * propósito para não se confundir com o anel de seleção (2px sólido).
+ * ========================================================================= */
+.trilha-etapa--marco {
+  --trilha-etapa-faixa: 12px;
+}
+
+.trilha-etapa--marco .trilha-etapa__titulo {
+  font-weight: 700;
+}
+
+.trilha-etapa__selo--marco {
+  border-color: var(--ink-muted);
+  border-left-width: 4px;
+  color: var(--ink);
+}
+
+.trilha-etapa--proxima {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--amber) 32%, transparent),
+    var(--shadow-hard-sm);
+}
+
+.trilha-etapa__aqui {
+  position: absolute;
+  top: 0;
+  left: calc(var(--trilha-etapa-faixa) + 0.5rem);
+  transform: translateY(-55%);
+  padding: 0 0.4rem;
+  border: 1.5px solid var(--amber);
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--amber-ink);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.trilha-etapa__aqui::before {
+  content: "\25B6";
+  margin-right: 0.25rem;
+  font-family: "Segoe UI Symbol", var(--font-sans);
+  font-size: 0.5rem;
+  vertical-align: 0.05em;
+}
+
+/* =========================================================================
+ * Cadeia de dependências (item 2): com um cartão sob o mouse ou
+ * selecionado, o canvas recebe `.trilha-canvas--com-cadeia`, e cada nó de
+ * etapa recebe um papel (classe no wrapper `.react-flow__node`, posta por
+ * `TrilhaCanvas.tsx`):
+ *   foco          o próprio cartão — nada muda nele
+ *   exige         está ANTES (transitivo) — anel sólido em `ink`
+ *   desbloqueia   vem DEPOIS (transitivo) — anel pontilhado em `ink`
+ *   fora          resto — some para 30% (a única opacidade além de "descartada")
+ * Sólido/pontilhado, não cor: a posição na coluna (esquerda/direita) já diz
+ * o sentido, o anel só confirma. Raia e fundo nunca somem (`-trilhaEtapa`
+ * no seletor). Transição em opacidade, `--motion-fast`, ease-out.
+ * ========================================================================= */
+.trilha-canvas .react-flow__node-trilhaEtapa,
+.trilha-canvas .react-flow__edge.trilha-aresta {
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.trilha-canvas--com-cadeia .react-flow__node-trilhaEtapa.trilha-no--fora-da-cadeia {
+  opacity: 0.3;
+}
+
+.trilha-canvas--com-cadeia .react-flow__edge.trilha-aresta--fora-da-cadeia {
+  opacity: 0.18;
+}
+
+.trilha-canvas .react-flow__node.trilha-no--exige .trilha-etapa {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.trilha-canvas .react-flow__node.trilha-no--desbloqueia .trilha-etapa {
+  outline: 2px dotted var(--ink);
+  outline-offset: 2px;
+}
+
+/* Na cadeia, a flecha ganha a espessura de seleção para o caminho ler como
+   um traço só (sem mudar cor — a cor continua dizendo a raia/estado). */
+.trilha-canvas .react-flow__edge.trilha-aresta--na-cadeia .react-flow__edge-path {
+  stroke-width: var(--trilha-aresta-espessura-selecionada);
+}
+
+/* =========================================================================
+ * Alvo do arrasto (item 3 do pedido: arrastar um cartão de etapa para outra
+ * raia) — enquanto o cartão está em voo sobre esta faixa, ela precisa dizer
+ * isso sem o usuário ter que adivinhar (`TrilhaCanvas.handleNodeDrag`, via
+ * `raiaAlvoDoArrasto`). Contorno sólido em `emerald` — a mesma cor de
+ * confirmação de "Ligar"/"Criar caminho" no resto da Trilha — por cima do
+ * filete da raia, nunca como um tom de fundo (contraste ruim em cima da
+ * hachura de "recolhida", que de qualquer forma nunca ganha este destaque:
+ * `raiaAlvoNoY` já recusa uma faixa recolhida como alvo).
+ * ========================================================================= */
+.trilha-canvas .react-flow__node-trilhaRaia.trilha-raia-no--alvo-do-arrasto .trilha-raia {
+  outline: 2px solid var(--emerald);
+  outline-offset: -2px;
+  transition: outline-color var(--motion-fast) var(--ease-out);
+}
+
+/* Linha de inserção do arrasto DENTRO da mesma raia (reordenar, não trocar
+   de faixa) — mesma cor de confirmação do destaque acima, agora como um
+   traço fino na altura exata onde o cartão vai cair (`LinhaDeInsercaoNode`).
+   `pointer-events: none`: é só um sinal visual, nunca deve capturar o drop. */
+.trilha-linha-de-insercao {
+  width: var(--trilha-linha-insercao-largura, var(--trilha-etapa-largura));
+  height: 3px;
+  border-radius: 2px;
+  background: var(--emerald);
+  pointer-events: none;
+}
+
+/* =========================================================================
+ * Situação no caminho — um eixo ORTOGONAL aos cinco estados de progresso
+ * acima (ver o comentário de `EstadoVisualDaEtapa` em descricoes.ts). Uma
+ * etapa alimentada por uma decisão pode estar aguardando escolha ou ter
+ * ficado para trás quando outro caminho venceu, e isso não muda nada do que
+ * ela É em termos de progresso — uma "descartada" pode estar concluída, e o
+ * glifo `::before` de progresso (✓/◐) continua por cima para provar isso.
+ * Nenhum modificador daqui reescreve `--trilha-etapa-borda-cor` nem o glifo:
+ * só acrescentam sinal, e nenhum é SÓ cor — cada um também muda a forma
+ * (borda pontilhada, sombra em anel, cantos mais redondos) e o componente
+ * escreve um selo de texto (`.trilha-etapa__selo`) mais uma frase
+ * (`.trilha-etapa__situacao`) — ver EtapaNode.tsx.
+ *
+ * "descartada" é a única situação com opacidade nesta folha (as cinco de
+ * cima nunca usam — "apagada" foi pedido explicitamente aqui). O valor é
+ * moderado (0.78) de propósito: baixar mais arriscaria derrubar o texto do
+ * selo abaixo do contraste medido no cabeçalho deste arquivo, e essa medição
+ * não foi refeita com opacidade — quem alterar o valor precisa remedir.
+ * ========================================================================= */
+.trilha-etapa--decisao {
+  border-radius: 0.75rem;
+}
+
+.trilha-etapa--aguardando-escolha {
+  border-style: dotted;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--raia-cor) 50%, transparent),
+    var(--shadow-hard-sm);
+}
+
+.trilha-etapa--descartada {
+  border-style: dotted;
+  opacity: 0.78;
+}
+
+/* Descartada não convida ação — sem o degrau de hover das outras etapas.
+   Mesma especificidade de `.trilha-canvas .react-flow__node:hover .trilha-etapa`
+   (0,3,0 contra 0,4,0 aqui, que vence por ter uma classe a mais). */
+.trilha-canvas .react-flow__node:hover .trilha-etapa.trilha-etapa--descartada {
+  transform: none;
+}
+
+.trilha-etapa__selo {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  padding: 0 0.3rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-muted);
+  background: var(--surface);
+}
+
+.trilha-etapa__selo--decisao {
+  border-color: var(--ink-muted);
+  color: var(--ink);
+}
+
+.trilha-etapa__selo--aguardando,
+.trilha-etapa__selo--descartada {
+  border-style: dotted;
+}
+
+.trilha-etapa__situacao {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================================
+ * Maturidade do material de baralho (`deck_maturity`) — item 2 da entrega
+ * que liga FSRS à Trilha. Mesmo trilho hairline + preenchimento da barra de
+ * progresso da etapa (`.trilha-etapa__progresso` acima), mas em mint: maduro
+ * é o glifo "✓" da etapa concluída, e a leitura pretendida é a mesma —
+ * "isto já passou no teste do tempo". `--fracao-maduros` (0–100) é posto
+ * pelo componente em `style`.
+ * ========================================================================= */
+.trilha-material__maturidade {
+  --fracao-maduros: 0;
+
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.trilha-material__maturidade-trilho {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 2.5rem;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--hairline);
+}
+
+.trilha-material__maturidade-cheio {
+  display: block;
+  height: 100%;
+  width: calc(var(--fracao-maduros) * 1%);
+  background: var(--mint);
+  transition: width var(--motion-base) var(--ease-in-out);
+}
+
+/* =========================================================================
+ * Flecha (aresta). Sempre da direita de A para a esquerda de B, com ponta:
+ * "B depende de A". Espessura 2 (o mapa mental usa 1.5: aqui a flecha é o
+ * conteúdo principal, não ligação decorativa). Curva: bezier com tangentes
+ * horizontais (`type: "default"`), que lê como "entra em"; a curvatura é
+ * prop do componente (DESIGN-TRILHA.md §4), não CSS.
+ *
+ * A PONTA (marker) é pintada pela lib com style inline no <polyline>, então
+ * CSS não alcança: o componente passa `markerEnd.color` com o MESMO
+ * `var(--raia-…)` / `var(--mint)` / `var(--terracotta)` / `var(--amber)`
+ * que a regra abaixo dá ao traço. Detalhe e tamanhos no documento.
+ *
+ * Cor da flecha = cor da raia da etapa ALVO (quem depende), como no mapa
+ * mental (aresta na cor do filho). Chegando numa concluída, vira mint: o
+ * caminho já percorrido é verde. Chegando numa bloqueada, tracejada na cor
+ * da raia: o caminho ainda não se abriu. Em ciclo: pontilhada terracotta —
+ * o único caso com dois sinais (padrão e cor), porque é erro.
+ * ========================================================================= */
+.trilha-canvas .react-flow__edge.trilha-aresta .react-flow__edge-path {
+  stroke: var(--raia-cor, var(--border));
+  stroke-width: var(--trilha-aresta-espessura);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Hover engrossa sem animar (ação de alta frequência): ajuda a mirar antes
+   de selecionar para apagar. */
+.trilha-canvas .react-flow__edge.trilha-aresta:hover .react-flow__edge-path {
+  stroke-width: var(--trilha-aresta-espessura-selecionada);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta--para-bloqueada .react-flow__edge-path {
+  stroke-dasharray: var(--trilha-aresta-tracejado-bloqueada);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta--para-concluida .react-flow__edge-path {
+  stroke: var(--mint);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta--em-ciclo .react-flow__edge-path {
+  stroke: var(--terracotta);
+  stroke-dasharray: var(--trilha-aresta-tracejado-ciclo);
+}
+
+/* Viva/morta/esperando (item 2 do pedido) é um eixo ORTOGONAL ao acima: é
+ * sobre o CAMINHO da flecha (a decisão que a origina), não sobre o progresso
+ * do alvo — por isso só mexe em `stroke-dasharray`/`opacity`, nunca em
+ * `stroke`, e pode conviver com para-concluida/em-ciclo/para-bloqueada (uma
+ * flecha morta pode apontar para uma etapa já concluída antes da troca de
+ * caminho — nada é apagado). Nunca só cor: morta some em opacidade E troca o
+ * traço para um tracejado mais curto que o de "para-bloqueada"; esperando fica
+ * pontilhada fina, sem perder opacidade (ainda pode virar viva a qualquer
+ * momento, não é um estado "desistido"). Vem DEPOIS das três de cima de
+ * propósito, para ganhar o empate de especificidade (mesmas 4 classes).
+ */
+.trilha-canvas .react-flow__edge.trilha-aresta--morta .react-flow__edge-path {
+  stroke-dasharray: var(--trilha-aresta-tracejado-morta);
+  opacity: var(--trilha-aresta-opacidade-morta);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta--morta .react-flow__edge-textbg,
+.trilha-canvas .react-flow__edge.trilha-aresta--morta .react-flow__edge-text {
+  opacity: var(--trilha-aresta-opacidade-morta);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta--esperando .react-flow__edge-path {
+  stroke-dasharray: var(--trilha-aresta-tracejado-esperando);
+}
+
+/* Selecionada (ou focada por teclado): amber, 3 de espessura, contínua —
+   é esta que Delete/Backspace apaga. Cinco classes vencem as três da lib. */
+.trilha-canvas .react-flow__edge.trilha-aresta.selected .react-flow__edge-path,
+.trilha-canvas .react-flow__edge.trilha-aresta.selectable:focus-visible .react-flow__edge-path {
+  stroke: var(--amber);
+  stroke-width: var(--trilha-aresta-espessura-selecionada);
+  stroke-dasharray: none;
+}
+
+/* Rótulo opcional da flecha (ex.: "pré-requisito"). */
+.trilha-canvas .react-flow__edge.trilha-aresta .react-flow__edge-textbg {
+  fill: var(--surface);
+}
+
+.trilha-canvas .react-flow__edge.trilha-aresta .react-flow__edge-text {
+  fill: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}

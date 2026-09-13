@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AppError, importApkg } from "../../lib/ipc";
 
@@ -46,13 +46,11 @@ function fileNameFromPath(path: string): string {
  *
  * PLT-013: um import pode sobrescrever cartões que já existiam, então é um
  * dos dois gatilhos de operação de risco do checklist com código real por
- * trás — o campo de senha existe só para isso: o backend faz uma cópia de
- * segurança antes de chamar o sidecar, e a senha nunca fica salva (mesma
- * regra de `BackupSettings`/`CheckDatabaseSection`).
+ * trás — o backend faz uma cópia de segurança (`VACUUM INTO`, sem senha
+ * nem processo externo) antes de chamar o sidecar (mesma ideia de
+ * `BackupSettings`/`CheckDatabaseSection`).
  */
 export function ImportApkgSection() {
-  const passwordId = useId();
-  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<ImportStatus>({ kind: "idle" });
 
   async function handlePickFile() {
@@ -67,44 +65,29 @@ export function ImportApkgSection() {
     const fileName = fileNameFromPath(selected);
     setStatus({ kind: "importing", fileName });
     try {
-      const result = await importApkg(selected, password);
+      const result = await importApkg(selected);
       setStatus({ kind: "done", fileName, notesImported: result.notes_imported });
     } catch (error) {
       // Cobre tanto `ApkgInvalido` (zip corrompido/não é .apkg) e as falhas
-      // do backup pré-import (PLT-013: pg_dump ausente, disco cheio) quanto
-      // `SidecarTimeout`/`SidecarCrashed` do critério de aceite de PLT-004 —
-      // todas chegam aqui como `AppError` com `message` já pronta para o
-      // usuário (ver o comentário de `importApkg` em `src/lib/ipc.ts`),
-      // nunca como exceção não tratada.
+      // do backup pré-import (PLT-013: disco cheio, permissão negada na
+      // pasta) quanto `SidecarTimeout`/`SidecarCrashed` do critério de
+      // aceite de PLT-004 — todas chegam aqui como `AppError` com `message`
+      // já pronta para o usuário (ver o comentário de `importApkg` em
+      // `src/lib/ipc.ts`), nunca como exceção não tratada.
       setStatus({ kind: "error", message: errorMessage(error, "Não foi possível importar o arquivo .apkg.") });
     }
   }
 
   const isImporting = status.kind === "importing";
-  const canImport = password.length > 0 && !isImporting;
+  const canImport = !isImporting;
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-ink-muted">
         Importa um baralho exportado do Anki (arquivo <code>.apkg</code>). O app continua respondendo
-        durante o processamento, mesmo em arquivos grandes.
+        durante o processamento, mesmo em arquivos grandes. Antes de importar, o app faz uma cópia de
+        segurança do banco atual.
       </p>
-
-      <div>
-        <label htmlFor={passwordId} className="block text-sm font-medium text-ink">
-          Senha do Postgres
-        </label>
-        <input
-          id={passwordId}
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.currentTarget.value)}
-          className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-sm text-ink"
-        />
-        <p className="mt-1 text-xs text-ink-muted">
-          Necessária para que o app faça uma cópia de segurança antes de importar — nunca é salva.
-        </p>
-      </div>
 
       <div>
         <button

@@ -33,7 +33,9 @@
   border: 1px solid var(--border);
   border-radius: 0.35rem;
   background-color: var(--surface);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - popup de sugestão do
+     "@", flutuando sobre o texto. Preto fixo não seguia o tema. */
+  box-shadow: var(--shadow-hard);
   padding: 0.25rem;
 }
 

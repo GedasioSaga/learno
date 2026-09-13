@@ -94,6 +94,19 @@ describe("PageTree", () => {
     expect(screen.queryByRole("treeitem", { name: /Células/ })).not.toBeInTheDocument();
   });
 
+  it("§1: uma página raiz parece categoria (peso e ícone maior) — uma sub-página não", async () => {
+    const user = userEvent.setup();
+    render(<PageTree />);
+    const biologiaRow = await screen.findByRole("treeitem", { name: /Biologia/ });
+    expect(biologiaRow.querySelector("button.font-semibold")).toBeInTheDocument();
+    expect(within(biologiaRow).getByLabelText("Ícone de Biologia")).toHaveClass("size-7", "text-lg");
+
+    await user.click(within(biologiaRow).getByLabelText("Expandir"));
+    const celulasRow = screen.getByRole("treeitem", { name: /Células/ });
+    expect(celulasRow.querySelector("button.font-semibold")).not.toBeInTheDocument();
+    expect(within(celulasRow).getByLabelText("Ícone de Células")).toHaveClass("size-6", "text-base");
+  });
+
   it("expandir Biologia revela Células; colapsar esconde de novo", async () => {
     const user = userEvent.setup();
     render(<PageTree />);

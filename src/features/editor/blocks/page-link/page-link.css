@@ -64,7 +64,10 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 15vh;
-  background: rgb(0 0 0 / 0.35);
+  /* Preto fixo não segue o tema - mesmo espírito do `backdrop:bg-ink/50` que
+     o App.tsx usa nos <dialog>; aqui é div fixa simulando backdrop, então o
+     equivalente em CSS puro é `color-mix` sobre o token `--ink`. */
+  background: color-mix(in oklab, var(--ink) 50%, transparent);
 }
 
 .ed-page-link-picker {
@@ -76,7 +79,9 @@
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--surface);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - é o picker flutuando
+     sobre a página, mesma categoria de diálogo/popover. */
+  box-shadow: var(--shadow-hard);
   overflow: hidden;
 }
 

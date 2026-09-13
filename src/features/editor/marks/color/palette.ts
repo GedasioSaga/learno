@@ -3,16 +3,30 @@
  * own brand colors plus red/yellow/blue/green, exactly what the task asks
  * for - not a full color wheel, which would stop being "pequena e legível".
  *
- * Text-color `value`s use each color's "-ink" variant (theme.css) where one
- * exists - those are the ones theme.css itself documents as contrast-safe
- * for text, unlike the plain `--amber`/`--terracotta` swatches meant for
- * icons/borders. The four extra hues (red/yellow/blue/green) aren't in the
- * theme, so they're picked at a darkened, ~4.5:1-on-paper shade by hand.
+ * Every `value` below is `color-mix()` against a theme token, not a literal
+ * hex - see the "Matizes" block in `theme.css` for why. Brand hues (amber,
+ * mint, emerald, terracotta) mix the brand token itself (`var(--amber)`
+ * etc. - already documented in theme.css as contrast-safe); the four extra
+ * hues that have no brand token (red/yellow/blue/green) mix the matching
+ * `--matiz-*` token instead. Either way the mix is what makes this
+ * theme-aware automatically: five themes, zero hardcoded hex per theme.
  *
- * Highlight `value`s are the same hues at partial alpha (8-digit hex) so the
- * swatch (and the mark it produces) blends with whatever surface color the
- * current theme renders - light or dark - instead of a hardcoded light-mode
- * pastel that would go muddy against a dark background.
+ * Text `value`s mix mostly hue with a little `--ink` (70/30) so the result
+ * self-adjusts toward the active theme's text color - dark ink pulls a hue
+ * darker on Papel, light ink pulls it lighter on the four dark themes.
+ * Highlight `value`s mix a lighter dose of hue with `--surface` (30/70) so
+ * the wash blends with whatever surface color the current theme renders
+ * instead of a hardcoded light-mode pastel that would go muddy in the dark.
+ *
+ * IMPORTANT - persisted data: `value` is stored verbatim as the mark's
+ * `color` attr inside the user's document (ColorMenuButton passes it
+ * straight to `setColor`/`setHighlight`). Changing a `value` here does NOT
+ * change text/highlights already saved with the old literal hex - those
+ * marks still carry that exact string and still render it exactly as
+ * before (a CSS color string doesn't stop being valid because the palette
+ * moved on). That's intentional and covered by `register.test.ts`: new
+ * marks pick up the new theme-aware value, old marks keep rendering their
+ * old literal color. Neither is a bug; don't "fix" old documents to match.
  */
 export interface NamedColor {
   /** Stable id for the swatch's React key - not persisted anywhere. */
@@ -24,10 +38,10 @@ export interface NamedColor {
 }
 
 export const TEXT_COLORS: NamedColor[] = [
-  { id: "red", label: "Vermelho", value: "#b3261e" },
-  { id: "yellow", label: "Amarelo", value: "#8a6d1a" },
-  { id: "blue", label: "Azul", value: "#1d4ed8" },
-  { id: "green", label: "Verde", value: "#15803d" },
+  { id: "red", label: "Vermelho", value: "color-mix(in srgb, var(--matiz-vermelho) 70%, var(--ink))" },
+  { id: "yellow", label: "Amarelo", value: "color-mix(in srgb, var(--matiz-amarelo) 70%, var(--ink))" },
+  { id: "blue", label: "Azul", value: "color-mix(in srgb, var(--matiz-azul) 70%, var(--ink))" },
+  { id: "green", label: "Verde", value: "color-mix(in srgb, var(--matiz-verde) 70%, var(--ink))" },
   { id: "amber", label: "Âmbar", value: "var(--amber-ink)" },
   { id: "mint", label: "Menta", value: "var(--mint-ink)" },
   { id: "emerald", label: "Esmeralda", value: "var(--emerald)" },
@@ -35,12 +49,12 @@ export const TEXT_COLORS: NamedColor[] = [
 ];
 
 export const HIGHLIGHT_COLORS: NamedColor[] = [
-  { id: "red", label: "Vermelho", value: "#dc262666" },
-  { id: "yellow", label: "Amarelo", value: "#eab30866" },
-  { id: "blue", label: "Azul", value: "#3b82f666" },
-  { id: "green", label: "Verde", value: "#22c55e66" },
-  { id: "amber", label: "Âmbar", value: "#d6943666" },
-  { id: "mint", label: "Menta", value: "#59d68a66" },
-  { id: "emerald", label: "Esmeralda", value: "#0d564d66" },
-  { id: "terracotta", label: "Terracota", value: "#9f582e66" },
+  { id: "red", label: "Vermelho", value: "color-mix(in srgb, var(--matiz-vermelho) 30%, var(--surface))" },
+  { id: "yellow", label: "Amarelo", value: "color-mix(in srgb, var(--matiz-amarelo) 30%, var(--surface))" },
+  { id: "blue", label: "Azul", value: "color-mix(in srgb, var(--matiz-azul) 30%, var(--surface))" },
+  { id: "green", label: "Verde", value: "color-mix(in srgb, var(--matiz-verde) 30%, var(--surface))" },
+  { id: "amber", label: "Âmbar", value: "color-mix(in srgb, var(--amber) 30%, var(--surface))" },
+  { id: "mint", label: "Menta", value: "color-mix(in srgb, var(--mint) 30%, var(--surface))" },
+  { id: "emerald", label: "Esmeralda", value: "color-mix(in srgb, var(--emerald) 30%, var(--surface))" },
+  { id: "terracotta", label: "Terracota", value: "color-mix(in srgb, var(--terracotta) 30%, var(--surface))" },
 ];

@@ -6,8 +6,13 @@
  * MathJax - exatamente como `serialize.test.ts` já testa os nove tipos do
  * core.
  */
-import { describe, expect, it } from "vitest";
+import type { JSONContent } from "@tiptap/core";
+import { Editor } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Block } from "../../contract";
+import { collectTurnIntoItems } from "../../core/block-spec";
+import { buildEditorExtensions } from "../../core/extensions";
 import { docToFlatBlocks, blocksToDoc } from "../../core/serialize";
 // Efeito colateral: registra o BlockSpec de "equation" antes dos testes.
 import "./register";
@@ -53,5 +58,76 @@ describe("EDT-022: equação em bloco sobrevive ao round trip de persistência",
     const contentNode = doc.content?.[0]?.content?.[0];
     expect(contentNode?.type).toBe("equation");
     expect(contentNode?.attrs?.expression).toBe("");
+  });
+});
+
+describe('"Transformar em" > Equação em bloco - camada de Editor', () => {
+  let editor: Editor;
+
+  function createEditor(content: JSONContent): Editor {
+    return new Editor({ extensions: buildEditorExtensions(), content });
+  }
+
+  function startOfBlock(blockId: string): number {
+    let result: number | null = null;
+    editor.state.doc.descendants((node: PMNode, pos: number) => {
+      if (result !== null) return false;
+      if (node.attrs.id === blockId) {
+        result = pos + 1;
+        return false;
+      }
+      return true;
+    });
+    if (result === null) throw new Error(`bloco "${blockId}" não encontrado`);
+    return result;
+  }
+
+  function firstNodeOfType(typeName: string): PMNode | null {
+    let found: PMNode | null = null;
+    editor.state.doc.descendants((node: PMNode) => {
+      if (found) return false;
+      if (node.type.name === typeName) {
+        found = node;
+        return false;
+      }
+      return true;
+    });
+    return found;
+  }
+
+  afterEach(() => {
+    editor?.destroy();
+  });
+
+  it("num bloco vazio, converte no lugar - o documento resultante tem o nó equation", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "p1" } }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("p1"));
+    const item = collectTurnIntoItems().find((entry) => entry.id === "math:turn:equation");
+    if (!item) throw new Error('item "math:turn:equation" não registrado');
+
+    expect(item.run(editor)).toBe(true);
+
+    expect(firstNodeOfType("equation")).not.toBeNull();
+    expect(editor.getJSON().content).toHaveLength(1);
+  });
+
+  it("num bloco com texto, o texto sobrevive (a equação entra como próximo irmão)", () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "x = 1" }] }] }],
+    });
+    editor.commands.setTextSelection(startOfBlock("p1") + 1);
+    const item = collectTurnIntoItems().find((entry) => entry.id === "math:turn:equation");
+    if (!item) throw new Error('item "math:turn:equation" não registrado');
+
+    expect(item.run(editor)).toBe(true);
+
+    const doc = editor.getJSON();
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content?.[0]?.content?.[0]).toMatchObject({ type: "paragraph", content: [{ text: "x = 1" }] });
+    expect(firstNodeOfType("equation")).not.toBeNull();
   });
 });

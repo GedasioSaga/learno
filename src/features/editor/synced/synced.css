@@ -48,7 +48,11 @@
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgb(0 0 0 / 0.35);
+  /* Preto fixo não escurece nem clareia com o tema - no Papel ficava pesado
+     demais. Mesmo espírito do `backdrop:bg-ink/50` que o App.tsx usa nos
+     <dialog>; isto aqui é uma div fixa simulando backdrop, não <dialog>, então
+     o equivalente em CSS puro é `color-mix` sobre o token `--ink`. */
+  background: color-mix(in oklab, var(--ink) 50%, transparent);
   z-index: 50;
 }
 
@@ -59,7 +63,11 @@
   background: var(--surface-raised, var(--surface));
   color: var(--ink);
   padding: 1.25rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - isto é um diálogo
+     flutuando. `--shadow-hard` já traz a sombra dupla calibrada por tema
+     mais o fio de luz que substitui a sombra no escuro, onde preto sobre
+     preto some. */
+  box-shadow: var(--shadow-hard);
 }
 
 .ed-synced-dialog__title {

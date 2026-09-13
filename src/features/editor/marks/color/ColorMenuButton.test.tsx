@@ -10,7 +10,19 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildEditorExtensions } from "../../core/extensions";
 import { ColorMenuButton } from "./ColorMenuButton";
+import { HIGHLIGHT_COLORS, type NamedColor, TEXT_COLORS } from "./palette";
 import "./register";
+
+/** Acha uma cor pela `id` na paleta e falha alto (não silencioso) se a
+    paleta mudou e a cor sumiu - preferível a `!` num teste. */
+function colorValue(list: NamedColor[], id: string): string {
+  const found = list.find((color) => color.id === id);
+  if (!found) throw new Error(`cor "${id}" não está na paleta`);
+  return found.value;
+}
+
+const RED_TEXT = colorValue(TEXT_COLORS, "red");
+const YELLOW_HIGHLIGHT = colorValue(HIGHLIGHT_COLORS, "yellow");
 
 let editor: Editor;
 
@@ -47,7 +59,7 @@ describe("EDT-040: menu de cor de texto", () => {
     await user.click(screen.getByRole("button", { name: "Vermelho" }));
 
     const mark = editor.state.doc.nodeAt(2)?.marks.find((m) => m.type.name === "textStyle");
-    expect(mark?.attrs.color).toBe("#b3261e");
+    expect(mark?.attrs.color).toBe(RED_TEXT);
   });
 
   it("'Remover cor' desfaz a marca aplicada", async () => {
@@ -73,7 +85,7 @@ describe("EDT-041: menu de cor de fundo", () => {
     await user.click(screen.getByRole("button", { name: "Amarelo (fundo)" }));
 
     const marks = editor.state.doc.nodeAt(2)?.marks ?? [];
-    expect(marks.some((m) => m.type.name === "highlight" && m.attrs.color === "#eab30866")).toBe(true);
+    expect(marks.some((m) => m.type.name === "highlight" && m.attrs.color === YELLOW_HIGHLIGHT)).toBe(true);
     expect(marks.some((m) => m.type.name === "textStyle" && m.attrs.color)).toBe(false);
   });
 
@@ -90,7 +102,7 @@ describe("EDT-041: menu de cor de fundo", () => {
 
     const marks = editor.state.doc.nodeAt(2)?.marks ?? [];
     expect(marks.some((m) => m.type.name === "highlight")).toBe(false);
-    expect(marks.some((m) => m.type.name === "textStyle" && m.attrs.color === "#b3261e")).toBe(true);
+    expect(marks.some((m) => m.type.name === "textStyle" && m.attrs.color === RED_TEXT)).toBe(true);
   });
 });
 

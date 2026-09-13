@@ -12,19 +12,27 @@
 //! The conversion itself (`build_block_tree`, `render_markdown`,
 //! `escape_markdown_text`, `sanitize_filename`) is pure — no I/O, no
 //! database — and is exactly what the tests below exercise. Only
-//! `fetch_page_blocks`, the one function that actually reads Postgres, needs
-//! a live database, and is covered by the `#[ignore]`d integration test in
-//! `src-tauri/tests/backup_export_markdown.rs`.
+//! `fetch_page_blocks`, the one function that actually reads SQLite, needs
+//! a live database, and is covered by the integration tests in
+//! `src-tauri/tests/backup_export_markdown.rs` (not `#[ignore]`d; they run
+//! in every `cargo test` with a temporary SQLite database).
 
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::db::ids::{DbId, DbIdOpt, IdBind};
 use crate::error::Result;
 
-/// One row of `blocks`, as fetched for export.
+/// One row de `blocks`, como buscada para exportação.
+///
+/// `id` e `parent_block_id` são lidos como `DbId`/`DbIdOpt` (TEXT) e
+/// convertidos de volta para `Uuid` pelo `#[sqlx(try_from = ...)]` — ver
+/// `crate::db::ids` para o porquê.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ExportBlockRow {
+    #[sqlx(try_from = "DbId")]
     pub id: Uuid,
+    #[sqlx(try_from = "DbIdOpt")]
     pub parent_block_id: Option<Uuid>,
     pub block_type: String,
     pub content: serde_json::Value,
@@ -50,7 +58,7 @@ pub async fn fetch_page_blocks(pool: &SqlitePool, page_id: Uuid) -> Result<Vec<E
         "SELECT id, parent_block_id, block_type, content, plain_text, position \
          FROM blocks WHERE page_id = $1 AND deleted_at IS NULL ORDER BY position",
     )
-    .bind(page_id)
+    .bind(page_id.db())
     .fetch_all(pool)
     .await?;
 

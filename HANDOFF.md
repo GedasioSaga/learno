@@ -214,6 +214,82 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Biblioteca: estante organizada e páginas de anotação (08/09/2026)
+
+Portão inteiro, verde:
+
+- `rtk proxy cargo test`: **929 testes, 0 falhas**.
+- `rtk proxy cargo clippy --all-targets --all-features -- -D warnings -W clippy::unwrap_used
+  -W clippy::expect_used`: **0 erros**.
+- `rtk proxy npx tsc --noEmit`: **exit 0**.
+- `rtk proxy npx vitest run`: **1882 testes em 200 arquivos, 0 falhas**.
+
+O que entrou: categorias aninhadas (0036), título/autor editáveis e ordem personalizada da
+estante (0037), páginas de anotação criadas pelo usuário no leitor (0038), painel de categorias
+repaginado, capa do EPUB, e o CSP liberando `blob:`.
+
+#### ARRASTAR NA ESTANTE: TRÊS causas empilhadas, e as duas primeiras foram palpite meu
+
+Vale ler antes de mexer em qualquer arrastar-e-soltar deste projeto. O usuário reportou "fica o
+sinal de negação"; eu remendei o JavaScript **duas vezes** antes de achar a causa real.
+
+1. **`dragDropEnabled` do Tauri — A CAUSA DE VERDADE.** Em `tauri.conf.json`, a opção da janela
+   nasce `true` (confirmado no `config.rs` do `tauri-utils` via ctx7). Com ela ligada, o Tauri
+   registra no WebView2 o manipulador de arrastar-arquivo do SISTEMA OPERACIONAL, que intercepta
+   o gesto **antes de a página vê-lo**. Nenhuma correção em JavaScript resolve, porque o evento
+   não chega. Agora está `false`, e a linha está documentada em `GradeDeLivros.tsx` — quem a
+   reativar quebra o arrastar da estante E o da árvore de páginas junto.
+2. **A `<img>` da capa roubava o gesto.** Imagem é arrastável por padrão; como a capa é a maior
+   área do cartão, o navegador tentava arrastar a IMAGEM em vez do cartão. `draggable={false}`.
+3. **`preventDefault` depois de um guarda de estado do React.** `dragover` só autoriza o drop se
+   chamar `preventDefault`, e a chamada estava atrás de um `if` que lia `arrastandoId` — estado
+   escrito em `dragstart`. Os primeiros eventos chegam antes do re-render, o `if` lia `null`, e o
+   gesto nascia proibido. Autorizar sempre; o estado serve só para o destaque.
+
+**E um quarto defeito, que só o relato preciso do usuário revelou:** "num sentido deixa, no outro
+não". Soltar sobre um cartão significava sempre "pousa logo DEPOIS dele" — então arrastar o
+segundo sobre o primeiro pedia "põe o segundo depois do primeiro", que é onde ele já estava. Não
+era recusa, era pedido sem efeito, e **metade dos arrastes de um par era inútil por construção**.
+Agora vale o LADO do cartão (metade esquerda = antes, direita = depois), com marca no lado onde
+o livro vai cair. O comentário antigo dizia que numa grade não havia eixo óbvio para
+antes/depois; estava errado — a grade flui da esquerda para a direita.
+
+#### Duas armadilhas de TESTE desta rodada (as duas davam verde provando nada)
+
+- **`clientX` não sobrevive ao evento sintético.** O jsdom não implementa `DragEvent`, então a
+  testing-library cai num `Event` genérico e descarta propriedades de mouse. Todo teste de
+  "metade esquerda" media a metade direita e passava com o defeito de volta. Os eventos agora são
+  construídos à mão (`createEvent` + `Object.defineProperty`) em `GradeDeLivros.test.tsx`.
+- **Teste de ciclo em categoria passava sem exercitar nada.** `listar_livros_da_categoria` junta
+  com `library_book_categories`; sem NENHUM livro ligado, a consulta é trivialmente vazia e o
+  SQLite nem percorre a recursão. O teste terminava rápido e passava mesmo com
+  `MAX_CATEGORY_DEPTH` removido. Medido: com um livro ligado e o teto em 100 milhões, a consulta
+  leva ~58s; com o teto real, 0,1s. O teste agora liga um livro.
+
+#### ARMADILHA DE GIT: 29 arquivos staged como VAZIOS
+
+`git ls-files -s src/features/biblioteca/` mostrava blob `e69de29…` (o hash do arquivo vazio) em
+29 arquivos, com o conteúdo real intacto no disco. **Um `git commit` gravaria a Biblioteca inteira
+em branco.** Herança de sessão anterior, não das mudanças do dia. Resolvido com `git add`
+novamente, conferindo tamanho de índice contra disco. Se aparecer de novo:
+`git ls-files -s | grep e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`.
+
+#### Dívida declarada nesta rodada
+
+- `listar_livros_da_categoria` (Rust) sem tela: o filtro expande descendentes no TypeScript, com a
+  árvore que a tela já tem em memória. A travessia existe nos DOIS lados e nada trava as duas
+  juntas — quem ligar o comando um dia deve APAGAR a versão TypeScript no mesmo commit.
+- `salvar_resumo_de_capitulo` / `listar_resumos_do_livro` / `remover_resumo_de_capitulo`: a feature
+  foi substituída por páginas do usuário (0038). A tabela antiga continua no banco e **nenhuma
+  tela lê os resumos já escritos**. As duas saídas honestas: importar os resumos antigos para
+  páginas, ou apagar tabela e comandos juntos depois de confirmar que não há nada escrito.
+
+#### Disco
+
+**3,7 GB livres.** `src-tauri/target/debug` = 13,7 GB; o temporário do Claude = 7,2 GB, quase todo
+de OUTROS projetos do usuário (Magic 3,7 GB, Projeto Genesis 2,8 GB) — não apagar sem pedir. Já
+zerou uma vez nesta sessão e quebrou build.
+
 ### Tags `#assim` (07/09/2026) — backend
 
 Bar: Obsidian. Tag inline no meio do texto, aninhada com `/`, com um jeito de ver todas e
@@ -1202,3 +1278,63 @@ Evidência anterior, ainda válida:
 - **Ambiente**: o disco `C:` encheu durante a sessão anterior; foram liberados 18,3 GB
   apagando só `src-tauri/target/debug/incremental`, que é cache regenerável. O cache volta a
   crescer a cada build.
+
+### Esteira gauntlet sobre Mapa Mental, Trilha, Cronograma e Biblioteca (07/09/2026)
+
+Sessão conduzida pela skill `gauntlet-loop`, com bar externa nomeada e comparação cega por
+rodada. Ledger completo (bar, ordem A/B por hash, gap, veredito, invariantes) em
+`<scratchpad da sessão>/gauntlet-esteira-4-areas.jsonl`.
+
+**Instrumento novo — vitrine.** `src/vitrine/` renderiza telas de feature com fixture, sem
+backend Tauri, para permitir screenshot e julgamento por pixel: `?vitrine=cronograma-grade`,
+`cronograma-colunas`, `biblioteca-estante`, `mapa-mental-50|200|500`, `trilha-pequena|media|com-decisao`.
+
+**Trilha — `gauntlet vs roadmap.sh: 1 rodada, saída VENCE (confirmada por swap com ordem
+invertida; os dois critics escolheram o nosso).** Gap encontrado NA BAR: roadmap.sh não tem
+representação visual de "bloqueado" nem legenda para os três tons de check, e as linhas não
+têm seta. Testes: 151 em `src/features/trilha`, `tsc` limpo.
+
+**Cronograma — `gauntlet vs Notion Calendar (visão de semana): 4 rodadas, sem saída`**, 3 gaps
+fechados em sequência (largura mínima de lane + chip `+N`; card que renderizava só o título;
+descarte silencioso do horário). Uma rodada anulada por defeito do próprio instrumento.
+Testes: 145 em `src/features/cronograma`.
+
+**Mapa Mental — medido, não estimado.** `layoutRadial` 2665ms → 282ms em 500 nós (~9x);
+`arestasComCor` deixou de recalcular a cada quadro de arrasto (dependência trocada por
+assinatura de topologia). **Delta em aberto: fluidez de quadro no arrasto NÃO foi provada** —
+aba de segundo plano não roda `requestAnimationFrame`, e a medição headless não mede paint.
+
+**Biblioteca — encerrada por ordem do usuário** ("está praticamente pronta"). Não reabrir sem
+pedido explícito.
+
+**Bug crítico achado pelo usuário, não pela esteira.** Etapas criadas pela UI ficavam
+invisíveis e inalcançáveis: `BarraDaTrilha.tsx` criava com `laneValue` vazio fixo, `layout.ts`
+filtrava por igualdade exata e descartava, o resgate só rodava sem nenhuma raia, e o único
+controle de mudar raia vivia no cartão que nunca era desenhado — impasse fechado. Confirmado
+no banco real (`trail_lanes` = 1 linha 'Estudos'; 4 etapas com valor de agrupamento NULL).
+Corrigido em duas camadas, com invariante testado: **etapas que entram no layout == etapas
+posicionadas**. Lição de processo registrada no ledger: as fixtures nasciam do formato de dado
+ideal, não do caminho real de criação — por isso a vitória cega e 146 testes verdes conviveram
+com o bug.
+
+**Três defeitos do instrumento de julgamento, todos registrados no ledger:** captura JPEG
+reduzida produziu falso positivo de texto cortado e de sobreposição (uma rodada anulada, dois
+terços de um gap inválido); fixture da Biblioteca dava a mesma capa a todo livro. Regra
+adotada: julgamento visual só com PNG em escala nativa, e toda acusação de "texto cortado" ou
+"blocos sobrepostos" é conferida por `getBoundingClientRect` antes de virar gap.
+
+**Duas mentiras confirmadas do filtro `rtk` sobre exit code** (além da de `tsc` já documentada
+em `RTK.md`): `cargo test` que falhou por disco cheio reportou exit 0, e um `vitest run` em
+background reportou exit 0 com 2 testes falhando. Portão de qualidade roda com `rtk proxy` e
+lê a linha de resumo, nunca `$?`.
+
+**Ambiente — bloqueio real:** disco `C:` com ~2,5 GB livres de 476 GB (0,5%) durante a sessão;
+`src-tauri/target` ocupa 10,18 GB (reconstruível). Causou Vite morto três vezes por falta de
+memória, renderer do Chrome travando em captura, e um `cargo test` corrompido (erro Windows
+1455). Decisão de limpeza pendente com o usuário.
+
+**Dívida pré-existente que permaneceu intocada** (é de Notas/tags, fora do escopo desta
+sessão): `comandos-alcancaveis.test.ts` acusa `['list_all_tags','list_pages_for_tag']` e
+`contrato-ipc.test.ts` acusa `['TagPageRow','TagSummaryRow']`. Conferir o CONTEÚDO dessa
+acusação, não a contagem de arquivos falhando — `deck_maturity` entrou e saiu dela nesta
+sessão sem mudar a contagem.

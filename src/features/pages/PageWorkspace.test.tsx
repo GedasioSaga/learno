@@ -5,11 +5,15 @@ import {
   autosaveClearPending,
   autosaveWritePending,
   createPageVersionSnapshot,
+  duplicatePage,
   getPageBreadcrumb,
+  listPageTree,
   listPageVersions,
+  movePage,
   renamePage,
   setPageFavorite,
   setPageIcon,
+  trashPage,
   type PageRow,
 } from "../../lib/ipc";
 import { listBacklinks } from "./backlinks/ipc";
@@ -39,6 +43,13 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     // would hit the real Tauri `invoke` (absent in jsdom) and reject.
     autosaveWritePending: vi.fn(),
     autosaveClearPending: vi.fn(),
+    // `PageOptionsMenu` (o "•••" do cabeçalho) chama `duplicate`/`trash` da
+    // store, que por sua vez chamam estes três — sem mocá-los aqui, os
+    // testes de Duplicar/Mover para lixeira bateriam no `invoke` real.
+    duplicatePage: vi.fn(),
+    trashPage: vi.fn(),
+    movePage: vi.fn(),
+    listPageTree: vi.fn(),
   };
 });
 
@@ -51,6 +62,10 @@ const createPageVersionSnapshotMock = vi.mocked(createPageVersionSnapshot);
 const autosaveWritePendingMock = vi.mocked(autosaveWritePending);
 const autosaveClearPendingMock = vi.mocked(autosaveClearPending);
 const listBacklinksMock = vi.mocked(listBacklinks);
+const duplicatePageMock = vi.mocked(duplicatePage);
+const trashPageMock = vi.mocked(trashPage);
+const movePageMock = vi.mocked(movePage);
+const listPageTreeMock = vi.mocked(listPageTree);
 
 function row(overrides: Partial<PageRow> & Pick<PageRow, "id">): PageRow {
   return {
@@ -74,6 +89,11 @@ beforeEach(() => {
   autosaveWritePendingMock.mockResolvedValue(undefined);
   autosaveClearPendingMock.mockResolvedValue(undefined);
   listBacklinksMock.mockResolvedValue([]);
+  // `duplicate`/`trash` da store recarregam a árvore inteira depois de agir
+  // (ver os comentários em `store.ts`) — sem isto, `load()` cairia em
+  // `status: "error"` internamente (capturado lá, não vaza para o teste, mas
+  // some da árvore o que os testes de Duplicar/Lixeira esperam encontrar).
+  listPageTreeMock.mockResolvedValue([row({ id: "cronograma", title: "Cronograma" })]);
   usePageTreeStore.setState({
     status: "ready",
     errorMessage: null,
@@ -156,23 +176,126 @@ describe("PageWorkspace", () => {
     expect(screen.getByText("Página não encontrada")).toBeInTheDocument();
   });
 
-  it("FUN-035: o botão Histórico abre o VersionHistoryDialog da página aberta", async () => {
+  it("FUN-035: 'Histórico' no menu de opções da página abre o VersionHistoryDialog", async () => {
     const user = userEvent.setup();
     render(<PageWorkspace pageId="cronograma" />);
 
-    await user.click(screen.getByRole("button", { name: "Histórico" }));
+    // O painel do "•••" é `popover="auto"` — permanentemente `display: none`
+    // no jsdom (ver o comentário em `PageTree.test.tsx`), daí `{ hidden: true }`
+    // e `fireEvent.click` (não `userEvent.click`, que checa visibilidade) no
+    // item de dentro.
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Histórico", hidden: true }));
 
     expect(await screen.findByRole("dialog", { name: /Histórico de versões de Cronograma/ })).toBeInTheDocument();
     expect(listPageVersionsMock).toHaveBeenCalledWith("cronograma");
   });
 
-  it("FUN-023: o botão de exportar Markdown da página aberta está presente", async () => {
+  it("FUN-023: o botão de exportar Markdown está no menu de opções da página aberta", async () => {
+    const user = userEvent.setup();
     render(<PageWorkspace pageId="cronograma" />);
 
-    // `findBy` (not `getBy`) - no fake timers in this block, so it's free to
-    // flush `Editor`'s async initial load the normal way instead of an
-    // explicit `act()` dance.
-    expect(await screen.findByRole("button", { name: "Exportar como Markdown" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    expect(screen.getByRole("button", { name: "Exportar como Markdown", hidden: true })).toBeInTheDocument();
+  });
+
+  it("FUN-017: escolher 'Serifada' no menu de opções muda a fonte e persiste por página", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    expect(screen.getByRole("radio", { name: "Padrão", hidden: true })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Serifada", hidden: true }));
+
+    // Radiogroup de verdade: escolher uma desmarca as outras duas.
+    expect(screen.getByRole("radio", { name: "Serifada", hidden: true })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Padrão", hidden: true })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Mono", hidden: true })).not.toBeChecked();
+
+    const surface = container.querySelector('[data-slot="page-surface"]');
+    expect(surface).toHaveStyle({ "--font-sans": "var(--font-display)" });
+  });
+
+  it("FUN-017: 'Mono' muda tanto o corpo quanto os títulos, sem depender de nenhum token de fonte do tema", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Mono", hidden: true }));
+
+    const surface = container.querySelector('[data-slot="page-surface"]');
+    expect(surface).toHaveStyle({
+      "--font-sans": 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      "--font-display": 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    });
+  });
+
+  it("FUN-018: 'Texto pequeno' encolhe a página inteira via zoom", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Texto pequeno", hidden: true }));
+
+    const surface = container.querySelector('[data-slot="page-surface"]');
+    expect(surface).toHaveStyle({ zoom: "0.875" });
+  });
+
+  it("FUN-016: 'Largura total' remove a régua de 65ch", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PageWorkspace pageId="cronograma" />);
+
+    const surface = () => container.querySelector('[data-slot="page-surface"]');
+    expect(surface()).toHaveClass("max-w-[var(--measure)]");
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Largura total", hidden: true }));
+
+    expect(surface()).toHaveClass("max-w-none");
+    expect(surface()).not.toHaveClass("max-w-[var(--measure)]");
+  });
+
+  it("'Duplicar' no menu de opções duplica a página aberta", async () => {
+    const user = userEvent.setup();
+    duplicatePageMock.mockResolvedValue(row({ id: "copia", title: "Cronograma (cópia)" }));
+    render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicar", hidden: true }));
+
+    await waitFor(() => expect(duplicatePageMock).toHaveBeenCalledWith("cronograma"));
+  });
+
+  it("'Mover para lixeira' no menu de opções move a página aberta para a lixeira", async () => {
+    const user = userEvent.setup();
+    trashPageMock.mockResolvedValue(row({ id: "cronograma", title: "Cronograma" }));
+    render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mover para lixeira", hidden: true }));
+
+    await waitFor(() => expect(trashPageMock).toHaveBeenCalledWith("cronograma"));
+  });
+
+  it("'Mover para...' no menu de opções abre o diálogo e move a página aberta ao escolher um destino", async () => {
+    const user = userEvent.setup();
+    usePageTreeStore.setState({
+      pagesById: new Map([
+        ["cronograma", row({ id: "cronograma", title: "Cronograma" })],
+        ["biologia", row({ id: "biologia", title: "Biologia" })],
+      ]),
+    });
+    movePageMock.mockResolvedValue(row({ id: "cronograma", title: "Cronograma", parent_id: "biologia" }));
+    render(<PageWorkspace pageId="cronograma" />);
+
+    await user.click(screen.getByRole("button", { name: "Mais opções da página" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mover para...", hidden: true }));
+
+    expect(screen.getByRole("heading", { name: /Mover .Cronograma. para/, hidden: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /Biologia/, hidden: true }));
+
+    await waitFor(() => expect(movePageMock).toHaveBeenCalledWith("cronograma", "biologia", { type: "end" }));
   });
 
   it("FUN-044: o rodapé de backlinks é montado para a página aberta e mostra o que veio do backend", async () => {
@@ -194,7 +317,10 @@ describe("PageWorkspace", () => {
   it("sem backlinks, o rodapé não aparece (nunca uma seção 'Backlinks' vazia)", async () => {
     render(<PageWorkspace pageId="cronograma" />);
 
-    await screen.findByRole("button", { name: "Exportar como Markdown" });
+    // Só para esperar o `Editor` (Fase 2) assentar antes de checar o rodapé —
+    // qualquer elemento sempre presente serve; o gatilho do menu de opções é
+    // visível sem precisar de `{ hidden: true }`.
+    await screen.findByRole("button", { name: "Mais opções da página" });
     expect(screen.queryByRole("heading", { name: "Backlinks" })).not.toBeInTheDocument();
   });
 });

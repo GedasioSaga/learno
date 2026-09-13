@@ -1,0 +1,63 @@
+/*
+ * O necessário para o `TextLayer` do pdf.js (spans absolutos, um por palavra,
+ * por cima do canvas) alinhar com o texto desenhado e ficar selecionável.
+ *
+ * Não é o `pdfjs-dist/web/pdf_viewer.css` inteiro — são ~4000 linhas para a
+ * barra de localizar, o editor de anotação e a visualização de impressão que
+ * esta rodada não usa; copiar tudo importaria estilo e cor que este leitor
+ * não desenha. Só a cadeia de variáveis que o `TextLayer` de fato lê está
+ * aqui, extraída de `node_modules/pdfjs-dist/web/pdf_viewer.css` (as regras
+ * `.pdfViewer`/`.pdfViewer .page`/`.textLayer` de lá).
+ *
+ * `--scale-factor` é escrito pelo próprio `LeitorPdf.tsx` (inline, em
+ * `.leitor-pdf-pagina`, um NÚMERO — não uma cor, então não entra na regra de
+ * tokens do projeto) a cada render de página, igual ao `viewport.scale`
+ * usado para desenhar o canvas: é o que faz um span de texto cair exatamente
+ * sobre o glifo pintado, em qualquer zoom.
+ */
+.leitor-pdf-pagina {
+  position: relative;
+  --scale-factor: 1;
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+}
+
+.leitor-pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  caret-color: transparent;
+  /* `--min-font-size` é sobrescrito pelo próprio `TextLayer.render()` (inline, no container) — este valor só cobre o instante antes do primeiro render. */
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.leitor-pdf-text-layer span,
+.leitor-pdf-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  /* `--font-height` chega inline por span, do próprio `TextLayer.render()`; `0` aqui é só o valor antes disso acontecer. */
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+/* Sem camada de texto (`hasTextLayer === false`): nada aqui é selecionável, e o cursor de texto seria uma promessa vazia. */
+.leitor-pdf-text-layer[data-sem-texto="true"] span {
+  cursor: default;
+}
+
+.leitor-pdf-text-layer ::selection {
+  background: color-mix(in srgb, var(--focus) 35%, transparent);
+  color: transparent;
+}

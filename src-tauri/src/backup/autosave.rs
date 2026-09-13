@@ -6,7 +6,7 @@
 //! that gap: the editor calls [`AutosaveJournal::write_pending`] far more
 //! often (every few seconds of idle typing), to a plain file on disk, and
 //! [`AutosaveJournal::clear_pending`] the moment that content is confirmed
-//! durably saved to Postgres.
+//! durably saved to SQLite.
 //!
 //! The key invariant, and the reason this needs no separate "was the last
 //! session dirty?" marker: a journal entry for a page exists on disk **only
@@ -15,7 +15,7 @@
 //! dirty-session signal — the previous process ended (crashed) before it
 //! ever got to call `clear_pending`. A clean shutdown always clears first.
 //!
-//! Nothing here touches Postgres, so every test in this file runs with no
+//! Nothing here touches SQLite, so every test in this file runs with no
 //! database at all — only a scratch directory on disk.
 
 use std::fs;
@@ -38,7 +38,7 @@ pub struct JournalEntry {
 }
 
 /// The most recent point in time this page's content is known to have
-/// reached Postgres durably — the baseline a recovered journal entry is
+/// reached SQLite durably — the baseline a recovered journal entry is
 /// compared against, so a stale entry never overwrites a save that already
 /// happened after it (a narrow race: autosave-to-DB succeeds, then the
 /// process dies before the journal file is cleared).

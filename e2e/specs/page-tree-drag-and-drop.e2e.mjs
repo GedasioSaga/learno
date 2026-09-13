@@ -7,40 +7,32 @@
 // exercitada por um teste de componente; só um WebView real, com layout
 // real, prova este critério de aceite.
 //
-// Setup do teste (não é o que este teste verifica): a única porta de
-// entrada para o estado "pronto" é o próprio assistente de primeira
-// execução/reconexão (`App.tsx` só renderiza a árvore depois que
-// `FirstRunWizard` chama `onComplete`, e a senha nunca fica persistida —
-// ver `src/App.tsx` — então nem escrever `config.json` na mão adiantaria:
-// toda sessão nova sempre nasce em "needs-reconnect" e pede a senha de
-// novo). Este arquivo preenche esse mesmo formulário apontando para
-// `learno_test`, sem alegar nada sobre PLT-016 (isso é
-// first-run-wizard.e2e.mjs) — é só o caminho que existe para chegar à
-// árvore de páginas.
+// Setup do teste (não é o que este teste verifica): depois da migração para
+// SQLite (docs/MIGRACAO-SQLITE.md) não existe mais assistente de primeira
+// execução — `FirstRunWizard` foi apagado. `App.tsx` chama `openWorkspace()`
+// ao subir, que abre direto o arquivo do banco na pasta de dados do app e
+// aplica as migrações; não há formulário para preencher nem "Continuar" para
+// clicar. O app só demora a aparecer porque essa abertura + migração ainda
+// precisam rodar na primeira execução da sessão — daí o timeout generoso no
+// primeiro elemento esperado abaixo.
 
-import { TEST_DB } from "../lib/env.mjs";
-import { psql, psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
+import { scalar, waitFor } from "../lib/db.mjs";
 
 const STAMP = Date.now();
 const PARENT_TITLE = `E2E Destino ${STAMP}`;
 const CHILD_TITLE = `E2E Origem ${STAMP}`;
 
-/** Mesmo par label+input de first-run-wizard.e2e.mjs — nenhum dos dois arquivos importa do outro de propósito (specs independentes, cada um lançando sua própria sessão do app). */
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
-
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
 }
 
-/** Confirma no Postgres real — não só no DOM — que `parent_id` mudou (o que o critério de aceite do FUN-005 exige). */
+/** Confirma no banco real — não só no DOM — que `parent_id` mudou (o que o critério de aceite do FUN-005 exige). */
 function parentIdOf(title) {
-  return psql(`select parent_id from pages where title = ${sqlLiteral(title)}`);
+  return scalar("select parent_id from pages where title = ?", [title]);
 }
 
 function idOf(title) {
-  return psql(`select id from pages where title = ${sqlLiteral(title)}`);
+  return scalar("select id from pages where title = ?", [title]);
 }
 
 async function createRootPage(title) {
@@ -56,28 +48,18 @@ async function createRootPage(title) {
 
 describe("FUN-005 — arrastar uma página sobre outra a torna sua sub-página", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    // Trust auth (ver first-run-wizard.e2e.mjs sobre o campo Senha nascer
-    // `required`) — conteúdo irrelevante para o Postgres, só não pode ficar vazio.
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
-
+    // Sem assistente de primeira execução, o primeiro sinal de app pronto é
+    // a própria barra lateral (`AppShell.tsx`, `nav[aria-label="Páginas"]`).
+    // 30000ms porque essa primeira renderização ainda espera `openWorkspace()`
+    // criar/abrir o arquivo SQLite e rodar as migrações pendentes.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
     await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
   });
 
-  after(() => {
-    // Limpeza do próprio banco de teste descartável — mantém a suíte
-    // repetível sem acumular páginas de execuções anteriores.
-    psqlQuiet(`delete from pages where title in (${sqlLiteral(PARENT_TITLE)}, ${sqlLiteral(CHILD_TITLE)})`);
-  });
+  // Sem hook de limpeza: `db.mjs` abre o arquivo só para leitura de propósito
+  // (o app está de pé com o mesmo arquivo aberto em WAL), então não há como
+  // fazer `DELETE` daqui. Os títulos já carregam `STAMP` (Date.now()) e são
+  // exclusivos desta suíte, então uma execução não colide com sobra de outra.
 
   it("cria duas páginas raiz para o cenário", async () => {
     await createRootPage(PARENT_TITLE);
@@ -108,9 +90,16 @@ describe("FUN-005 — arrastar uma página sobre outra a torna sua sub-página",
     await expect(child).toHaveAttribute("aria-level", "2");
   });
 
-  it("persistiu no Postgres: parent_id da origem agora é o id do destino", () => {
-    const parentId = parentIdOf(CHILD_TITLE);
+  it("persistiu no banco: parent_id da origem agora é o id do destino", async () => {
     const expectedId = idOf(PARENT_TITLE);
+
+    // `waitFor` em vez de leitura única: o drop já assentou na tela (teste
+    // anterior), mas a escrita no SQLite é assíncrona em relação ao clique —
+    // ler no instante seguinte pode pegar o valor antigo por sorte de timing.
+    const parentId = await waitFor(() => parentIdOf(CHILD_TITLE), (valor) => valor === expectedId, {
+      mensagem: `parent_id de "${CHILD_TITLE}" apontar para o id de "${PARENT_TITLE}"`,
+    });
+
     expect(parentId).toBe(expectedId);
   });
 });

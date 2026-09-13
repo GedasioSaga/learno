@@ -13,15 +13,6 @@ pub enum Error {
     #[error("banco de dados: {0}")]
     Database(#[from] sqlx::Error),
 
-    /// PLT-016: distinto de `Database` — este é o caso em que nenhuma
-    /// instância de Postgres respondeu no endereço testado (porta fechada,
-    /// host errado, serviço parado), não uma credencial rejeitada por um
-    /// servidor que de fato atendeu. O assistente de primeira execução usa
-    /// esse `kind` para mostrar orientação de instalação em vez da mensagem
-    /// crua de conexão.
-    #[error("nenhuma instância de Postgres encontrada: {0}")]
-    DatabaseUnreachable(String),
-
     #[error("migração do banco: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
 
@@ -56,7 +47,6 @@ impl Error {
     pub fn kind(&self) -> &'static str {
         match self {
             Error::Database(_) => "database",
-            Error::DatabaseUnreachable(_) => "database_unreachable",
             Error::Migration(_) => "migration",
             Error::Config(_) => "config",
             Error::Sidecar(_) => "sidecar",

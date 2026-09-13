@@ -5,7 +5,7 @@
  * discover-extensions.ts` o descobre via `import.meta.glob`.
  */
 import { createElement } from "react";
-import { registerBlockSpec, registerEditorOverlay, registerSlashMenuItem } from "../../core/block-spec";
+import { registerBlockSpec, registerEditorOverlay, registerSlashMenuItem, registerTurnIntoItem } from "../../core/block-spec";
 import { registerBlockExtension } from "../../core/registry";
 import { usePageTreeStore } from "../../../pages/store";
 import { displayTitle } from "../../../pages/tree-utils";
@@ -79,4 +79,23 @@ registerSlashMenuItem([
 registerEditorOverlay({
   id: "blocks:page-link-picker",
   render: (editor) => createElement(PageLinkPicker, { editor }),
+});
+
+// EDT-049: "Transformar em" > "Sub-página" - só "Sub-página" foi pedida
+// ("Link para página" abre um seletor, que não cabe no contrato síncrono de
+// `TurnIntoItem.run`, e não foi pedida). Mesmo corpo do item "/" acima
+// (linha 66) - duplicado, não extraído: são só duas chamadas, abaixo do
+// limiar de 3 usos reais deste projeto para abstrair. `createSubPageAndInsert`
+// já chama `insertBlockHere` por baixo (`actions.ts`), então um bloco com
+// texto mantém seu texto e ganha o link como próximo irmão - nada some.
+registerTurnIntoItem({
+  id: "blocks:turn:sub-page",
+  title: "Sub-página",
+  group: "Páginas",
+  icon: "📄",
+  run: (editor) => {
+    if (!usePageTreeStore.getState().selectedPageId) return false;
+    void createSubPageAndInsert(editor).catch(() => undefined);
+    return true;
+  },
 });

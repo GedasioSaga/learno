@@ -17,8 +17,7 @@
 // aria-label="Páginas"`, como o próprio arquivo declara. Se isso mudar, só
 // `pickMention` precisa mudar, não o resto do spec.
 
-import { TEST_DB } from "../lib/env.mjs";
-import { psql, psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
+import { scalar, waitFor } from "../lib/db.mjs";
 
 const STAMP = Date.now();
 const AULA4_TITLE = `E2E Aula 4 ${STAMP}`;
@@ -26,10 +25,6 @@ const AULA7_TITLE = `E2E Aula 7 ${STAMP}`;
 const GLOSSARIO_TITLE = `E2E Glossário ${STAMP}`;
 const TERMOS_TITLE = `E2E Termos ${STAMP}`;
 const DICIONARIO_TITLE = `E2E Dicionário ${STAMP}`;
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -100,31 +95,24 @@ function mentionChip(pageTitle) {
 
 describe("FUN-044/FUN-045 — backlinks no rodapé e propagação de renomeação", () => {
   before(async () => {
-    await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-
-    await fieldFor("Host").setValue(TEST_DB.host);
-    await fieldFor("Porta").setValue(String(TEST_DB.port));
-    await fieldFor("Banco de dados").setValue(TEST_DB.database);
-    await fieldFor("Usuário").setValue(TEST_DB.user);
-    await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-
-    await $("button=Testar conexão").click();
-    await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-    await $("button=Continuar").click();
-
-    await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
+    // Sem assistente de primeira execução (apagado — App.tsx chama
+    // openWorkspace() direto ao subir, que abre/cria o arquivo do banco e
+    // roda as migrações). O primeiro elemento real do app é a `<nav
+    // aria-label="Páginas">` de `AppShell.tsx` — ela existe mesmo antes de a
+    // árvore carregar (mostra o `EmptyState` até lá), então é o sinal certo
+    // de "o app abriu de verdade" em vez de esperar a árvore em si. Timeout
+    // generoso porque a primeira execução ainda cria o arquivo e migra.
+    await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
 
     await createRootPage(AULA4_TITLE);
     await createRootPage(AULA7_TITLE);
     await createRootPage(GLOSSARIO_TITLE);
   });
 
-  after(() => {
-    const titles = [AULA4_TITLE, AULA7_TITLE, GLOSSARIO_TITLE, TERMOS_TITLE, DICIONARIO_TITLE]
-      .map(sqlLiteral)
-      .join(", ");
-    psqlQuiet(`delete from pages where title in (${titles})`);
-  });
+  // Sem `after` de limpeza: `db.mjs` abre o SQLite em modo somente leitura de
+  // propósito (ver `lib/db.mjs`), e o banco inteiro é descartado entre
+  // sessões de qualquer forma. Os títulos já carregam `STAMP` (Date.now())
+  // como prefixo único, então não há colisão com outra spec para limpar.
 
   it("prepara o cenário do checklist: 'Glossário' com filha 'Termos', mencionado em 'Aula 4' e 'Aula 7'", async () => {
     await openPage(GLOSSARIO_TITLE);
@@ -195,10 +183,16 @@ describe("FUN-044/FUN-045 — backlinks no rodapé e propagação de renomeaçã
     await expect(nav).toHaveText(new RegExp(`${DICIONARIO_TITLE}[\\s\\S]*${TERMOS_TITLE}`));
   });
 
-  it("FUN-045 (Postgres): o título persistido de 'Glossário' agora é 'Dicionário'", () => {
-    const title = psql(
-      `select title from pages where id = (select id from pages where title = ${sqlLiteral(DICIONARIO_TITLE)})`,
+  it("FUN-045 (SQLite): o título persistido de 'Glossário' agora é 'Dicionário'", async () => {
+    // waitFor, não scalar direto: a asserção anterior já confirmou o rename
+    // na UI, mas a gravação em disco é assíncrona em relação ao clique/blur
+    // (ver comentário de `waitFor` em `lib/db.mjs`) — ler o banco no instante
+    // seguinte pode ainda achar o título antigo.
+    const persisted = await waitFor(
+      () => scalar("select title from pages where title = ?", [DICIONARIO_TITLE]),
+      (valor) => valor === DICIONARIO_TITLE,
+      { mensagem: "título de 'Glossário' renomeado para 'Dicionário' no banco" },
     );
-    expect(title).toBe(DICIONARIO_TITLE);
+    expect(persisted).toBe(DICIONARIO_TITLE);
   });
 });

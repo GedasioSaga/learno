@@ -1,0 +1,173 @@
+/*
+ * Estante da Biblioteca (`GradeDeLivros.tsx` + `LivroCard.tsx`) — só o que
+ * o Tailwind não escreve sem valor arbitrário: a cor da capa sintética por
+ * `data-cor`, a "lombada" por gradiente, o levantar do cartão no hover e o
+ * preenchimento do `<progress>`. Fora de qualquer `@layer`, de propósito,
+ * como `cronograma-grade.css`: regra sem camada vence utilitário sem
+ * `!important`.
+ *
+ * Toda cor vem de `src/styles/theme.css`. Nenhum hex aqui: os cinco temas
+ * trocam os tokens e esta folha segue sem saber quantos temas existem.
+ *
+ * Movimento na régua do tema (`--motion-*`, `--ease-*`). Quem pediu menos
+ * movimento no SO já é atendido pelo `@layer base` de theme.css — não
+ * duplicar aqui.
+ */
+
+/* -------------------------------------------------------------------------
+ * Capa sintética — quando o livro não tem imagem.
+ *
+ * A estante NÃO desenha um placeholder chamativo: desenha uma capa de
+ * verdade, com título e autor, na mesma proporção 2:3 da capa real (senão
+ * a grade desalinha) e numa cor derivada do título (`corDaCapaSintetica`
+ * em LivroCard.tsx). O `data-cor` só escolhe a matiz; a LUMINOSIDADE vem
+ * do tema, misturando a matiz com `--surface-sunken` — no escuro sai uma
+ * capa escura, no Papel uma capa clara, e o texto em `--ink` continua
+ * legível sem override por tema (mesmo raciocínio das matizes em
+ * theme.css). Medido no Âmbar noturno, Papel e Alto contraste.
+ * ---------------------------------------------------------------------- */
+[data-slot="capa-sintetica"][data-cor="amber"] { --cor-da-capa: var(--amber); }
+[data-slot="capa-sintetica"][data-cor="mint"] { --cor-da-capa: var(--mint); }
+[data-slot="capa-sintetica"][data-cor="emerald"] { --cor-da-capa: var(--emerald); }
+[data-slot="capa-sintetica"][data-cor="terracotta"] { --cor-da-capa: var(--terracotta); }
+[data-slot="capa-sintetica"][data-cor="brown"] { --cor-da-capa: var(--brown); }
+[data-slot="capa-sintetica"][data-cor="azul"] { --cor-da-capa: var(--matiz-azul); }
+[data-slot="capa-sintetica"][data-cor="roxo"] { --cor-da-capa: var(--matiz-roxo); }
+
+[data-slot="capa-sintetica"] {
+  background-color: color-mix(in srgb, var(--cor-da-capa) 32%, var(--surface-sunken));
+  /* Fio na cor pura ao longo da borda esquerda: é a "lombada" da capa
+     sintética, o detalhe que a separa de um retângulo pintado. */
+  box-shadow: inset 4px 0 0 0 color-mix(in srgb, var(--cor-da-capa) 70%, var(--surface-sunken));
+  color: var(--ink);
+}
+
+/* Título e autor da capa sintética vêm de `data-titulo`/`data-autor` e
+   são desenhados aqui, em pseudo-elemento — de propósito FORA do DOM: o
+   título já é o nome acessível do botão da capa e o texto do cartão logo
+   abaixo (ver o comentário em LivroCard.tsx). `-webkit-box` + `line-clamp`
+   é o mesmo corte de `trilha.css`; `overflow-wrap: anywhere` porque um
+   nome de arquivo sem espaço ("relatorio_final_v3.pdf") é título válido e
+   não pode estourar a capa. */
+[data-slot="capa-sintetica"]::before {
+  content: attr(data-titulo);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  line-height: 1.3;
+}
+
+[data-slot="capa-sintetica"]::after {
+  content: attr(data-autor);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  opacity: 0.78;
+}
+
+/* -------------------------------------------------------------------------
+ * Lombada e luz — sobre TODA capa (real ou sintética).
+ *
+ * Um gradiente estreito na esquerda simula a curvatura da página junto à
+ * lombada: sombra, um fio de luz, e some. Usa `--shadow-ink`/`--shadow-glow`
+ * (os mesmos tokens da elevação), então no Alto contraste, onde os dois são
+ * `transparent`, o efeito desliga sozinho — lá a aresta é a borda.
+ * ---------------------------------------------------------------------- */
+[data-slot="capa"] {
+  position: relative;
+}
+
+[data-slot="capa"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    var(--shadow-ink) 0,
+    transparent 4%,
+    var(--shadow-glow) 6%,
+    transparent 11%
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * Elevação no hover: o cartão INTEIRO da capa sobe um degrau (translate +
+ * sombra de nível 2). `transform`/`box-shadow` só, sem reflow. 180ms e
+ * ease-out: é entrada de estado, não movimento na tela.
+ *
+ * `:focus-within` acompanha: quem chega por Tab vê o mesmo levantar que
+ * quem passa o mouse.
+ * ---------------------------------------------------------------------- */
+[data-slot="capa-moldura"] {
+  transition:
+    transform var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
+}
+
+[data-slot="livro-card"]:hover [data-slot="capa-moldura"],
+[data-slot="livro-card"]:focus-within [data-slot="capa-moldura"] {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-glow),
+    0 4px 12px -2px var(--shadow-ink),
+    0 16px 40px -12px var(--shadow-ink);
+}
+
+/* Pressionado: só a CAPA encolhe (o botão, não a moldura) — apertar uma
+   seta da faixa não pode dar a impressão de que o livro inteiro afundou. */
+[data-slot="capa"] {
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+[data-slot="capa"]:active {
+  transform: scale(var(--motion-scale-press));
+}
+
+/* -------------------------------------------------------------------------
+ * Faixa de ações sobre a base da capa. Nasce invisível: ação destrutiva e
+ * reordenar não moram em repouso. Aparece no hover, no foco de teclado, e
+ * fica enquanto a lista de categorias estiver aberta (`[open]`) — senão
+ * tirar o mouse apagaria um painel aberto.
+ * ---------------------------------------------------------------------- */
+[data-slot="acoes-da-capa"] {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+[data-slot="livro-card"]:hover [data-slot="acoes-da-capa"],
+[data-slot="livro-card"]:focus-within [data-slot="acoes-da-capa"],
+[data-slot="acoes-da-capa"]:has([open]) {
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------------------
+ * Barra de progresso: `<progress>` nativo pintado só com token. WebView2 é
+ * Chromium, então os pseudo-elementos `-webkit-progress-*` bastam.
+ * ---------------------------------------------------------------------- */
+[data-slot="progresso-de-leitura"] {
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background-color: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+}
+
+[data-slot="progresso-de-leitura"]::-webkit-progress-bar {
+  background-color: transparent;
+}
+
+[data-slot="progresso-de-leitura"]::-webkit-progress-value {
+  border-radius: 9999px;
+  background-color: var(--emerald);
+}

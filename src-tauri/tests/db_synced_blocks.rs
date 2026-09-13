@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Integration tests for EDT-073..078 (synced blocks) against a real
-//! Postgres instance. `#[ignore]`d like every other `db_*.rs` file here —
-//! see `db_blocks.rs`'s header for how to run these.
+//! Integration tests for EDT-073..078 (synced blocks). Cada teste provisiona
+//! seu próprio arquivo SQLite descartável via `support::IsolatedDatabase` e
+//! roda num `cargo test` limpo, sem preparação nenhuma — sem cluster, sem
+//! variável de ambiente. Ver `docs/MIGRACAO-SQLITE.md` para o histórico da
+//! migração que tornou isso possível.
 
 mod support;
 
@@ -32,7 +34,6 @@ fn text_patch(text: &str) -> BlockPatchInput {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn editing_a_copy_propagates_to_the_original_and_every_other_copy() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -67,7 +68,6 @@ async fn editing_a_copy_propagates_to_the_original_and_every_other_copy() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn moving_a_copy_never_touches_the_others_placement() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -95,7 +95,6 @@ async fn moving_a_copy_never_touches_the_others_placement() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn unsyncing_one_copy_detaches_only_that_copy() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -126,7 +125,6 @@ async fn unsyncing_one_copy_detaches_only_that_copy() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn unsync_one_rejects_a_block_that_is_not_a_copy() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -141,7 +139,6 @@ async fn unsync_one_rejects_a_block_that_is_not_a_copy() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn unsync_all_detaches_every_copy_at_once() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -168,7 +165,6 @@ async fn unsync_all_detaches_every_copy_at_once() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn unsync_all_rejects_a_copy_passed_in_place_of_the_original() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -185,7 +181,6 @@ async fn unsync_all_rejects_a_copy_passed_in_place_of_the_original() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn deleting_a_synced_original_through_the_generic_path_is_rejected() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -207,7 +202,6 @@ async fn deleting_a_synced_original_through_the_generic_path_is_rejected() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn delete_synced_original_with_few_copies_cascades_without_confirmation() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -228,7 +222,6 @@ async fn delete_synced_original_with_few_copies_cascades_without_confirmation() 
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn delete_synced_original_with_many_copies_requires_confirmation() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -254,7 +247,6 @@ async fn delete_synced_original_with_many_copies_requires_confirmation() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn delete_synced_original_rejects_a_copy_passed_in_its_place() {
     let db = IsolatedDatabase::setup("synced").await;
     let pages = PageRepository::new(db.pool.clone());

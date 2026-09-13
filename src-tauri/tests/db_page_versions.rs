@@ -1,11 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Integration tests for `db::page_versions` against a real Postgres
-//! instance. `#[ignore]`d for the same reason as `tests/db_pages.rs`: it
-//! needs a live Postgres cluster, which `cargo test` never starts on its
-//! own. Run `scripts/dev-db.ps1 start` (or `reset`), then `cargo test --
-//! --ignored` with `LEARNO_TEST_DATABASE_URL` set — see
-//! `docs/rust-tests.md`. Each test provisions its own private database via
-//! `support::IsolatedDatabase`.
+//! Integration tests for `db::page_versions` contra um banco SQLite real.
+//!
+//! Nenhum teste aqui precisa de `#[ignore]`: cada um cria seu próprio
+//! arquivo SQLite descartável via `support::IsolatedDatabase`, já migrado,
+//! numa pasta temporária — então a suíte roda direto num `cargo test`
+//! limpo, em qualquer máquina, sem cluster nenhum para subir antes. Isso
+//! veio da migração para SQLite (`docs/MIGRACAO-SQLITE.md`); antes disso
+//! era Postgres, com `LEARNO_TEST_DATABASE_URL` e `scripts/dev-db.ps1`
+//! como pré-requisito.
 
 mod support;
 
@@ -13,7 +15,6 @@ use learno_lib::db::{PageRepository, PageVersionRepository, SnapshotReason};
 use support::IsolatedDatabase;
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_034_snapshots_accumulate_with_distinct_content() {
     let db = IsolatedDatabase::setup("page_versions").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -37,7 +38,6 @@ async fn fun_034_snapshots_accumulate_with_distinct_content() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_035_history_lists_newest_first() {
     let db = IsolatedDatabase::setup("page_versions").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -64,7 +64,6 @@ async fn fun_035_history_lists_newest_first() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_036_restoring_a_version_updates_the_page_and_adds_a_new_snapshot() {
     let db = IsolatedDatabase::setup("page_versions").await;
     let pages = PageRepository::new(db.pool.clone());

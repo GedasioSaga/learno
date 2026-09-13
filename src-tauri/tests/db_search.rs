@@ -1,22 +1,17 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Integration tests for `db::search` against a real Postgres instance.
-//! `#[ignore]`d for the same reason as `tests/db_pages.rs`: it needs a live
-//! Postgres cluster, which `cargo test` never starts on its own. Run
-//! `scripts/dev-db.ps1 start` (or `reset`), then `cargo test -- --ignored`
-//! with `LEARNO_TEST_DATABASE_URL` set — see `docs/rust-tests.md`.
+//! Integration tests for `db::search`.
 //!
-//! Each test provisions its own private database via
-//! `support::IsolatedDatabase` — this used to run every test against the
-//! shared, long-lived `LEARNO_TEST_DATABASE_URL` database directly, which
-//! needed a `clear_previous_matches_for` cleanup step and a suite-wide lock
-//! just to keep prior runs' leftover rows from crowding a fresh fixture out
-//! of `SearchRepository`'s ranked, limited results (a real flake, not a
-//! timing issue). A private database has no leftover rows to crowd anything
-//! out with, so neither workaround is needed any more.
+//! Cada teste provisiona seu próprio banco descartável via
+//! `support::IsolatedDatabase` — um arquivo SQLite temporário, migrado do
+//! zero — então não há mais estado compartilhado entre testes para
+//! atrapalhar o rankeamento limitado de `SearchRepository`, nem preparação
+//! nenhuma fora do `cargo test` (a migração para SQLite tirou o cluster
+//! Postgres, `LEARNO_TEST_DATABASE_URL` e o `#[ignore]` que dependia dos
+//! dois — ver `docs/MIGRACAO-SQLITE.md`).
 
 mod support;
 
-use learno_lib::db::{PageRepository, SearchRepository};
+use learno_lib::db::{IdBind, PageRepository, SearchRepository};
 use support::IsolatedDatabase;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -29,10 +24,10 @@ const RESULT_LIMIT: i64 = 20;
 async fn insert_block(pool: &SqlitePool, page_id: Uuid, plain_text: &str) {
     sqlx::query(
         "INSERT INTO blocks (id, page_id, block_type, content, plain_text, position) \
-         VALUES ($1, $2, 'paragraph', '{}'::jsonb, $3, 'a0')",
+         VALUES ($1, $2, 'paragraph', '{}', $3, 'a0')",
     )
-    .bind(Uuid::now_v7())
-    .bind(page_id)
+    .bind(Uuid::now_v7().db())
+    .bind(page_id.db())
     .bind(plain_text)
     .execute(pool)
     .await
@@ -40,7 +35,6 @@ async fn insert_block(pool: &SqlitePool, page_id: Uuid, plain_text: &str) {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_finds_a_page_by_title_ignoring_accents() {
     let db = IsolatedDatabase::setup("search").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -56,7 +50,6 @@ async fn fun_037_finds_a_page_by_title_ignoring_accents() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_finds_a_page_by_partial_title_substring() {
     let db = IsolatedDatabase::setup("search").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -72,7 +65,6 @@ async fn fun_037_finds_a_page_by_partial_title_substring() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_finds_a_page_by_block_content_ignoring_accents() {
     let db = IsolatedDatabase::setup("search").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -89,7 +81,6 @@ async fn fun_037_finds_a_page_by_block_content_ignoring_accents() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_unmatched_term_returns_no_results() {
     let db = IsolatedDatabase::setup("search").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -108,7 +99,6 @@ async fn fun_037_unmatched_term_returns_no_results() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_blank_query_returns_no_results_without_erroring() {
     let db = IsolatedDatabase::setup("search").await;
     let search = SearchRepository::new(db.pool.clone());
@@ -121,7 +111,6 @@ async fn fun_037_blank_query_returns_no_results_without_erroring() {
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn fun_037_trashed_pages_are_excluded() {
     let db = IsolatedDatabase::setup("search").await;
     let pages = PageRepository::new(db.pool.clone());

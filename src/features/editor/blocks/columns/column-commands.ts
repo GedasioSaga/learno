@@ -165,24 +165,28 @@ function rangesOverlap(a: LocatedWrapper, b: LocatedWrapper): boolean {
 
 /**
  * Monta o `Block` wrapper de `columnList` inteiro: `columnList` (átomo) +
- * `childBlocks` com duas colunas, cada uma por sua vez um `Block` wrapper de
- * `column` (átomo) + `childBlocks` com o bloco original dela dentro. Os
- * blocos originais (`leftBlock`/`rightBlock`) entram inteiros, filhos
- * aninhados incluídos - "envolver em colunas" nunca descarta conteúdo.
+ * `childBlocks` com N colunas (N = `blocks.length`, `ChildBlocks.content` é
+ * `"block+"` em `core/schema.ts` - sem teto), cada uma por sua vez um
+ * `Block` wrapper de `column` (átomo) + `childBlocks` com o bloco original
+ * dela dentro. Os blocos originais entram inteiros, filhos aninhados
+ * incluídos - "envolver em colunas" nunca descarta conteúdo. Largura inicial
+ * dividida em partes iguais entre as N colunas (não `DEFAULT_COLUMN_WIDTH`
+ * fixo, que só faz sentido para duas: 0.5 + 0.5 = 1, mas 0.5 x3 não soma 1).
  */
-function buildColumnListWrapper(schema: Schema, leftBlock: PMNode, rightBlock: PMNode): PMNode {
+function buildColumnListWrapper(schema: Schema, blocks: PMNode[]): PMNode {
   const columnListType = schema.nodes[COLUMN_LIST_NODE_NAME];
   const columnType = schema.nodes[COLUMN_NODE_NAME];
   const blockType = schema.nodes[NODE_NAMES.block];
   const childBlocksType = schema.nodes[NODE_NAMES.childBlocks];
+  const equalWidth = roundWidth(1 / blocks.length);
 
   const oneColumn = (block: PMNode): PMNode =>
     blockType.create(null, [
-      columnType.create({ id: newBlockId(), width: DEFAULT_COLUMN_WIDTH }),
+      columnType.create({ id: newBlockId(), width: equalWidth }),
       childBlocksType.create(null, block),
     ]);
 
-  const columnsRow = childBlocksType.create(null, [oneColumn(leftBlock), oneColumn(rightBlock)]);
+  const columnsRow = childBlocksType.create(null, blocks.map(oneColumn));
   return blockType.create(null, [columnListType.create({ id: newBlockId() }), columnsRow]);
 }
 
@@ -220,7 +224,7 @@ export function wrapBlocksInColumns(editor: Editor, targetBlockId: string, incom
   const mappedFrom = tr.mapping.map(target.pos);
   const mappedTo = tr.mapping.map(target.pos + target.node.nodeSize);
 
-  const wrapper = buildColumnListWrapper(state.schema, target.node, incoming.node);
+  const wrapper = buildColumnListWrapper(state.schema, [target.node, incoming.node]);
   tr.replaceWith(mappedFrom, mappedTo, wrapper);
 
   // `TextSelection.near` caminha para a frente até achar uma posição de
@@ -235,12 +239,16 @@ export function wrapBlocksInColumns(editor: Editor, targetBlockId: string, incom
 
 /**
  * EDT-033, caminho sem mouse: envolve o bloco sob o cursor num layout de
- * duas colunas - ele vira a coluna esquerda, um parágrafo vazio novo vira a
- * direita. É o comando por trás do item "Duas colunas" do menu `/` e do
- * atalho de teclado (`column-keymap.ts`) - existe porque "só testável
- * arrastando" não é testável em vitest.
+ * `columnCount` colunas - ele vira a primeira (a esquerda), e `columnCount -
+ * 1` parágrafos vazios novos preenchem as demais, em ordem. É o comando por
+ * trás dos itens "Duas colunas"/"Três colunas" do menu `/` e do atalho de
+ * teclado (`column-keymap.ts`, só para duas) - existe porque "só testável
+ * arrastando" não é testável em vitest. `columnCount` menor que 2 devolve
+ * `false` sem tocar a transação: um "layout" de uma coluna só não é um
+ * layout.
  */
-export function wrapCurrentBlockInColumns(editor: Editor): boolean {
+export function wrapCurrentBlockInColumns(editor: Editor, columnCount = 2): boolean {
+  if (columnCount < 2) return false;
   const { state } = editor;
   const depth = contentDepthOf(editor);
   if (depth === null) return false;
@@ -251,11 +259,14 @@ export function wrapCurrentBlockInColumns(editor: Editor): boolean {
 
   const paragraphType = state.schema.nodes[NODE_NAMES.paragraph];
   const blockType = state.schema.nodes[NODE_NAMES.block];
-  const newParagraph = paragraphType.createAndFill({ id: newBlockId() });
-  if (!newParagraph) return false;
-  const emptyBlockWrapper = blockType.create(null, newParagraph);
+  const extraColumns: PMNode[] = [];
+  for (let i = 1; i < columnCount; i += 1) {
+    const newParagraph = paragraphType.createAndFill({ id: newBlockId() });
+    if (!newParagraph) return false;
+    extraColumns.push(blockType.create(null, newParagraph));
+  }
 
-  const wrapper = buildColumnListWrapper(state.schema, wrapperNode, emptyBlockWrapper);
+  const wrapper = buildColumnListWrapper(state.schema, [wrapperNode, ...extraColumns]);
   const tr = state.tr.replaceWith(wrapperPos, wrapperPos + wrapperNode.nodeSize, wrapper);
   const selPos = Math.min(wrapperPos + 1, tr.doc.content.size);
   tr.setSelection(TextSelection.near(tr.doc.resolve(selPos), 1));

@@ -80,7 +80,9 @@
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--surface);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  /* Nível 2 de elevação (docs/DESIGN-TOKENS.md §7) - é o menu de escolha de
+     colagem, flutuando sobre o bloco. Preto fixo sumia no escuro. */
+  box-shadow: var(--shadow-hard);
   z-index: 50;
   min-width: 12rem;
 }

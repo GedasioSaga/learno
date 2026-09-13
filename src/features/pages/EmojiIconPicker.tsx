@@ -2,13 +2,26 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import { usePageTreeStore } from "./store";
 import { hidePopoverSafely } from "./dom-compat";
 import { useOpenTransition } from "./use-open-transition";
+import { usePosicaoAncorada } from "./use-posicao-ancorada";
 
 interface EmojiIconPickerProps {
   pageId: string;
   currentIcon: string | null;
   /** Rótulo acessível do botão-gatilho — muda conforme onde o seletor mora (linha da árvore vs. cabeçalho da página). */
   triggerLabel: string;
+  /**
+   * "lg" para uma página raiz estilizada como categoria na árvore (§1 da
+   * tarefa: "ícone maior" é um dos três sinais de peso, junto com fonte
+   * semi-negrito e mais espaçamento). Ambos os tamanhos são da escala
+   * tipográfica do projeto (`docs/DESIGN-TOKENS.md` §4) — nenhum valor novo.
+   */
+  size?: "sm" | "lg";
 }
+
+const TRIGGER_SIZE_CLASS: Record<"sm" | "lg", string> = {
+  sm: "size-6 text-base",
+  lg: "size-7 text-lg",
+};
 
 // Um recorte pequeno e útil para estudo, não uma paleta completa — o campo de
 // texto logo abaixo aceita qualquer emoji digitado ou colado, então esta
@@ -24,13 +37,15 @@ const CURATED_EMOJIS = [
  * barra lateral (que tem `overflow-y-auto`) cortar o painel — sem nenhum
  * listener de clique-fora escrito à mão.
  */
-export function EmojiIconPicker({ pageId, currentIcon, triggerLabel }: EmojiIconPickerProps) {
+export function EmojiIconPicker({ pageId, currentIcon, triggerLabel, size = "sm" }: EmojiIconPickerProps) {
   const panelId = useId();
   const setIcon = usePageTreeStore((state) => state.setIcon);
   const [customValue, setCustomValue] = useState("");
   const [open, setOpen] = useState(false);
   const entered = useOpenTransition(open);
   const panelRef = useRef<HTMLDivElement>(null);
+  const gatilhoRef = useRef<HTMLButtonElement>(null);
+  usePosicaoAncorada(gatilhoRef, panelRef, open);
 
   async function choose(icon: string | null) {
     await setIcon(pageId, icon);
@@ -48,11 +63,12 @@ export function EmojiIconPicker({ pageId, currentIcon, triggerLabel }: EmojiIcon
   return (
     <span className="relative inline-flex">
       <button
+        ref={gatilhoRef}
         type="button"
         popoverTarget={panelId}
         popoverTargetAction="toggle"
         aria-label={triggerLabel}
-        className="grid size-6 shrink-0 place-items-center rounded-sm text-base leading-none transition-transform active:scale-97"
+        className={`grid ${TRIGGER_SIZE_CLASS[size]} shrink-0 place-items-center rounded-sm leading-none transition-transform active:scale-97`}
       >
         {currentIcon ?? "📄"}
       </button>
@@ -65,7 +81,11 @@ export function EmojiIconPicker({ pageId, currentIcon, triggerLabel }: EmojiIcon
         // `transform-origin: top left` (via `origin-top-left`) porque o
         // gatilho fica no canto superior-esquerdo do painel: a entrada tem
         // que crescer a partir de onde o usuário clicou, não do centro.
-        className={`absolute left-0 top-full m-0 mt-1 w-56 origin-top-left rounded-md border border-border
+        // Sem classe de posição: `usePosicaoAncorada` mede o gatilho e crava
+        // `position: fixed`. O `absolute top-full` que estava aqui abria o
+        // painel uma altura de janela abaixo, fora da tela — dentro da top
+        // layer do popover a porcentagem é da janela, não do gatilho.
+        className={`w-56 origin-top-left rounded-md border border-border
           bg-surface p-3 shadow-hard transition duration-150 ease-out motion-reduce:transition-none
           ${entered ? "scale-100 opacity-100" : "scale-95 opacity-0"}`}
       >

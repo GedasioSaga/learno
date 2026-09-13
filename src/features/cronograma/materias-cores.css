@@ -1,0 +1,43 @@
+/*
+ * A amostra de cor do seletor de matéria (`PainelDeMaterias.tsx`) precisa
+ * mostrar a cor DE VERDADE — o pedido foi explícito: "amostras de verdade
+ * pintadas com a própria cor, não um menu suspenso de nomes". A mesma
+ * restrição de `cronograma-grade.css` vale aqui, pelo mesmo motivo: das oito
+ * cores de `CORES_DA_GRADE` (`cores.ts`), cinco são tokens de marca já
+ * expostos pro Tailwind (`--color-amber` etc., `theme.css`), mas
+ * `azul`/`roxo`/`vermelho` são as três matizes "sem marca" (`--matiz-*`) —
+ * sem `--color-*`, então `bg-azul` não existiria e a única alternativa seria
+ * valor arbitrário ou `style` inline, as duas coisas proibidas neste projeto.
+ * A técnica é a mesma daquele arquivo: atributo `data-cor` + variável de tema
+ * direto, fora de qualquer `@layer` (uma regra sobre `[data-cor]` já vence
+ * qualquer classe Tailwind do elemento, sem precisar de `!important`).
+ *
+ * Única diferença: aqui o fundo é a cor PURA (a amostra precisa parecer a cor
+ * de verdade), não o verniz de 16% que `cronograma-grade.css` usa pro cartão
+ * da grade — ali o requisito era um fundo sutil atrás de texto, aqui é a
+ * própria amostra.
+ */
+[data-slot="amostra-de-cor"][data-cor="amber"] {
+  background-color: var(--amber);
+}
+[data-slot="amostra-de-cor"][data-cor="mint"] {
+  background-color: var(--mint);
+}
+[data-slot="amostra-de-cor"][data-cor="emerald"] {
+  background-color: var(--emerald);
+}
+[data-slot="amostra-de-cor"][data-cor="terracotta"] {
+  background-color: var(--terracotta);
+}
+[data-slot="amostra-de-cor"][data-cor="brown"] {
+  background-color: var(--brown);
+}
+[data-slot="amostra-de-cor"][data-cor="azul"] {
+  background-color: var(--matiz-azul);
+}
+[data-slot="amostra-de-cor"][data-cor="roxo"] {
+  background-color: var(--matiz-roxo);
+}
+[data-slot="amostra-de-cor"][data-cor="vermelho"] {
+  background-color: var(--matiz-vermelho);
+}

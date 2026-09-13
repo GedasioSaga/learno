@@ -1,11 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Integration tests for I1..I4 (arquitetura §2) against a real Postgres
-//! instance, exercised through `db::record_values::RecordValueRepository`.
+//! Integration tests for I1..I4 (arquitetura §2) against um SQLite de
+//! verdade, exercised through `db::record_values::RecordValueRepository`.
 //!
-//! `#[ignore]`d like every other `db_*.rs` file here for the tests that need
-//! `LEARNO_TEST_DATABASE_URL` (`scripts/dev-db.ps1 start`, then
-//! `cargo test -- --ignored`) — see `db_blocks.rs`'s header. The I4 grep
-//! test at the bottom needs no database and runs under a plain `cargo test`.
+//! Cada teste cria seu próprio arquivo de banco descartável em pasta
+//! temporária (`support::IsolatedDatabase::setup`) e roda num `cargo test`
+//! limpo, em qualquer máquina, sem preparação nenhuma. Não existe mais
+//! cluster Postgres, nem `LEARNO_TEST_DATABASE_URL`, nem `#[ignore]` neste
+//! arquivo — mudança que veio da migração para SQLite
+//! (`docs/MIGRACAO-SQLITE.md`). O teste I4 no fim continua sem precisar de
+//! banco nenhum — é análise estática do próprio código-fonte via `rg` — e
+//! por isso nunca teve `#[ignore]`.
 //!
 //! No `database`/`database_properties` repository exists yet in this
 //! repository (a different Fase 3 piece owns it), so this file inserts
@@ -16,53 +20,68 @@ mod support;
 
 use std::collections::HashSet;
 
-use learno_lib::db::{PageRepository, RecordValueChangeInput, RecordValueRepository};
+use learno_lib::db::{DbId, IdBind, PageRepository, RecordValueChangeInput, RecordValueRepository};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
 use support::IsolatedDatabase;
 use uuid::Uuid;
 
+// `databases.id` / `database_properties.id` / `pages.id` são TEXT PRIMARY
+// KEY sem DEFAULT (ver as migrações 0003/0007/0008) — este crate gera o id
+// em Rust com `Uuid::now_v7()` antes de todo INSERT, exatamente como
+// `PageRepository::create` (`src/db/pages.rs`) já faz; não há `RETURNING`
+// para buscar de volta porque o id já é conhecido antes da escrita.
+
 async fn create_database(pool: &SqlitePool, container_page_id: Uuid, name: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO databases (container_page_id, name) VALUES ($1, $2) RETURNING id")
-        .bind(container_page_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO databases (id, container_page_id, name) VALUES ($1, $2, $3)")
+        .bind(id.db())
+        .bind(container_page_id.db())
         .bind(name)
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 async fn create_property(pool: &SqlitePool, database_id: Uuid, name: &str, property_type: &str, config: &JsonValue) -> Uuid {
-    sqlx::query_scalar(
-        "INSERT INTO database_properties (database_id, name, property_type, config, position) \
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO database_properties (id, database_id, name, property_type, config, position) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
-    .bind(database_id)
+    .bind(id.db())
+    .bind(database_id.db())
     .bind(name)
     .bind(property_type)
     .bind(config)
     .bind("a0")
-    .fetch_one(pool)
+    .execute(pool)
     .await
-    .unwrap()
+    .unwrap();
+    id
 }
 
 async fn create_record(pool: &SqlitePool, database_id: Uuid, title: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO pages (database_id, title, position) VALUES ($1, $2, $3) RETURNING id")
-        .bind(database_id)
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO pages (id, database_id, title, position) VALUES ($1, $2, $3, $4)")
+        .bind(id.db())
+        .bind(database_id.db())
         .bind(title)
         .bind("a0")
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap()
+        .unwrap();
+    id
 }
 
 async fn row_count(pool: &SqlitePool, record_id: Uuid, property_id: Uuid) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM database_record_values WHERE record_id = $1 AND property_id = $2",
     )
-    .bind(record_id)
-    .bind(property_id)
+    .bind(record_id.db())
+    .bind(property_id.db())
     .fetch_one(pool)
     .await
     .unwrap()
@@ -85,7 +104,6 @@ async fn setup_database_and_record(db: &IsolatedDatabase, label: &str) -> Fixtur
 }
 
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn i1_writing_empty_deletes_an_existing_row() {
     let db = IsolatedDatabase::setup("value_inv").await;
     let fixture = setup_database_and_record(&db, "I1 vazio apaga").await;
@@ -124,7 +142,6 @@ async fn i1_writing_empty_deletes_an_existing_row() {
 /// Testado aqui com um card só, mas a asserção que importa é a mesma:
 /// `false` de checkbox nunca deveria sequer ter criado a linha.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn i1_checkbox_false_never_creates_a_row() {
     let db = IsolatedDatabase::setup("value_inv").await;
     let fixture = setup_database_and_record(&db, "I1 checkbox").await;
@@ -155,7 +172,6 @@ async fn i1_checkbox_false_never_creates_a_row() {
 /// valor legítimo e tem que sobreviver como uma linha de verdade — só o
 /// CHECKBOX apaga `false`.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn i1_formula_boolean_false_is_accepted_and_kept() {
     let db = IsolatedDatabase::setup("value_inv").await;
     let fixture = setup_database_and_record(&db, "I1 formula false").await;
@@ -184,19 +200,35 @@ async fn i1_formula_boolean_false_is_accepted_and_kept() {
     assert_eq!(
         row_count(&fixture.pool, fixture.record_id, property_id).await,
         1,
-        "o CHECK aceita false explicitamente — só checkbox o apaga, não o Postgres"
+        "o CHECK aceita false explicitamente — só checkbox o apaga, não o banco"
     );
 
     db.teardown().await;
 }
 
-/// I2: a mesma propriedade com duas formas de data — uma só-início (menos
-/// chaves), outra com início+fim (mais chaves) — provando que `sort_text`,
+/// I2: a mesma propriedade com duas formas de data — uma só-início (uma
+/// chave), outra com início+fim (duas chaves) — provando que `sort_text`,
 /// não `value`, é quem ordena corretamente. Sem as duas formas JUNTAS numa
 /// mesma propriedade, um teste passa verde sobre `ORDER BY value`, que é
 /// exatamente o bug que I2 existe para prevenir.
+///
+/// O mecanismo da armadilha mudou com a migração para SQLite — descrito em
+/// `docs/MIGRACAO-SQLITE.md` — e por isso os papéis "cedo"/"tarde" abaixo
+/// estão invertidos em relação à versão Postgres deste teste: `value` aqui
+/// é TEXT puro (não jsonb), e o `serde_json::Value` deste crate serializa
+/// objeto sem a feature `preserve_order` (confirmado no `Cargo.lock`: a
+/// entrada de `serde_json` não depende de `indexmap`), então as chaves saem
+/// sempre em ordem ALFABÉTICA — um objeto com `end` sempre serializa como
+/// `{"end":...` antes de `{"start":...`, e "e" byte a byte é menor que "s".
+/// Resultado: QUALQUER linha cujo valor tenha a chave `end` ordena antes de
+/// qualquer linha só-`start` em `ORDER BY value`, não importa a data — o
+/// mesmo tipo de bug que a versão Postgres tinha por jsonb comparar
+/// QUANTIDADE de chaves antes do conteúdo, só que aqui é o NOME da chave
+/// quem decide. Por isso a linha de duas chaves abaixo é a
+/// cronologicamente DEPOIS e a linha de uma chave é a cronologicamente
+/// ANTES — inversão deliberada para reproduzir a armadilha sob a semântica
+/// real do SQLite.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn i2_two_date_shapes_on_the_same_property_order_by_sort_text_not_value() {
     let db = IsolatedDatabase::setup("value_inv").await;
     let pages = PageRepository::new(db.pool.clone());
@@ -206,52 +238,58 @@ async fn i2_two_date_shapes_on_the_same_property_order_by_sort_text_not_value() 
         create_property(&db.pool, database_id, "Período", "date", &serde_json::json!({ "hasEnd": true })).await;
     let repo = RecordValueRepository::new(db.pool.clone());
 
-    // Cronologicamente PRIMEIRO (01/01 a 02/01) mas com DUAS chaves.
-    let earlier_two_keys = create_record(&db.pool, database_id, "Cedo, com fim").await;
-    // Cronologicamente DEPOIS (01/02) mas com UMA chave só.
-    let later_one_key = create_record(&db.pool, database_id, "Tarde, só início").await;
+    // Cronologicamente PRIMEIRO (01/01) mas com UMA chave só — o valor
+    // serializa como `{"start":...}`.
+    let earlier_one_key = create_record(&db.pool, database_id, "Cedo, só início").await;
+    // Cronologicamente DEPOIS (01/02 a 02/02) mas com DUAS chaves — o valor
+    // serializa como `{"end":...,"start":...}` (chaves em ordem alfabética),
+    // então começa com "e", que sempre vence "s" em ORDER BY value.
+    let later_two_keys = create_record(&db.pool, database_id, "Tarde, com fim").await;
 
     repo.apply_record_value_changes(vec![
         RecordValueChangeInput {
-            record_id: earlier_two_keys,
+            record_id: earlier_one_key,
             property_id,
-            value: serde_json::json!({ "start": "2026-01-01", "end": "2026-01-02" }),
+            value: serde_json::json!({ "start": "2026-01-01" }),
         },
         RecordValueChangeInput {
-            record_id: later_one_key,
+            record_id: later_two_keys,
             property_id,
-            value: serde_json::json!({ "start": "2026-02-01" }),
+            value: serde_json::json!({ "start": "2026-02-01", "end": "2026-02-02" }),
         },
     ])
     .await
     .unwrap();
 
     // A prova negativa primeiro: `ORDER BY value` (o que I2 proíbe) inverte
-    // a ordem cronológica, porque jsonb compara objeto por QUANTIDADE de
-    // chaves antes do conteúdo — exatamente o achado da arquitetura §2.
-    let by_value: Vec<Uuid> =
-        sqlx::query_scalar("SELECT record_id FROM database_record_values WHERE property_id = $1 ORDER BY value")
-            .bind(property_id)
-            .fetch_all(&db.pool)
-            .await
-            .unwrap();
+    // a ordem cronológica, porque a chave "end" vence "start" em ordem
+    // alfabética — se isto falhar, a premissa do teste mudou.
+    let by_value_ids: Vec<DbId> = sqlx::query_scalar(
+        "SELECT record_id FROM database_record_values WHERE property_id = $1 ORDER BY value",
+    )
+    .bind(property_id.db())
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    let by_value: Vec<Uuid> = by_value_ids.into_iter().map(Uuid::from).collect();
     assert_eq!(
         by_value,
-        vec![later_one_key, earlier_two_keys],
+        vec![later_two_keys, earlier_one_key],
         "ORDER BY value deveria mesmo estar cronologicamente ERRADO — se isto falhar, a premissa do teste mudou"
     );
 
     // A prova positiva: `ORDER BY sort_text` é a ordem cronológica correta.
-    let by_sort_text: Vec<Uuid> = sqlx::query_scalar(
+    let by_sort_text_ids: Vec<DbId> = sqlx::query_scalar(
         "SELECT record_id FROM database_record_values WHERE property_id = $1 ORDER BY sort_text",
     )
-    .bind(property_id)
+    .bind(property_id.db())
     .fetch_all(&db.pool)
     .await
     .unwrap();
+    let by_sort_text: Vec<Uuid> = by_sort_text_ids.into_iter().map(Uuid::from).collect();
     assert_eq!(
         by_sort_text,
-        vec![earlier_two_keys, later_one_key],
+        vec![earlier_one_key, later_two_keys],
         "I2: sort_text tem que ordenar cronologicamente mesmo quando value não ordenaria"
     );
 
@@ -259,13 +297,12 @@ async fn i2_two_date_shapes_on_the_same_property_order_by_sort_text_not_value() 
 }
 
 /// O texto de 6 KB de ALTA ENTROPIA do fixture compartilhado (md5
-/// concatenado — `repeat('x', N)` comprime no btree e passaria mesmo com o
-/// índice quebrado). Prova duas coisas ao mesmo tempo: a gravação não
-/// estoura o índice (a versão sem `left(...,256)` falha com
-/// "index row size ... exceeds btree version 4 maximum"), e `sort_text`
-/// trunca exatamente nos primeiros 256 caracteres.
+/// concatenado — `repeat('x', N)` comprime e passaria mesmo com um índice
+/// de ordenação quebrado). Prova duas coisas ao mesmo tempo: a gravação
+/// sobrevive sem erro (I3, `0017_database_value_invariants.sql`), e
+/// `sort_text` trunca exatamente nos primeiros 256 caracteres mesmo que
+/// `value` guarde o texto inteiro sem cortar nada.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
 async fn high_entropy_6kb_text_survives_and_sort_text_truncates_at_256() {
     let fixture = load_fixture();
     let case = find_case(&fixture, "text_high_entropy_6400_chars_truncates_sort_text_at_256");
@@ -299,13 +336,12 @@ async fn high_entropy_6kb_text_survives_and_sort_text_truncates_at_256() {
     db.teardown().await;
 }
 
-/// Roda TODOS os 18 casos do fixture compartilhado contra Postgres de
+/// Roda TODOS os 18 casos do fixture compartilhado contra um SQLite de
 /// verdade — a peça central da resposta ao achado da Fase 2 (arquitetura
 /// §10): `sort_text`/`sort_num` aqui vêm da COLUNA GERADA, não de um cálculo
 /// em Rust que poderia divergir do banco em silêncio.
 #[tokio::test]
-#[ignore = "requires a running Postgres cluster (scripts/dev-db.ps1)"]
-async fn every_fixture_case_matches_postgres_generated_sort_columns() {
+async fn every_fixture_case_matches_sqlite_generated_sort_columns() {
     let fixture = load_fixture();
     assert!(fixture.cases.len() >= 18, "fixture perdeu casos — esperava pelo menos 18, achou {}", fixture.cases.len());
 
@@ -373,8 +409,32 @@ fn i4_only_record_values_rs_writes_to_database_record_values() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let matching_files: HashSet<String> =
-        stdout.lines().filter_map(|line| line.split(':').next()).map(|path| path.replace('\\', "/")).collect();
+
+    // Só o código de produção conta. I4 é sobre o caminho pelo qual o app
+    // escreve valor de propriedade; um `#[cfg(test)]` que insere uma linha
+    // para provar outra coisa (a cascata de chave estrangeira, em
+    // `db/pool.rs`) não é um segundo caminho de escrita — ele nem existe no
+    // binário que o usuário roda. Sem este corte, a invariante passaria a
+    // proibir que qualquer teste montasse um cenário com dado nessa tabela, o
+    // que não é o que ela quer dizer.
+    //
+    // "Produção" aqui é tudo que vem ANTES do primeiro `#[cfg(test)]` do
+    // arquivo — a convenção que todo módulo deste crate segue (o módulo de
+    // teste é sempre o último item).
+    let matching_files: HashSet<String> = stdout
+        .lines()
+        .filter_map(|linha| {
+            // `rg` no Windows devolve `src\db\pool.rs:369:...`; o nome do
+            // arquivo pode conter `:` do prefixo de unidade só se o caminho
+            // for absoluto, o que não acontece aqui (a busca é relativa).
+            let mut partes = linha.splitn(3, ':');
+            let caminho = partes.next()?;
+            let numero: usize = partes.next()?.parse().ok()?;
+            Some((caminho.replace('\\', "/"), numero))
+        })
+        .filter(|(caminho, numero)| !esta_em_modulo_de_teste(caminho, *numero))
+        .map(|(caminho, _)| caminho)
+        .collect();
 
     assert!(
         !matching_files.is_empty(),
@@ -387,6 +447,23 @@ fn i4_only_record_values_rs_writes_to_database_record_values() {
              só db/record_values.rs pode (apply_record_value_changes)"
         );
     }
+}
+
+/// Verdadeiro quando a linha `numero` (1-based) de `caminho` está dentro do
+/// módulo de teste do arquivo — isto é, depois do primeiro `#[cfg(test)]`.
+///
+/// Arquivo ilegível conta como produção, deliberadamente: uma invariante de
+/// segurança que se desliga sozinha quando não consegue ler o código é pior
+/// que uma que acusa demais.
+fn esta_em_modulo_de_teste(caminho: &str, numero: usize) -> bool {
+    let Ok(conteudo) = std::fs::read_to_string(caminho) else {
+        return false;
+    };
+
+    conteudo
+        .lines()
+        .position(|linha| linha.trim_start().starts_with("#[cfg(test)]"))
+        .is_some_and(|indice| numero > indice + 1)
 }
 
 #[derive(Debug, Deserialize)]

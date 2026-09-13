@@ -577,6 +577,29 @@ export interface DeckCounts {
   revisar: number;
 }
 
+/**
+ * Espelha `DeckMaturity` em `src-tauri/src/db/cards.rs` — quanto de UM
+ * baralho específico (`deckId` exato, sem descer para subbaralhos) já foi de
+ * fato APRENDIDO, não só "quantos cartões tem" (`DeckCounts` acima) nem
+ * "quanto falta estudar hoje". A Trilha usa isto para mostrar, no material de
+ * baralho de uma etapa, o quanto aquele baralho já foi memorizado de verdade.
+ *
+ * `maduros + jovens + novos + suspensos` pode ser MENOR que `total`: um
+ * cartão em `learning` (primeira aprendizagem, nunca chegou a `review`) não
+ * cai em nenhum dos quatro — decisão deliberada, ver o comentário completo em
+ * `db::DeckMaturity` no Rust. `fracaoMaduros` já vem calculada pelo backend e
+ * nunca é `NaN` (denominador zero — baralho vazio ou 100% suspenso — vira
+ * `0.0` lá), então a tela nunca precisa dividir isto sozinha.
+ */
+export interface DeckMaturity {
+  total: number;
+  maduros: number;
+  jovens: number;
+  novos: number;
+  suspensos: number;
+  fracaoMaduros: number;
+}
+
 /** Coluna `cards.state` (0011). */
 export type CardState = "new" | "learning" | "review" | "relearning" | "suspended";
 
@@ -822,6 +845,16 @@ export function setDeckSchedulingOptions(deckId: string, opcoes: OpcoesDeDeckJso
 /** Contadores de hoje; sem `deckId`, da coleção inteira. */
 export function deckCounts(deckId?: string | null): Promise<DeckCounts> {
   return call<DeckCounts>("deck_counts", { deckId: deckId ?? null });
+}
+
+/**
+ * Quanto do baralho `deckId` (exato, sem subbaralhos) já foi de fato
+ * aprendido — ver o comentário de `DeckMaturity` acima. Rejeita com
+ * `AppError` de `kind: "not_found"` se o baralho não existir (mesma
+ * convenção de `Error::NotFound` no backend).
+ */
+export function deckMaturity(deckId: string): Promise<DeckMaturity> {
+  return call<DeckMaturity>("deck_maturity", { deckId });
 }
 
 /** O próximo cartão da fila de hoje, ou `null` quando não há mais nada a estudar. */
@@ -1683,6 +1716,14 @@ export interface EtapaDaTrilha {
   title: string;
   icon: string | null;
   laneValue: string;
+  /**
+   * `pages.position` (índice fracionário) desta etapa — dá para o frontend
+   * ordenar verticalmente por ela dentro da raia (antes caía para
+   * `title.localeCompare`, que travava qualquer inversão sem renomear).
+   * Mesma coluna que `movePage` já escreve; nada nasce aqui, só passa a ser
+   * lido — ver o comentário de `Etapa.position` em `src-tauri/src/db/trilha.rs`.
+   */
+  position: string;
   /** Derivado do grafo: 0 para quem não tem flecha entrando, senão um nível depois da bloqueadora mais profunda. */
   level: number;
   /**
@@ -1902,6 +1943,19 @@ export function definirRaiaRecolhida(
 }
 
 /**
+ * Apaga a raia — NUNCA apaga as etapas que estavam nela (TRL-014): elas ficam
+ * sem raia e passam a aparecer na faixa "Sem raia". Ver o comentário de
+ * `TrilhaRepository::remover_raia`.
+ *
+ * NÃO é idempotente, ao contrário de `apagarFlecha`: apagar a mesma raia duas
+ * vezes rejeita com `AppError` de `kind: "not_found"`, mesma convenção de
+ * `reordenarRaia`/`definirRaiaRecolhida`.
+ */
+export function removerRaia(viewId: string, laneValue: string): Promise<void> {
+  return call<void>("remover_raia", { viewId, laneValue });
+}
+
+/**
  * Move a etapa para outra raia — que é gravar outro valor de propriedade, não
  * mexer em raia nenhuma. Por isso não devolve `RaiaDaTrilha`.
  */
@@ -1987,6 +2041,28 @@ export function criarTrilhaCompleta(
  */
 export function criarEtapa(viewId: string, title: string, laneValue: string): Promise<EtapaDaTrilha> {
   return call<EtapaDaTrilha>("criar_etapa", { viewId, title, laneValue });
+}
+
+/**
+ * Apaga (manda para a lixeira de Notas) a etapa — reversível, mesmo destino
+ * de `trashPage`: `restorePage(id)` devolve a página inteira, com progresso,
+ * materiais e decisão intactos.
+ *
+ * Cascata que o backend garante e que a tela precisa avisar ANTES de chamar
+ * isto (ver `TrilhaRepository::remover_etapa`):
+ * - toda flecha que toca a etapa (nos dois sentidos) é apagada na mesma
+ *   transação — NÃO HÁ RELIGAÇÃO AUTOMÁTICA. Numa cadeia A → B → C, apagar B
+ *   deixa C sem bloqueadora (desbloqueada), e A e C continuam sem relação
+ *   nenhuma entre si;
+ * - se a etapa era uma decisão com caminho escolhido, as flechas rotuladas
+ *   somem e a escolha é zerada por gatilho — não é recusado.
+ *
+ * Devolve a `PageRow` já na lixeira (`deleted_at` preenchido), pelo mesmo
+ * motivo de `trashPage`. Rejeita com `AppError` se a página já estiver na
+ * lixeira.
+ */
+export function removerEtapa(stepId: string): Promise<PageRow> {
+  return call<PageRow>("remover_etapa", { stepId });
 }
 
 /**

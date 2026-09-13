@@ -1,0 +1,140 @@
+/*
+ * O `@xyflow/react` traz o próprio `style.css` (importado em
+ * `ConteudoDeMapaMental.tsx`) com uma paleta fixa em hex — branco, cinza
+ * `#eee`, azul `#1a192b` — que ignora os cinco temas do app. Um canvas branco
+ * fixo dentro de "Âmbar noturno" seria o defeito mais visível possível.
+ *
+ * A correção NÃO é `!important` nem reescrever as classes `.react-flow__*`
+ * do zero: a lib já lê cada cor por uma variável (`--xy-edge-stroke`, por
+ * exemplo) antes de cair no valor fixo (`--xy-edge-stroke-default`) — ver
+ * `node_modules/@xyflow/react/dist/style.css`. Basta declarar a variável
+ * "sem -default" apontando para o token do tema; a lib mesma prefere ela.
+ *
+ * `.mapa-mental-canvas .react-flow` (duas classes) tem mais especificidade
+ * que `.react-flow` (uma classe, no CSS da lib), então isto vence
+ * independente da ordem de import dos dois arquivos CSS — não depende de sorte.
+ *
+ * Todo valor aqui é `var(--token)`, nunca hex: troque de tema e o canvas
+ * muda com o resto do app, os cinco.
+ */
+.mapa-mental-canvas .react-flow {
+  --xy-background-color: var(--paper);
+  --xy-background-pattern-dots-color: var(--hairline);
+
+  --xy-node-color: var(--ink);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-background-color: var(--surface);
+
+  --xy-handle-background-color: var(--border);
+  --xy-handle-border-color: var(--surface);
+
+  --xy-edge-stroke: var(--border);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-selected: var(--amber);
+  --xy-connectionline-stroke: var(--amber);
+  --xy-connectionline-stroke-width: 1.5;
+
+  --xy-selection-background-color: color-mix(in oklab, var(--amber) 12%, transparent);
+  --xy-selection-border: 1px dashed var(--amber);
+
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-raised);
+  --xy-controls-button-color: var(--ink-muted);
+  --xy-controls-button-color-hover: var(--ink);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: var(--shadow-hard-sm);
+
+  --xy-minimap-background-color: var(--surface-sunken);
+
+  --xy-attribution-background-color: transparent;
+}
+
+/* O anel de foco do teclado é o token global — não o azul padrão da lib. */
+.mapa-mental-canvas .react-flow__node:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/*
+ * Cor por ramo (mapa radial) — item 5 do briefing. `data-cor` (posto por
+ * `CartaoNode.tsx`) e `className` por aresta (posto por `CanvasDoMapa` em
+ * `ConteudoDeMapaMental.tsx`) usam os MESMOS oito ids de
+ * `cores-de-ramo.ts`. A paleta inteira, o porquê de só oito (e não os dez
+ * tokens categóricos disponíveis) e os números de contraste medidos estão
+ * documentados lá — aqui é só o mapeamento id → token.
+ *
+ * BORDA e ARESTA usam a cor PURA do token (nunca misturada com `color-mix`):
+ * a mistura dilui a cor pro lado de `--surface`, e mesmo a mistura mais
+ * forte (100% hue) já é o mínimo medido pra bater 3:1 contra `--paper` em
+ * todo tema — qualquer mistura mais fraca cai abaixo disso. Só o FUNDO usa
+ * `color-mix` (um verniz leve, sem requisito de contraste, porque quem
+ * carrega legibilidade é sempre o texto `--ink`, nunca o fundo).
+ *
+ * Este arquivo não está em nenhum `@layer` (ver comentário no topo do
+ * arquivo sobre `.mapa-mental-canvas .react-flow`) — por isso as regras
+ * abaixo vencem as classes Tailwind `border-border`/`bg-surface` de
+ * `CartaoNode.tsx` mesmo sem serem mais específicas: uma regra fora de
+ * camada sempre vence uma regra dentro de `@layer utilities`, onde o
+ * Tailwind vive.
+ */
+.mapa-mental-no[data-cor="amber"] {
+  border-color: var(--amber);
+  background-color: color-mix(in srgb, var(--amber) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="mint"] {
+  border-color: var(--mint);
+  background-color: color-mix(in srgb, var(--mint) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="emerald"] {
+  border-color: var(--emerald);
+  background-color: color-mix(in srgb, var(--emerald) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="terracotta"] {
+  border-color: var(--terracotta);
+  background-color: color-mix(in srgb, var(--terracotta) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="brown"] {
+  border-color: var(--brown);
+  background-color: color-mix(in srgb, var(--brown) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="azul"] {
+  border-color: var(--matiz-azul);
+  background-color: color-mix(in srgb, var(--matiz-azul) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="roxo"] {
+  border-color: var(--matiz-roxo);
+  background-color: color-mix(in srgb, var(--matiz-roxo) 16%, var(--surface));
+}
+.mapa-mental-no[data-cor="vermelho"] {
+  border-color: var(--matiz-vermelho);
+  background-color: color-mix(in srgb, var(--matiz-vermelho) 16%, var(--surface));
+}
+
+/* Mesma cor do nó FILHO (o alvo da aresta) — `CanvasDoMapa` calcula qual é
+   e põe a classe correspondente; ver comentário lá. Seletor de 4 classes
+   (mais específico que o `.react-flow__edge-path` de uma classe só da lib),
+   então vence mesmo se as duas folhas ficassem na mesma camada. */
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--amber .react-flow__edge-path {
+  stroke: var(--amber);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--mint .react-flow__edge-path {
+  stroke: var(--mint);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--emerald .react-flow__edge-path {
+  stroke: var(--emerald);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--terracotta .react-flow__edge-path {
+  stroke: var(--terracotta);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--brown .react-flow__edge-path {
+  stroke: var(--brown);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--azul .react-flow__edge-path {
+  stroke: var(--matiz-azul);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--roxo .react-flow__edge-path {
+  stroke: var(--matiz-roxo);
+}
+.mapa-mental-canvas .react-flow__edge.mapa-mental-aresta--vermelho .react-flow__edge-path {
+  stroke: var(--matiz-vermelho);
+}

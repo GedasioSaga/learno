@@ -21,7 +21,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksToDoc, docToFlatBlocks } from "../../core/serialize";
 import { buildEditorExtensions } from "../../core/extensions";
-import { collectSlashMenuItems } from "../../core/block-spec";
+import { collectSlashMenuItems, collectTurnIntoItems } from "../../core/block-spec";
 import { type PageRow, createPage, movePage } from "../../../../lib/ipc";
 import { buildChildrenIndex } from "../../../pages/tree-utils";
 import { usePageTreeStore } from "../../../pages/store";
@@ -205,6 +205,43 @@ describe("FUN-003: sub-página pelo comando /page", () => {
     expect(handled).toBe(true);
     // `run` só dispara a criação (assíncrona) - espera ela terminar antes de checar.
     await vi.waitFor(() => expect(createPageMock).toHaveBeenCalledWith("curso", undefined));
+  });
+});
+
+describe('EDT-049: "Transformar em" > Sub-página', () => {
+  it("está registrado", () => {
+    expect(collectTurnIntoItems().find((i) => i.id === "blocks:turn:sub-page")).toMatchObject({ title: "Sub-página" });
+  });
+
+  it("aplicado a um parágrafo vazio - o documento resultante tem o nó linkToPage apontando pra sub-página nova", async () => {
+    editor = createEditor({ type: "doc", content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "p1" } }] }] });
+    createPageMock.mockResolvedValue(row({ id: "nova-sub-3", title: "", parent_id: "curso" }));
+    const item = collectTurnIntoItems().find((i) => i.id === "blocks:turn:sub-page");
+    if (!item) throw new Error('item "blocks:turn:sub-page" não registrado');
+
+    const handled = item.run(editor);
+
+    expect(handled).toBe(true);
+    await vi.waitFor(() =>
+      expect(linkToPageNodes()).toEqual([expect.objectContaining({ attrs: expect.objectContaining({ pageId: "nova-sub-3" }) })]),
+    );
+  });
+
+  it("aplicado a um parágrafo com texto - o texto original sobrevive (o link entra como próximo irmão, não substitui)", async () => {
+    editor = createEditor({
+      type: "doc",
+      content: [{ type: "block", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Já tinha texto" }] }] }],
+    });
+    createPageMock.mockResolvedValue(row({ id: "nova-sub-4", title: "", parent_id: "curso" }));
+    const item = collectTurnIntoItems().find((i) => i.id === "blocks:turn:sub-page");
+    if (!item) throw new Error('item "blocks:turn:sub-page" não registrado');
+
+    const handled = item.run(editor);
+
+    expect(handled).toBe(true);
+    await vi.waitFor(() => expect(linkToPageNodes()).toHaveLength(1));
+    const doc = editor.getJSON();
+    expect(doc.content?.[0]?.content?.[0]).toMatchObject({ type: "paragraph", content: [{ text: "Já tinha texto" }] });
   });
 });
 

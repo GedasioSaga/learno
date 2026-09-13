@@ -7,26 +7,18 @@
 // `src/features/editor/interaction/selection/selection.test.ts` — este
 // arquivo prova só o gesto de DOM em cima dela.
 //
-// O assistente de primeira execução aparece UMA vez por sessão do app, e
-// todos os `describe` deste arquivo compartilham a mesma sessão (um app
-// Tauri por spec — ver `wdio.conf.mjs`). Por isso a conexão mora num
-// `before` de arquivo (`connectOnce`) e cada `describe` só abre a sua
-// própria página: a versão anterior repetia o formulário de conexão em cada
-// `describe` e os dois últimos morriam esperando por um `h1=Conectar ao
-// Postgres` que nunca ia voltar a existir.
+// O app abre UMA vez por sessão (App.tsx chama `openWorkspace()` ao subir,
+// que abre o arquivo SQLite na pasta de dados e roda as migrações — não há
+// mais assistente de conexão), e todos os `describe` deste arquivo
+// compartilham a mesma sessão (um app Tauri por spec — ver `wdio.conf.mjs`).
+// Por isso a espera pelo app pronto mora num `before` de arquivo
+// (`connectOnce`) e cada `describe` só abre a sua própria página.
 
 import { Key } from "webdriverio";
 
-import { TEST_DB } from "../lib/env.mjs";
-import { psqlQuiet, sqlLiteral } from "../lib/psql.mjs";
-
 const STAMP = Date.now();
-/** Prefixo comum das páginas deste arquivo — uma por `describe`, todas apagadas de uma vez no fim. */
+/** Prefixo comum das páginas deste arquivo — uma por `describe`. */
 const PAGE_PREFIX = `E2E Seleção ${STAMP}`;
-
-function fieldFor(label) {
-  return $(`//label[normalize-space(text())="${label}"]/following-sibling::input`);
-}
 
 function treeItemByTitle(title) {
   return $(`//div[@role="treeitem"][contains(., "${title}")]`);
@@ -41,16 +33,9 @@ let connected = false;
 
 async function connectOnce() {
   if (connected) return;
-  await $("h1=Conectar ao Postgres").waitForDisplayed({ timeout: 20000 });
-  await fieldFor("Host").setValue(TEST_DB.host);
-  await fieldFor("Porta").setValue(String(TEST_DB.port));
-  await fieldFor("Banco de dados").setValue(TEST_DB.database);
-  await fieldFor("Usuário").setValue(TEST_DB.user);
-  await fieldFor("Senha").setValue("placeholder-ignorado-por-trust-auth");
-  await $("button=Testar conexão").click();
-  await $('[role="status"]').waitForDisplayed({ timeout: 15000 });
-  await $("button=Continuar").click();
-  await $('[aria-label="Árvore de páginas"]').waitForDisplayed({ timeout: 15000 });
+  // Primeira execução ainda cria o arquivo do banco e roda as migrações
+  // antes da barra lateral aparecer — timeout generoso de propósito.
+  await $('[aria-label="Páginas"]').waitForDisplayed({ timeout: 30000 });
   connected = true;
 }
 
@@ -114,9 +99,12 @@ async function shiftClick(element) {
   await browser.action("key").up(Key.Shift).perform();
 }
 
-after(() => {
-  psqlQuiet(`delete from pages where title like ${sqlLiteral(`${PAGE_PREFIX}%`)}`);
-});
+// Sem limpeza no `after`: `e2e/lib/db.mjs` abre o SQLite em modo somente
+// leitura de propósito (o app está de pé com o arquivo aberto em WAL), então
+// não há como fazer `delete` daqui. O banco inteiro é descartado entre
+// sessões (`wdio.conf.mjs` apaga a pasta de dados antes de subir o app), e
+// `PAGE_PREFIX` carrega `STAMP` para não colidir com título de outra spec
+// dentro da mesma sessão.
 
 describe("EDT-053 — seleção por arrasto na margem", () => {
   before(async () => {

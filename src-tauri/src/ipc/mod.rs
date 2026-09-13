@@ -51,8 +51,10 @@ pub use block_commands::{
     list_page_blocks, list_pages_for_tag, move_block, unsync_all_synced_copies, unsync_block, update_block,
 };
 pub use cronograma_commands::{
-    atualizar_bloco, atualizar_materia, copiar_semana, criar_bloco, criar_materia, definir_meta_semanal,
-    listar_materias, mover_bloco, remover_bloco, remover_materia, semana_de_estudo,
+    aplicar_rotina, atualizar_bloco, atualizar_item_de_rotina, atualizar_materia, atualizar_rotina, copiar_semana,
+    criar_bloco, criar_item_de_rotina, criar_materia, criar_rotina, definir_meta_semanal, listar_itens_de_rotina,
+    listar_materias, listar_rotinas, mover_bloco, remover_bloco, remover_item_de_rotina, remover_materia,
+    remover_rotina, semana_de_estudo,
 };
 pub use database_commands::{
     apply_record_value_changes, change_property_type, create_database, create_property, create_record, create_view,
@@ -85,7 +87,7 @@ pub use pagina_de_livro_commands::{
 pub use pomodoro_commands::{finish_pomodoro, pomodoro_today, start_pomodoro};
 pub use prazos_commands::{atualizar_prazo, criar_prazo, listar_prazos, obter_prazo, remover_prazo};
 pub use resumo_capitulo_commands::{listar_resumos_do_livro, remover_resumo_de_capitulo, salvar_resumo_de_capitulo};
-pub use study_commands::{answer_card, deck_counts, deck_forecast, next_card};
+pub use study_commands::{answer_card, deck_counts, deck_forecast, deck_maturity, next_card};
 pub use vocabulario_commands::{
     atualizar_nota_da_palavra, coletar_palavra, listar_palavras, listar_palavras_do_livro, remover_palavra,
 };

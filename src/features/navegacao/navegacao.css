@@ -1,0 +1,22 @@
+/*
+ * Movimento da casca. Uma animação só, e com condição: o conteúdo de uma
+ * seção entra com um leve deslize quando a troca veio do mouse (feedback de
+ * "de onde veio"); troca por Ctrl+dígito não recebe a classe e aparece seco
+ * (§9.3 do DESIGN-TOKENS). Só `opacity` e `transform`, duração `--motion-base`
+ * (180ms) e a curva `ease-out` do tema — os três vêm de `theme.css`, nada é
+ * inventado aqui. `prefers-reduced-motion` é zerado globalmente lá.
+ */
+@keyframes entrada-de-secao {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.entrada-de-secao {
+  animation: entrada-de-secao var(--motion-base) var(--ease-out) both;
+}

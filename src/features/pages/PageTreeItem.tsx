@@ -115,6 +115,12 @@ export function PageTreeItem({
     event.stopPropagation();
   }
 
+  // §1 da tarefa: a raiz PARECE categoria (peso, espaçamento, ícone maior),
+  // sem entidade nova no banco — `pages.parent_id === null` já é a única
+  // marca de "isto é uma categoria" que existe, e é a mesma que o Notion usa
+  // para o que aparece embaixo de "Private".
+  const isCategoria = depth === 0;
+
   /** F2 entra em edição aqui, porque só esta linha sabe seu próprio estado de edição; todo o resto delega para a navegação da árvore. */
   function handleRowKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "F2") {
@@ -142,9 +148,10 @@ export function PageTreeItem({
       onDrop={(event) => onDropRow(page.id, event)}
       onDragEnd={onDragEndRow}
       style={{ paddingLeft: depth * INDENT_PER_DEPTH_PX }}
-      className={`group relative flex items-center gap-1 rounded-sm py-1 pr-1 text-sm outline-none
+      className={`group relative flex items-center gap-1 rounded-sm pr-1 text-sm outline-none
         ${selected ? "bg-surface-sunken text-ink" : "text-ink hover:bg-surface-sunken/60"}
-        ${dropIndicator ? DROP_INDICATOR_CLASS[dropIndicator] : ""}`}
+        ${dropIndicator ? DROP_INDICATOR_CLASS[dropIndicator] : ""}
+        ${isCategoria ? "mt-2 py-1.5 first:mt-0" : "py-1"}`}
     >
       <button
         type="button"
@@ -161,6 +168,7 @@ export function PageTreeItem({
         pageId={page.id}
         currentIcon={page.icon}
         triggerLabel={`Ícone de ${displayTitle(page)}`}
+        size={isCategoria ? "lg" : "sm"}
       />
 
       {isRenaming ? (
@@ -179,7 +187,7 @@ export function PageTreeItem({
           onClick={onSelect}
           onDoubleClick={startRenaming}
           tabIndex={-1}
-          className="min-w-0 flex-1 truncate text-left"
+          className={`min-w-0 flex-1 truncate text-left ${isCategoria ? "font-semibold" : ""}`}
         >
           {displayTitle(page)}
         </button>
