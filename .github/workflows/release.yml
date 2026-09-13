@@ -56,9 +56,12 @@ jobs:
       # atualiza ou atualiza em loop.
       - name: conferir versao da tag
         shell: pwsh
+        # Via env, nunca interpolado no script: nome de tag aceita $( ) e ;.
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $tag = $env:TAG.TrimStart('v')
           Write-Host "tag = $tag / tauri.conf.json = $($conf.version)"
           if ($conf.version -ne $tag) { throw "Tag v$tag diferente da versao $($conf.version) do tauri.conf.json. Build ABORTADO." }
 

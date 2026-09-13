@@ -198,6 +198,19 @@ pub async fn open_workspace(app: AppHandle, state: State<'_, AppState>) -> Resul
     open_workspace_and_wire_state(&state, &data_dir, &backup_dir).await
 }
 
+/// Auto-update: desliga o sidecar Python antes de o instalador rodar. No
+/// Windows o plugin updater encerra o processo com `exit(0)` sem passar por
+/// `RunEvent::ExitRequested`, então o `shutdown` de `lib.rs` não roda e o
+/// `learno-sidecar.exe` ficaria vivo, travando o arquivo que o NSIS precisa
+/// sobrescrever. O frontend chama isto entre `download()` e `install()`.
+#[tauri::command]
+pub async fn encerrar_sidecar_para_atualizar(state: State<'_, AppState>) -> Result<()> {
+    if let Ok(process) = state.sidecar() {
+        process.shutdown().await;
+    }
+    Ok(())
+}
+
 /// PLT-016: lê a pasta de dados escolhida, se alguma foi salva. `None`
 /// significa "usar o padrão do SO via `app_data_dir()`".
 #[tauri::command]

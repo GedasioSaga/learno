@@ -82,6 +82,7 @@ pub fn run() {
             ipc::commands::get_app_config,
             ipc::commands::open_workspace,
             ipc::commands::get_data_dir,
+            ipc::commands::encerrar_sidecar_para_atualizar,
             ipc::commands::save_data_dir,
             ipc::commands::get_theme,
             ipc::commands::save_theme,

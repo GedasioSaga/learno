@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { encerrarSidecarParaAtualizar } from "../lib/ipc";
 
 type Estado =
   | { fase: "aviso" }
@@ -43,11 +44,15 @@ export function AtualizadorBanner() {
     let total: number | null = null;
     setEstado({ fase: "baixando", baixado, total });
     try {
-      await update.downloadAndInstall((evento) => {
+      await update.download((evento) => {
         if (evento.event === "Started") total = evento.data.contentLength ?? null;
         if (evento.event === "Progress") baixado += evento.data.chunkLength;
         setEstado({ fase: "baixando", baixado, total });
       });
+      // Download e instalação separados de propósito: o sidecar só cai depois
+      // que o pacote chegou inteiro, e antes de o NSIS precisar do .exe dele.
+      await encerrarSidecarParaAtualizar();
+      await update.install();
       await relaunch();
     } catch (e) {
       setEstado({ fase: "erro", mensagem: String(e) });
@@ -103,9 +108,15 @@ export function AtualizadorBanner() {
             aria-valuenow={porcentagem ?? undefined}
             className="h-1.5 overflow-hidden rounded-sm bg-surface-sunken"
           >
+            {/* Sem contentLength não há porcentagem: barra pulsando em vez de
+                cheia, que pareceria download já concluído. */}
             <div
-              className="h-full bg-emerald transition-[width] duration-150 ease-out"
-              style={{ width: `${porcentagem ?? 100}%` }}
+              className={
+                porcentagem === null
+                  ? "h-full w-1/3 animate-pulse bg-emerald"
+                  : "h-full bg-emerald transition-[width] duration-150 ease-out"
+              }
+              style={porcentagem === null ? undefined : { width: `${porcentagem}%` }}
             />
           </div>
         </>

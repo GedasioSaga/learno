@@ -84,6 +84,14 @@ export function getDataDir(): Promise<string | null> {
 }
 
 /**
+ * Auto-update: desliga o sidecar Python antes do instalador rodar, para o
+ * `learno-sidecar.exe` nao ficar travado durante a sobrescrita.
+ */
+export function encerrarSidecarParaAtualizar(): Promise<void> {
+  return call<void>("encerrar_sidecar_para_atualizar");
+}
+
+/**
  * PLT-016: troca a pasta de trabalho e reabre o banco la, devolvendo a
  * configuracao que passou a valer. Rejeita string vazia/so espaco.
  *

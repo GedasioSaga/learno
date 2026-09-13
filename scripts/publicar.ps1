@@ -33,6 +33,10 @@ function Checar($etapa) {
 
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 if ($branch -ne "master") { throw "Publicacao so sai da master (branch atual: $branch)." }
+if (git status --porcelain) { throw "Arvore com mudancas nao commitadas. Commite ou descarte antes de publicar." }
+git fetch origin master --quiet
+Checar "git fetch"
+if ((git rev-list --count HEAD..origin/master) -ne "0") { throw "master local atras de origin/master. De pull antes de publicar." }
 
 $atual = (Get-Content "$raiz\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
 if ([version]$Versao -le [version]$atual) {
@@ -66,13 +70,16 @@ BumpVersao "$raiz\package.json" '"version": "\d+\.\d+\.\d+"' "`"version`": `"$Ve
 # Cargo.lock e package-lock.json acompanham o bump sem compilar nada.
 Push-Location "$raiz\src-tauri"
 cargo metadata --format-version 1 | Out-Null
+$exit = $LASTEXITCODE
 Pop-Location
+if ($exit -ne 0) { throw "cargo metadata falhou (exit $exit)" }
 npm install --package-lock-only --ignore-scripts 2>&1 | Out-Null
+Checar "npm install --package-lock-only"
 
 # 3. Gate anti-segredo: nada de token/chave em claro no que vai subir.
 Write-Host "== Gate anti-segredo..." -ForegroundColor Cyan
 git add -A
-$suspeitos = git grep --cached -I -n -E "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|rsign encrypted secret key"
+$suspeitos = git grep --cached -I -n -E "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWdu"
 if ($suspeitos) {
     Write-Host $suspeitos -ForegroundColor Red
     throw "Possivel segredo detectado - publicacao ABORTADA. Confira antes de tentar de novo."
