@@ -140,8 +140,8 @@ pub async fn gravar_colecao(
         let baralho = baralhos.resolver(&mut tx, caminho_do_cartao(primeiro, &caminhos), &mut relatorio).await?;
 
         let mut valores = serde_json::Map::with_capacity(tipo.campos.len());
-        for (indice, nome) in tipo.campos.iter().enumerate() {
-            let html = nota.campos.get(indice).map(String::as_str).unwrap_or_default();
+        for (indice, nome) in &tipo.campos {
+            let html = nota.campos.get(*indice).map(String::as_str).unwrap_or_default();
             valores.insert(nome.clone(), JsonValue::String(html_para_texto(html)));
         }
         let tags = JsonValue::Array(nota.tags.iter().cloned().map(JsonValue::String).collect());
@@ -330,8 +330,9 @@ async fn filho(
 #[derive(Clone)]
 struct TipoResolvido {
     id: Uuid,
-    /// Os nomes dos campos NO LEARNO, na ordem dos campos do Anki.
-    campos: Vec<String>,
+    /// `(posição do campo na nota do Anki, nome do campo no Learno)`, na ordem
+    /// dos campos do tipo no Learno.
+    campos: Vec<(usize, String)>,
     cloze: bool,
 }
 
@@ -374,12 +375,14 @@ impl TiposDoLearno {
         }
 
         let kind = if tipo.cloze { NOTE_TYPE_KIND_CLOZE } else { NOTE_TYPE_KIND_STANDARD };
+        let ordem = ordem_dos_campos(tipo);
+        let nomes: Vec<String> = ordem.iter().map(|&indice| tipo.campos[indice].clone()).collect();
         let embutido = match (tipo.cloze, tipo.campos.len(), tipo.templates.len()) {
-            (true, 2, _) => Some(CLOZE_NOTE_TYPE_NAME),
+            (true, 2, _) if ordem.first() == Some(&0) => Some(CLOZE_NOTE_TYPE_NAME),
             (false, 2, 1) => Some(BASICO_NOTE_TYPE_NAME),
             _ => None,
         };
-        let campos = JsonValue::Array(tipo.campos.iter().cloned().map(JsonValue::String).collect());
+        let campos = JsonValue::Array(nomes.iter().cloned().map(JsonValue::String).collect());
         let templates = JsonValue::Array(
             tipo.templates
                 .iter()
@@ -398,9 +401,11 @@ impl TiposDoLearno {
         });
 
         let resolvido = match achado {
-            Some(existente) => {
-                TipoResolvido { id: existente.id, campos: nomes_dos_campos(&existente.campos)?, cloze: tipo.cloze }
-            }
+            Some(existente) => TipoResolvido {
+                id: existente.id,
+                campos: ordem.iter().copied().zip(nomes_dos_campos(&existente.campos)?).collect(),
+                cloze: tipo.cloze,
+            },
             None => {
                 let id = Uuid::now_v7();
                 sqlx::query("INSERT INTO note_types (id, name, kind, fields, templates) VALUES ($1, $2, $3, $4, $5)")
@@ -419,13 +424,51 @@ impl TiposDoLearno {
                     campos,
                     templates,
                 });
-                TipoResolvido { id, campos: tipo.campos.clone(), cloze: tipo.cloze }
+                TipoResolvido { id, campos: ordem.iter().copied().zip(nomes).collect(), cloze: tipo.cloze }
             }
         };
 
         self.por_id_do_anki.insert(tipo.id, resolvido.clone());
         Ok(resolvido)
     }
+}
+
+/// A ordem dos campos do Anki dentro do tipo no Learno.
+///
+/// Um cloze do Learno lê as lacunas do PRIMEIRO campo
+/// (`db::cards::montar_card_to_study`). No Anki, o campo da lacuna é o que o
+/// template marca com `{{cloze:Campo}}`, e em muitos tipos ele não é o
+/// primeiro (numa coleção real, 11.989 de 24.029 notas). Esse campo passa
+/// para a frente; os outros seguem na ordem original.
+fn ordem_dos_campos(tipo: &TipoDeNotaAnki) -> Vec<usize> {
+    let mut ordem: Vec<usize> = (0..tipo.campos.len()).collect();
+    if tipo.cloze {
+        let campo = tipo.templates.first().and_then(|template| campo_de_cloze(&template.frente));
+        if let Some(posicao) = campo.and_then(|nome| tipo.campos.iter().position(|c| c == nome)) {
+            ordem.remove(posicao);
+            ordem.insert(0, posicao);
+        }
+    }
+    ordem
+}
+
+/// O campo marcado com o filtro `cloze` num template: `{{cloze:Texto}}` e
+/// `{{text:cloze:Texto}}` dão `Texto`. Filtros vêm antes, o campo é o último
+/// segmento.
+fn campo_de_cloze(template: &str) -> Option<&str> {
+    let mut resto = template;
+    while let Some(inicio) = resto.find("{{") {
+        let depois = &resto[inicio + 2..];
+        let fim = depois.find("}}")?;
+        let marcador = &depois[..fim];
+        let mut segmentos = marcador.rsplit(':').map(str::trim);
+        let campo = segmentos.next();
+        if segmentos.any(|filtro| filtro == "cloze") {
+            return campo;
+        }
+        resto = &depois[fim + 2..];
+    }
+    None
 }
 
 fn nomes_dos_campos(campos: &JsonValue) -> Result<Vec<String>> {
@@ -646,6 +689,34 @@ mod tests {
         let importada = mapear_revisao(&revisao(1, 0, -600, 0)).unwrap();
         assert_eq!((importada.estado_antes, importada.estado_depois), ("new", "learning"));
         assert_eq!(importada.intervalo_depois, 0);
+    }
+
+    #[test]
+    fn campo_de_cloze_acha_o_campo_marcado_no_template() {
+        assert_eq!(campo_de_cloze("{{cloze:Text}}"), Some("Text"));
+        assert_eq!(campo_de_cloze("<b>{{Título}}</b><br>{{cloze:Texto}}"), Some("Texto"));
+        assert_eq!(campo_de_cloze("{{text:cloze:Texto}}"), Some("Texto"));
+        assert_eq!(campo_de_cloze("{{ cloze : Texto }}"), Some("Texto"));
+        assert_eq!(campo_de_cloze("{{Front}}"), None);
+        assert_eq!(campo_de_cloze("{{cloze:sem fim"), None);
+    }
+
+    fn tipo(cloze: bool, campos: &[&str], frente: &str) -> TipoDeNotaAnki {
+        TipoDeNotaAnki {
+            id: 1,
+            nome: "t".into(),
+            cloze,
+            campos: campos.iter().map(|c| (*c).to_string()).collect(),
+            templates: vec![crate::anki::TemplateAnki { nome: "c".into(), frente: frente.into(), verso: String::new() }],
+        }
+    }
+
+    #[test]
+    fn cloze_com_a_lacuna_fora_do_primeiro_campo_leva_esse_campo_para_a_frente() {
+        assert_eq!(ordem_dos_campos(&tipo(true, &["Título", "Texto", "Extra"], "{{Título}}{{cloze:Texto}}")), vec![1, 0, 2]);
+        assert_eq!(ordem_dos_campos(&tipo(true, &["Texto", "Extra"], "{{cloze:Texto}}")), vec![0, 1]);
+        assert_eq!(ordem_dos_campos(&tipo(true, &["A", "B"], "{{A}}")), vec![0, 1]);
+        assert_eq!(ordem_dos_campos(&tipo(false, &["A", "B"], "{{cloze:B}}")), vec![0, 1]);
     }
 
     #[test]

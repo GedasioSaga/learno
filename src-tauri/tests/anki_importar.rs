@@ -292,6 +292,55 @@ async fn pacote_corrompido_no_meio_nao_deixa_nada_gravado() {
 }
 
 #[tokio::test]
+async fn cloze_com_a_lacuna_fora_do_primeiro_campo_estuda_a_lacuna_certa() {
+    let db = IsolatedDatabase::setup("anki-cloze-titulo").await;
+    let pasta = Pasta::nova("cloze-titulo");
+    let fixture = Fixture {
+        criada_em: CRIADA_EM,
+        tipos: vec![TipoFixture {
+            id: 7,
+            nome: "Cloze com título",
+            cloze: true,
+            campos: vec!["Título", "Texto", "Extra"],
+            templates: vec![("Cloze", "{{Título}}<br>{{cloze:Texto}}", "{{cloze:Texto}}<br>{{Extra}}")],
+        }],
+        baralhos: vec![(100, "Bioquímica", false)],
+        notas: vec![NotaFixture {
+            id: 1,
+            guid: "g-titulo",
+            tipo: 7,
+            tags: "",
+            campos: vec!["Respiração", "A {{c1::mitocôndria}} produz ATP", "extra"],
+        }],
+        cartoes: vec![CartaoFixture::novo(11, 1, 100, 0)],
+        revisoes: vec![],
+        midias: 0,
+    };
+    let caminho = anki_fixture::pacote_novo(&pasta.0, &fixture).await;
+
+    let relatorio = importar_pacote(&db.pool, &caminho).await.unwrap();
+
+    assert_eq!(relatorio.tipos_de_nota_criados, 1, "com a lacuna no 2º campo não é o «Cloze» de fábrica");
+    let campos_do_tipo: String = sqlx::query_scalar("SELECT fields FROM note_types WHERE name = 'Cloze com título'")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&campos_do_tipo).unwrap(), json!(["Texto", "Título", "Extra"]));
+    assert_eq!(
+        nota(&db.pool, "g-titulo").await.1,
+        json!({ "Título": "Respiração", "Texto": "A {{c1::mitocôndria}} produz ATP", "Extra": "extra" })
+    );
+
+    // A prova que importa: a fila de estudo acha a lacuna c1 neste cartão.
+    let estudo = learno_lib::db::CardRepository::new(db.pool.clone()).next_card(None).await.unwrap().unwrap();
+    let serializado = serde_json::to_value(&estudo).unwrap();
+    let segmentos = serializado["cloze"].as_array().expect("cartão cloze sem segmentos");
+    assert!(segmentos.iter().any(|s| s["hidden"] == json!(true)), "nenhuma lacuna escondida: {segmentos:?}");
+
+    db.teardown().await;
+}
+
+#[tokio::test]
 async fn gravar_colecao_aceita_colecao_ja_lida() {
     let db = IsolatedDatabase::setup("anki-gravar").await;
     let pasta = Pasta::nova("gravar");

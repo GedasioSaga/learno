@@ -111,9 +111,11 @@ pub async fn ler_colecao(arquivo: &Path) -> Result<ColecaoAnki> {
         // O Anki declara colunas e índices com a collation `unicase`, que só
         // existe dentro dele. Numa coleção real, `count(*)` em `decks` falhou
         // com "no such collation sequence" porque o planejador escolheu o
-        // índice por nome. As consultas daqui ordenam por id e não dependem
-        // desses índices, mas o planejador decide sozinho (as coleções trazem
-        // `sqlite_stat4`); registrar a collation tira a escolha dele do caminho.
+        // índice por nome. As consultas daqui não precisaram dela (a mesma
+        // coleção, com 24 mil notas, importou inteira sem a linha abaixo), mas
+        // os índices secundários de `fields` e `templates` cobrem as colunas
+        // lidas e o planejador pode escolhê-los; registrar a collation tira
+        // essa escolha do caminho.
         .collation("unicase", comparar_sem_caixa)
         .connect()
         .await
