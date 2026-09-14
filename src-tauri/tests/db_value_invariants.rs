@@ -387,29 +387,6 @@ async fn every_fixture_case_matches_sqlite_generated_sort_columns() {
 /// `#[ignore]`d.
 #[test]
 fn i4_only_record_values_rs_writes_to_database_record_values() {
-    let output = std::process::Command::new("rg")
-        .args([
-            "--line-number",
-            "--with-filename",
-            "INSERT INTO database_record_values|UPDATE database_record_values|DELETE FROM database_record_values",
-            "src",
-        ])
-        .output()
-        .expect("ripgrep (rg) precisa estar disponível no PATH para este teste");
-
-    // rg devolve 1 quando NENHUMA linha casa — o que aqui seria, ele
-    // próprio, uma falha (o caminho de escrita tem que existir em algum
-    // lugar). Só um código >= 2 é "rg falhou de verdade" (comando não
-    // encontrado, argumento inválido).
-    let exit_code = output.status.code().unwrap_or(2);
-    assert!(
-        exit_code <= 1,
-        "rg falhou ao rodar: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
     // Só o código de produção conta. I4 é sobre o caminho pelo qual o app
     // escreve valor de propriedade; um `#[cfg(test)]` que insere uma linha
     // para provar outra coisa (a cascata de chave estrangeira, em
@@ -421,17 +398,8 @@ fn i4_only_record_values_rs_writes_to_database_record_values() {
     // "Produção" aqui é tudo que vem ANTES do primeiro `#[cfg(test)]` do
     // arquivo — a convenção que todo módulo deste crate segue (o módulo de
     // teste é sempre o último item).
-    let matching_files: HashSet<String> = stdout
-        .lines()
-        .filter_map(|linha| {
-            // `rg` no Windows devolve `src\db\pool.rs:369:...`; o nome do
-            // arquivo pode conter `:` do prefixo de unidade só se o caminho
-            // for absoluto, o que não acontece aqui (a busca é relativa).
-            let mut partes = linha.splitn(3, ':');
-            let caminho = partes.next()?;
-            let numero: usize = partes.next()?.parse().ok()?;
-            Some((caminho.replace('\\', "/"), numero))
-        })
+    let matching_files: HashSet<String> = escritas_em_record_values(std::path::Path::new("src"))
+        .into_iter()
         .filter(|(caminho, numero)| !esta_em_modulo_de_teste(caminho, *numero))
         .map(|(caminho, _)| caminho)
         .collect();
@@ -447,6 +415,42 @@ fn i4_only_record_values_rs_writes_to_database_record_values() {
              só db/record_values.rs pode (apply_record_value_changes)"
         );
     }
+}
+
+/// Toda linha sob `raiz` que emite escrita em `database_record_values`, como
+/// `(caminho com "/", número 1-based)`.
+///
+/// Varredura em Rust puro, e não `rg`: o runner do CI não tem ripgrep no PATH,
+/// e uma invariante que só roda na máquina de quem tem a ferramenta instalada
+/// não guarda nada. Arquivo que não é UTF-8 é pulado, como o `rg` pula binário.
+fn escritas_em_record_values(raiz: &std::path::Path) -> Vec<(String, usize)> {
+    const ESCRITAS: [&str; 3] = [
+        "INSERT INTO database_record_values",
+        "UPDATE database_record_values",
+        "DELETE FROM database_record_values",
+    ];
+
+    let mut achados = Vec::new();
+    let mut pastas = vec![raiz.to_path_buf()];
+    while let Some(pasta) = pastas.pop() {
+        for entrada in std::fs::read_dir(&pasta).unwrap() {
+            let caminho = entrada.unwrap().path();
+            if caminho.is_dir() {
+                pastas.push(caminho);
+                continue;
+            }
+            let Ok(conteudo) = std::fs::read_to_string(&caminho) else {
+                continue;
+            };
+            let nome = caminho.to_string_lossy().replace('\\', "/");
+            for (indice, linha) in conteudo.lines().enumerate() {
+                if ESCRITAS.iter().any(|escrita| linha.contains(escrita)) {
+                    achados.push((nome.clone(), indice + 1));
+                }
+            }
+        }
+    }
+    achados
 }
 
 /// Verdadeiro quando a linha `numero` (1-based) de `caminho` está dentro do
