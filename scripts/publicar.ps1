@@ -81,7 +81,8 @@ Checar "npm install --package-lock-only"
 # 3. Gate anti-segredo: nada de token/chave em claro no que vai subir.
 Write-Host "== Gate anti-segredo..." -ForegroundColor Cyan
 git add -A
-$suspeitos = git grep --cached -I -n -E "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWdu"
+# O proprio script fica fora: a regex abaixo casaria com ela mesma.
+$suspeitos = git grep --cached -I -n -E "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWdu" -- . ":(exclude)scripts/publicar.ps1"
 if ($suspeitos) {
     Write-Host $suspeitos -ForegroundColor Red
     throw "Possivel segredo detectado - publicacao ABORTADA. Confira antes de tentar de novo."
