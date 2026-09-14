@@ -120,6 +120,19 @@ export function saveTheme(theme: string): Promise<void> {
   return call<void>("save_theme", { theme });
 }
 
+/** De onde veio um erro da interface: a tela de erro global, `window.onerror` ou promessa rejeitada sem tratamento. */
+export type OrigemDoErro = "tela" | "janela" | "promessa";
+
+/** Grava um erro da interface no mesmo arquivo de log do Rust (`ipc::diagnostico_commands`). */
+export function registrarErroDaInterface(origem: OrigemDoErro, mensagem: string, pilha: string | null): Promise<void> {
+  return call<void>("registrar_erro_da_interface", { origem, mensagem, pilha });
+}
+
+/** Abre a pasta de logs do app no explorador de arquivos, criando-a se preciso. */
+export function abrirPastaDeLogs(): Promise<void> {
+  return call<void>("abrir_pasta_de_logs");
+}
+
 /**
  * Espelha `PageRow` em `src-tauri/src/db/pages.rs`. Os nomes de campo ficam em
  * `snake_case` de propósito — `#[derive(Serialize)]` lá não tem `rename_all`,

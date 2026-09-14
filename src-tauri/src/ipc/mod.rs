@@ -18,6 +18,7 @@ pub(crate) mod commands;
 pub(crate) mod cronograma_commands;
 pub(crate) mod database_commands;
 pub(crate) mod deck_commands;
+pub(crate) mod diagnostico_commands;
 pub(crate) mod financas_commands;
 pub(crate) mod formula_commands;
 pub(crate) mod gamificacao_commands;

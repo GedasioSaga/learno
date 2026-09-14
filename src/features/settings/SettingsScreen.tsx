@@ -4,6 +4,7 @@ import { ImportApkgSection } from "../import";
 import { CheckDatabaseSection } from "../integrity";
 import { AppearanceSection } from "./AppearanceSection";
 import { DataFolderSection } from "./DataFolderSection";
+import { DiagnosticoSection } from "./DiagnosticoSection";
 
 /**
  * A tela de Configurações, com navegação própria.
@@ -59,6 +60,12 @@ const SECOES: readonly Secao[] = [
     nome: "Importar",
     resumo: "Trazer material de outros programas.",
     conteudo: <ImportApkgSection />,
+  },
+  {
+    id: "diagnostico",
+    nome: "Diagnóstico",
+    resumo: "O rastro que ajuda a entender um problema.",
+    conteudo: <DiagnosticoSection />,
   },
 ] as const;
 

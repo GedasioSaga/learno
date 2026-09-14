@@ -13,6 +13,7 @@
 //!   puro e sem nenhuma dependência de banco.
 //! - `sidecar` — processo Python empacotado e o protocolo que fala com ele.
 //! - `ipc` — os comandos `#[tauri::command]` que o frontend chama.
+//! - `logs` — o log em arquivo (um por dia) e o registro de pânico.
 
 pub mod anki;
 pub mod backup;
@@ -21,6 +22,7 @@ pub mod db;
 pub mod error;
 pub mod formula;
 pub mod ipc;
+pub mod logs;
 pub mod rollup;
 pub mod sidecar;
 pub mod srs;
@@ -44,13 +46,6 @@ pub const TOGGLE_THEME_EVENT: &str = "learno://toggle-theme";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "learno_lib=info,sqlx=warn".into()),
-        )
-        .init();
-
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -68,6 +63,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(ipc::AppState::new())
         .setup(|app| {
+            // O log liga aqui, e não no começo de `run`: a pasta de logs vem do
+            // identificador do app, que só o `AppHandle` conhece.
+            logs::iniciar(app.path().app_log_dir().ok().as_deref());
+
             // PLT-004: sobe o sidecar uma vez, aqui, e guarda o handle em
             // `AppState` para `import_apkg` (e as fases seguintes) chamarem.
             // Falha de spawn não é fatal para o app inteiro — só as features
@@ -229,6 +228,8 @@ pub fn run() {
             ipc::financas_commands::confirmar_recorrente,
             ipc::financas_commands::resumo_financeiro_do_mes,
             ipc::financas_commands::visao_financeira_por_meses,
+            ipc::diagnostico_commands::registrar_erro_da_interface,
+            ipc::diagnostico_commands::abrir_pasta_de_logs,
             ipc::database_commands::create_database,
             ipc::database_commands::get_database,
             ipc::database_commands::list_databases_in_page,
@@ -322,7 +323,9 @@ pub fn run() {
             }
         }),
         Err(error) => {
-            tracing::error!(%error, "falha ao inicializar o Tauri");
+            // O log só liga dentro do `setup`, que nunca rodou: o erro vai
+            // direto para o stderr.
+            eprintln!("falha ao inicializar o Tauri: {error}");
             std::process::exit(1);
         }
     }

@@ -1,12 +1,17 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { LimiteDeErroGlobal } from "./components/LimiteDeErroGlobal";
+import { instalarRegistroDeErros } from "./lib/registro-de-erros";
 import { useThemeStore } from "./lib/theme-store";
 import "./styles/theme.css";
 
 // Aplica o tema salvo antes do primeiro paint, não dentro de um efeito do
 // React — senão a tela pisca no tema errado por um quadro.
 useThemeStore.getState().iniciar();
+
+// Antes de montar: um erro solto já durante a primeira renderização vai para o log.
+instalarRegistroDeErros();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -33,7 +38,9 @@ if (emModoVitrine) {
 } else {
   root.render(
     <React.StrictMode>
-      <App />
+      <LimiteDeErroGlobal>
+        <App />
+      </LimiteDeErroGlobal>
     </React.StrictMode>,
   );
 }
