@@ -49,7 +49,9 @@ if (-not $SemTestes) {
     npx vitest run 2>&1 | Select-Object -Last 6 | ForEach-Object { "$_" }
     Checar "vitest"
     Push-Location "$raiz\src-tauri"
-    cargo test --quiet 2>&1 | Select-String "test result|error" | ForEach-Object { "$_" }
+    # --jobs 2: sem limite, os ~25 binarios de teste linkam juntos e esgotam a
+    # memoria virtual desta maquina (os error 1455, arquivo de paginacao).
+    cargo test --quiet --jobs 2 2>&1 | Select-String "test result|error" | ForEach-Object { "$_" }
     $exit = $LASTEXITCODE
     Pop-Location
     if ($exit -ne 0) { throw "cargo test falhou (exit $exit)" }

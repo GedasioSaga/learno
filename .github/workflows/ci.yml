@@ -1,0 +1,91 @@
+# Portão de teste em todo push e PR para a master. O release.yml só empacota,
+# e o scripts/publicar.ps1 aceita -SemTestes: sem este arquivo, nada impede um
+# push quebrado de virar tag de release.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup node
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      - name: tsc
+        run: npx tsc --noEmit
+
+      - name: vitest
+        run: npx vitest run
+
+  rust:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # O build script do tauri-build copia todo externalBin e falha se o
+      # arquivo não existe (copy_file em tauri-build 2.6). Os testes que
+      # executam o sidecar de verdade são #[ignore], então um arquivo vazio
+      # basta aqui; o empacotamento real com PyInstaller é do release.yml.
+      - name: sidecar provisorio
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force binaries | Out-Null
+          New-Item -ItemType File -Force binaries/learno-sidecar-x86_64-pc-windows-msvc.exe | Out-Null
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::unwrap_used -W clippy::expect_used
+
+      - name: cargo test
+        run: cargo test
+
+  sidecar:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: sidecar
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install pytest
+        run: python -m pip install "pytest>=8"
+
+      - name: pytest
+        run: python -m pytest -q
