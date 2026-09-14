@@ -29,7 +29,7 @@ A ordem põe primeiro o que destrava o resto.
 1. ~~**Fazer os 2 testes de guarda do vitest passarem.**~~ **Feito em 13/09/2026.** As 6 structs de Rotina e Tags ganharam interface em `ipc.ts`; "criar categoria" ganhou tela nos dois formulários de Finanças (`NovaCategoria.tsx`); os 11 comandos de tags e rotina foram declarados em `REGISTRADOS_SEM_TELA`, com o motivo.
 2. ~~**Estabilizar o vitest sob carga.**~~ **Feito em 13/09/2026.** A causa do flake era o `findBy*` com limite padrão de 1 s disputando com debounce real; agora `asyncUtilTimeout` 5 s (`src/test/setup.ts`), `testTimeout` 15 s e CSS processado só onde algum teste o lê (`vite.config.ts`). Duas suítes simultâneas passaram 2226/2226.
 3. ~~**Criar o CI de teste em push/PR** (`ci.yml`): tsc, vitest, clippy, cargo test e pytest.~~ **Feito em 13/09/2026** (`.github/workflows/ci.yml`). A primeira execução pegou um teste que dependia do `rg` instalado. Depois da correção, a run `34793296565` ficou verde nos 3 jobs.
-4. **Implementar a importação real de `.apkg`.** Hoje ela diz "concluído" e importa 0 notas, e isso bloqueia a adoção por quem vem do Anki.
+4. ~~**Implementar a importação real de `.apkg`.**~~ **Feito em 13/09/2026, sem mídia.** Notas, cartões com agendamento e histórico entram, nos formatos novo e antigo, em `.apkg` e `.colpkg`. Validado numa coleção real de 24 mil notas em 6,6 s. A mídia virou item próprio abaixo.
 5. **Gravar logs persistentes, com panic hook e ErrorBoundary global.** Sem isso, bug relatado não tem rastro.
 6. **Creditar XP automaticamente em revisão, pomodoro e bloco.** Hoje a gamificação parece quebrada.
 7. **Instalar o plugin de notificação do sistema.** Ele destrava o som/aviso do Pomodoro e o lembrete do Cronograma.
@@ -46,7 +46,9 @@ A ordem põe primeiro o que destrava o resto.
 - [x] **Criar categoria em Finanças** — o wrapper existe, mas nenhuma tela o chama, e o usuário fica preso às 13 categorias semeadas. Também é um dos 2 testes de guarda vermelhos (P) — `src-tauri/src/ipc/financas_commands.rs:31`
 - [x] **Interfaces TS para as structs de Rotina e Tags** — `Rotina`, `ItemDeRotina`, `DiaDeRotinaPulado`, `AplicacaoDeRotina`, `TagSummaryRow` e `TagPageRow` estão fora do teste de contrato (P) — `src-tauri/src/db/cronograma.rs:264`
 - [ ] **Tela de navegação por #tags** — `list_all_tags` e `list_pages_for_tag` não têm wrapper nem tela, então o índice de tags só existe no backend (M) — `src-tauri/src/ipc/block_commands.rs:131`
-- [ ] **Importação real de `.apkg` (notas, agendamento, mídia, Check Media)** — o sidecar devolve `notes_imported: 0` fixo e ainda dispara backup à toa. Cobre PLT-004 e PLT-015 (G) — `sidecar/learno_sidecar/handlers/apkg.py:41`
+- [x] **Importação real de `.apkg` (notas, agendamento, histórico)** — feita em 13/09/2026 no Rust (`src-tauri/src/anki/`). Cobre PLT-004 e SRS-149 sem mídia.
+- [ ] **Mídia do Anki e Check Media** — a importação conta a mídia e não a copia, porque a tela de estudo não mostra imagem nem áudio. Depende de "campos ricos" em Cartões. Cobre o resto de SRS-149 e PLT-015 (M) — `src-tauri/src/anki/importar.rs`
+- [ ] **Importar sem o agendamento** — opção de trazer os cartões como novos (SRS-150) (P) — `src-tauri/src/anki/importar.rs`
 - [ ] **Crédito automático de XP** — `registrar_xp_revisao_cartao`, `registrar_xp_pomodoro_concluido`, `registrar_xp_bloco_cronograma` e `resumo_de_sessao` nunca são chamados (M) — `src-tauri/src/ipc/gamificacao_commands.rs:49`
 - [ ] **Remover o comentário velho em Estatísticas** — ele diz que um erro é "esperado", mas `study_stats` existe, então um erro real seria ignorado (P) — `src/features/cartoes/Estatisticas.tsx:51`
 - [ ] **Mídia com pasta de dados customizada** — falta `fs_scope().allow_directory` no `save_data_dir`, e o bloco de mídia falha para quem trocou a pasta (P) — `src-tauri/capabilities/default.json:4`

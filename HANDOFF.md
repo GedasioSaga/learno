@@ -64,7 +64,7 @@ Este Top 10 saiu de 4 análises (docs, código, produto e qualidade). O backlog 
 1. ~~**Fazer os 2 testes de guarda do vitest passarem**~~ — **feito em 13/09/2026**, ver a Evidência "Travas verdes de novo".
 2. ~~**Estabilizar o vitest sob carga**~~ — **feito em 13/09/2026**, ver a Evidência "Vitest estável sob carga".
 3. ~~**Criar o CI de teste em push/PR**~~ — **feito em 13/09/2026**, verde no GitHub. Ver a Evidência "CI de teste".
-4. **Implementar a importação real de `.apkg`**. Hoje ela devolve 0 notas.
+4. ~~**Implementar a importação real de `.apkg`**~~ — **feito em 13/09/2026**, sem mídia. Ver a Evidência "Importação real do Anki".
 5. **Gravar logs persistentes**, com panic hook e ErrorBoundary global.
 6. **Creditar XP automaticamente** em revisão, pomodoro e bloco.
 7. **Instalar o plugin de notificação do sistema.**
@@ -230,6 +230,43 @@ declarado para cada um. Para a migração de banco especificamente: o portão in
 suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
+
+### Importação real do Anki (13/09/2026)
+
+Commits `8e5eda6`, `90f3705`, `1cbb07a`, `f1cd8a2`, `523dcb1`. Código em `src-tauri/src/anki/` (`pacote.rs` abre o zip, `colecao.rs` lê, `importar.rs` grava, `html.rs` e `proto.rs` de apoio), migração `0044_notes_anki_guid.sql`.
+
+**Decisões do usuário, tomadas antes de codar:**
+- O Rust lê e grava, numa transação só. O sidecar Python saiu do caminho, e o handler `apkg.import`, que devolvia 0 notas, foi apagado. Dependência nova: crate `zstd` (a `zip` já vinha pelo updater).
+- Vem o agendamento SM-2 (estado, vencimento, intervalo, facilidade, repetições, lapsos) e o histórico em `review_log`, sem os reagendamentos manuais.
+- HTML vira texto. Imagem e áudio viram marcador `[imagem: x]`/`[áudio: x]`, a mídia não é copiada, e o relatório conta os arquivos deixados de fora.
+- Reimportar pula a nota pelo guid do Anki e nunca mexe no progresso feito no Learno.
+- Tipo padrão com 2 campos e 1 template vira o «Básico»; cloze com a lacuna no 1º campo vira o «Cloze»; os outros viram tipo próprio.
+- Baralho entra pelo caminho e junta com o que já existe. Filtrado não existe no Learno, e o cartão volta à origem.
+- Aceita o formato novo (`collection.anki21b`, zstd, schema 18) e o antigo (`anki21`/`anki2`, schema 11), em `.apkg` e em `.colpkg`.
+
+**Validação na coleção real do usuário**, num banco descartável e apagado depois, sem conteúdo de nota no chat:
+- 24.029 notas e 24.349 cartões em **6,6 s**. Os estados batem com os `type`/`queue` do Anki: 22.270 novos, 131 aprendendo, 16 reaprendendo, 1.931 em revisão, 1 suspenso.
+- 29.939 revisões = 32.280 do `revlog`, menos 2.085 de cartões que não existem mais no Anki, menos 256 reagendamentos manuais.
+- 1.430 baralhos e 21 tipos de nota criados. Nenhum cartão em revisão ficou sem vencimento, e nenhum vencimento saiu fora do formato de `formatar_timestamp`.
+- Reimportar o mesmo arquivo: 24.029 notas puladas, nada gravado, 0,57 s.
+
+**Dois defeitos que só a coleção real mostrou**, os dois corrigidos com teste e com mutação que o deixa vermelho:
+- **Cloze com a lacuna fora do 1º campo** (11.989 das 24.029 notas): o Learno lê as lacunas do primeiro campo, e o template do Anki marcava outro (`{{cloze:Texto}}` depois de um título). O cartão seria estudado sem lacuna. O importador agora põe esse campo na frente (`ordem_dos_campos`). Teste: `cloze_com_a_lacuna_fora_do_primeiro_campo_estuda_a_lacuna_certa`, que vai até `next_card`.
+- **Cartão invertido perguntava o mesmo que o normal**: a tela lia a ordem de campos do tipo, igual para os dois cartões da nota. O backend agora põe na frente o campo que o template DESTE cartão mostra primeiro (`frente_pelo_template`, `db/cards.rs`), e a tela confia nessa ordem. Isso vale também para tipos criados no Learno.
+
+**O que ficou como está, com o porquê:**
+- 62 notas mostram `<b>`/`<br>` como texto. Vieram assim do Anki: o campo guardava `&lt;b&gt;`, código dentro de `<pre>` (103 notas têm `&lt;`). É texto legítimo, não tag esquecida.
+- 2 notas cloze não têm lacuna nenhuma já no Anki.
+- A collation `unicase` fica registrada: numa inspeção da coleção real, `count(*)` em `decks` falhou sem ela. O importador em si rodou a coleção inteira sem ela, mas o planejador do SQLite escolhe índice sozinho.
+
+**Portão:**
+- `cargo test --jobs 2`: **30 suítes, 1210 testes, 0 falhas, 2 ignorados** (os dois do sidecar empacotado).
+- `cargo clippy` com os lints do projeto: exit 0. `tsc --noEmit`: exit 0. pytest: 24 passed.
+- Travas de IPC e tela de importação: 17/17. O relatório entrou no contrato: `contrato-ipc` agora também lê `src-tauri/src/anki`.
+- `vitest run` completo: **226 arquivos, 2229 testes, 0 falhas**.
+- **Instabilidade nova, achada nesta rodada:** com o vitest inteiro rodando junto com o `cargo test`, falhou `espaço continua revelando o Básico normalmente` (isolado passou 6 de 6). O teste apertava espaço logo que a frente aparecia, e a tecla podia chegar ao ouvinte de teclado da renderização anterior, ainda com `status` "carregando", porque o `useEffect` que troca o ouvinte continuava pendente. Correção: `efeitosAplicados()` (um `act` vazio) antes de cada tecla em `EstudoSessao.test.tsx`. É mecanismo deduzido do código, não reproduzido de forma determinística: a prova é a suíte seguinte verde sob a mesma carga, uma rodada só.
+
+**Não verificado / não feito:** a tela de importação não foi aberta no app rodando, e nenhuma spec e2e cobre a importação. A mídia não é importada, então SRS-149 está cumprido só em parte. Não há opção de importar sem o agendamento (SRS-150). Estado FSRS não é importado (a coleção real não tinha nenhum cartão FSRS).
 
 ### CI de teste (13/09/2026)
 
