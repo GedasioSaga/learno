@@ -32,7 +32,7 @@ A ordem põe primeiro o que destrava o resto.
 4. ~~**Implementar a importação real de `.apkg`.**~~ **Feito em 13/09/2026, sem mídia.** Notas, cartões com agendamento e histórico entram, nos formatos novo e antigo, em `.apkg` e `.colpkg`. Validado numa coleção real de 24 mil notas em 6,6 s. A mídia virou item próprio abaixo.
 5. ~~**Gravar logs persistentes, com panic hook e ErrorBoundary global.**~~ **Feito em 13/09/2026**: um arquivo por dia em `%LOCALAPPDATA%\com.learno.app\logs`, 7 guardados; pânico com pilha; erros da interface no mesmo arquivo; tela de erro global; Configurações > Diagnóstico.
 6. ~~**Creditar XP automaticamente em revisão, pomodoro e bloco.**~~ **Feito em 14/09/2026.** Revisão e foco já creditavam na mesma transação; faltava o bloco, que agora é pago pelo foco iniciado em "Focar neste bloco" (Plano do dia e Cronograma). O resumo de sessão também ganhou tela.
-7. **Instalar o plugin de notificação do sistema.** Ele destrava o som/aviso do Pomodoro e o lembrete do Cronograma.
+7. ~~**Instalar o plugin de notificação do sistema.**~~ **Feito em 14/09/2026**: aviso do Windows no fim de cada fase do Pomodoro e lembrete 5 min antes dos blocos de hoje, com o app aberto. Som próprio e lembrete com o app fechado ficam de fora.
 8. **Criar o navegador de cartões (editar, apagar, suspender).** Hoje um cartão com erro não tem conserto.
 9. **Criar o pipeline de views do database (filtro, ordenação e views salvas).** Ele destrava kanban, calendário e galeria.
 10. **Assinar o instalador com Authenticode.** Hoje todo usuário novo esbarra no SmartScreen e no antivírus.
