@@ -4,7 +4,7 @@
 //! registra os comandos. Toda a lógica vive nos módulos abaixo, e cada um deles
 //! é dono exclusivo dos seus arquivos:
 //!
-//! - `anki` — leitura de pacotes `.apkg`/`.colpkg` do Anki, sem gravar nada.
+//! - `anki` — importação de pacotes `.apkg`/`.colpkg` do Anki.
 //! - `config` — a pasta de trabalho onde o arquivo do banco vive. Não tem
 //!   host, porta nem credencial: o banco é um arquivo local.
 //! - `db` — o banco SQLite: pool, migrações e os repositórios de página,

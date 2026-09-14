@@ -1123,7 +1123,7 @@ async fn fetch_deck_options(tx: &mut Transaction<'_, Sqlite>, deck_id: Uuid) -> 
 /// comparar "hoje"/"amanhã" contra `due`/`reviewed_at` (TEXT UTC) sem que um
 /// cartão que vence às 23h de terça em São Paulo apareça como vencendo
 /// quarta, só porque em UTC já é quarta.
-fn inicio_do_dia_local_em_utc(agora_utc: DateTime<Utc>, deslocamento_dias: u64) -> DateTime<Utc> {
+pub(crate) fn inicio_do_dia_local_em_utc(agora_utc: DateTime<Utc>, deslocamento_dias: u64) -> DateTime<Utc> {
     let hoje_local = agora_utc.with_timezone(&Local).date_naive();
     let dia_alvo = hoje_local + Days::new(deslocamento_dias);
     let meia_noite_ingenua = NaiveDateTime::new(dia_alvo, NaiveTime::MIN);
@@ -1151,7 +1151,7 @@ fn inicio_do_dia_local_em_utc(agora_utc: DateTime<Utc>, deslocamento_dias: u64) 
 /// que o schema espera divergindo em silêncio); aqui o texto gravado é
 /// sempre este, byte a byte, então `ORDER BY due` (lexicográfico) sempre
 /// concorda com a ordem cronológica real.
-fn formatar_timestamp(instante: DateTime<Utc>) -> String {
+pub(crate) fn formatar_timestamp(instante: DateTime<Utc>) -> String {
     instante.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 

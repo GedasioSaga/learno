@@ -65,7 +65,7 @@ use crate::error::{Error, Result};
 
 /// O tipo de nota "Frente e Verso" clássico, semeado desde a Fase 4 — ver o
 /// comentário de [`NoteTypeRepository::ensure_default`].
-const BASICO_NOTE_TYPE_NAME: &str = "Básico";
+pub(crate) const BASICO_NOTE_TYPE_NAME: &str = "Básico";
 
 /// "Digitar a resposta" (Anki: "Basic (type in the answer)"): a frente pede
 /// que o usuário DIGITE a resposta antes de revelar, e a comparação é
@@ -152,11 +152,11 @@ const MULTIPLA_ESCOLHA_NOTE_TYPE_NAME: &str = "Múltipla escolha";
 /// a geração de cartão em silêncio. `kind` é a mesma escolha que o próprio
 /// Anki faz internamente (`notetypes.config.kind`: Normal | Cloze) — um
 /// discriminador que sobrevive a qualquer nome de exibição.
-const CLOZE_NOTE_TYPE_NAME: &str = "Cloze";
+pub(crate) const CLOZE_NOTE_TYPE_NAME: &str = "Cloze";
 
 /// Valores de `note_types.kind` (`0040_note_types_kind.sql`) — ver o
 /// comentário de [`CLOZE_NOTE_TYPE_NAME`] para a decisão completa.
-const NOTE_TYPE_KIND_STANDARD: &str = "standard";
+pub(crate) const NOTE_TYPE_KIND_STANDARD: &str = "standard";
 /// `pub(crate)`: `db::cards::CardRepository::montar_card_to_study` compara o
 /// `kind` da nota com este valor para decidir se renderiza a lacuna — a
 /// mesma constante, para os dois lados nunca discordarem sobre a grafia.
