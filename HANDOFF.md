@@ -247,6 +247,34 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### v0.2.0 travou bancos existentes; correção na v0.2.1 (14/09/2026)
+
+**Sintoma:** o instalador v0.2.0 abria em "Não deu para abrir o banco de dados — migration 1 was previously applied but has been modified".
+
+**Causa, medida:**
+- O sqlx grava em `_sqlx_migrations.checksum` o SHA-384 dos bytes de cada `.sql` (`sqlx-core-0.8.6/src/migrate/migration.rs:25`) e recusa abrir quando o embutido difere (`migrator.rs:175`).
+- O `learno.exe` v0.2.0 instalado contém o checksum CRLF da 0001 (`5196dd61…`). O CI roda em `windows-latest` com `core.autocrlf=true` e o repo não tinha `.gitattributes`.
+- O banco real (`%APPDATA%\com.learno.app\learno.sqlite`, lido numa cópia) tinha as 40 migrações com checksum LF (`d409cb23…` na 0001), 0 CRLF, 0 outros, e só a 0044 pendente.
+- Os dados ficaram intactos: o rollback pré-migração restaurou o backup a cada tentativa (3 backups de 14/09 em `pre-migration-backups/`).
+- A tela de erro (`App.tsx`, ramo `load-failed`) saía antes do `AtualizadorBanner`, então o app travado não recebia update.
+
+**Correção:**
+- `.gitattributes`: `src-tauri/migrations/*.sql text eol=lf`. `git ls-files --eol`: 41 `i/lf w/lf`.
+- `src-tauri/src/db/pool.rs`: `reconcile_line_ending_checksums` roda antes de `migrate!().run` em `connect_and_migrate` e `connect_migrate_with_rollback`. Só regrava o checksum gravado que bate com o mesmo SQL em LF ou CRLF, numa transação, e loga com `tracing::warn!`.
+- `src/App.tsx`: `AtualizadorBanner` também na tela `load-failed`.
+
+**Portão:**
+- `cargo clippy` com os lints do projeto: exit 0.
+- `cargo test --jobs 2 --lib db::pool`: 12/12. Testes novos: trava de CR, reparo pelos dois caminhos e negativo (checksum lixo continua acusado e intocado).
+- vitest `App.test.tsx` + `AtualizadorBanner.test.tsx`: 12/12. `tsc`: exit 0.
+- **Experimento CI:** todas as migrations convertidas para CRLF no worktree (script em scratchpad, restauração em `finally`). O embutido virou `5196dd61…`, `embedded_migrations_have_no_carriage_return` FALHOU, os 2 testes de reparo passaram no sentido do caso real (binário CRLF, banco LF) e os outros 9 seguiram verdes. Depois, restaurado para `d409cb23…`, 41 `i/lf w/lf`.
+
+**Varredura curta** (`docs/varredura-2026-09-14-v021.md`, 7 agentes, sem erro): 2 CONFIRMADO médios, os dois corrigidos antes do release. (1) Nenhum teste passava pelo ramo "reparo + migração pendente + backup"; entrou `checksum_de_outra_quebra_de_linha_com_migracao_pendente_e_reparado_e_migra`. (2) O `release.yml` gerava o instalador sem nenhuma checagem de CR; entrou o passo "conferir quebra de linha das migrations" antes do `tauri-action`.
+
+**Pendente de evidência:** release v0.2.1, instalação manual por cima da v0.2.0 (o app travado não mostra o aviso), o app abrindo e a 0044 aplicada no banco real.
+
+**Achado de processo:** `build.rs` não tem `cargo:rerun-if-changed=migrations`, então editar só um `.sql` não recompila o `sqlx::migrate!()` localmente.
+
 ### Logs persistentes, pânico e tela de erro global (13/09/2026)
 
 Commit `dab6e52`.
