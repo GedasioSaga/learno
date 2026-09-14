@@ -20,6 +20,12 @@ import {
 } from "./lib/ipc";
 import { useThemeStore } from "./lib/theme-store";
 
+// `AtualizadorBanner` consulta o updater no boot. Rejeitar por padrão reproduz
+// o que acontece hoje sem release/offline: banner calado, testes existentes
+// intactos. O teste da tela de erro troca isso por um update falso.
+const { checkMock } = vi.hoisted(() => ({ checkMock: vi.fn() }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: checkMock }));
+
 vi.mock("./lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./lib/ipc")>();
   return {
@@ -59,6 +65,7 @@ const savedConfig = { data_dir: "C:\\Users\\fixture\\AppData\\Roaming\\Learno" }
 
 beforeEach(() => {
   openWorkspaceMock.mockReset();
+  checkMock.mockReset().mockRejectedValue(new Error("sem release"));
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   useThemeStore.setState({ preferencia: "papel", temaEfetivo: "papel", ultimoEscuro: "ambar-noturno" });
@@ -96,6 +103,25 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("disco cheio");
+  });
+
+  it("quem ficou preso na tela de erro do banco ainda vê o aviso de versão nova", async () => {
+    openWorkspaceMock.mockRejectedValue(new Error("migração 0007 falhou"));
+    checkMock.mockResolvedValue({
+      version: "0.2.1",
+      download: () => Promise.resolve(),
+      install: () => Promise.resolve(),
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("migração 0007 falhou");
+    // O número da versão fica num `<span>` separado, então o texto do `<p>`
+    // só é inteiro no elemento pai — daí o matcher por conteúdo do nó.
+    expect(
+      await screen.findByText((_, node) => node?.textContent === "Nova versão v0.2.1 disponível"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Atualizar agora" })).toBeInTheDocument();
   });
 
   it("o rail tem as oito seções, na ordem certa, e trocar de seção troca o conteúdo", async () => {

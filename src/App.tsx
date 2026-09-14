@@ -114,6 +114,12 @@ function App() {
             {state.message}
           </p>
         </div>
+        {/* Quem está preso nesta tela não chega ao `Workspace`, e este aviso é
+            o único caminho para uma correção (ex.: bug de migração) alcançar
+            essa pessoa pelo updater. O check não depende do banco — só do
+            `latest.json` do release — e o banner é `fixed`, então não disputa
+            layout com a mensagem. */}
+        <AtualizadorBanner />
       </div>
     );
   }
