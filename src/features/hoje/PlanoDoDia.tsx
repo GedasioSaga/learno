@@ -3,6 +3,7 @@ import { AppError, pomodoroToday, semanaDeEstudo, type BlocoPlanejado } from "..
 import { hojeLocal, inicioDaSemanaLocal } from "../cronograma/date-utils";
 import { formatarDuracao, ROTULO_DA_ATIVIDADE } from "../cronograma/format";
 import { useNavegacaoStore } from "../navegacao";
+import { usePomodoroStore } from "../pomodoro";
 
 interface DadosDoDia {
   blocos: BlocoPlanejado[];
@@ -116,6 +117,7 @@ export function PlanoDoDia() {
 
 function DiaPronto({ dados, onPlanejar }: { dados: DadosDoDia; onPlanejar: () => void }) {
   const { blocos, totalPlanejadoMinutos, minutosPlanejadosDePomodoro, minutosFocados } = dados;
+  const focarNoBloco = usePomodoroStore((state) => state.focarNoBloco);
 
   // A porcentagem só aparece quando há Pomodoro planejado, porque é a única
   // comparação em que numerador e denominador medem a mesma coisa. Com o dia
@@ -162,18 +164,32 @@ function DiaPronto({ dados, onPlanejar }: { dados: DadosDoDia; onPlanejar: () =>
       {restoDoPlano ? <p className="mt-1 text-sm text-ink-muted">{restoDoPlano}</p> : null}
 
       <ul className="mt-4 flex w-full flex-col gap-2">
-        {blocos.map((bloco) => (
-          <li
-            key={bloco.id}
-            className="flex items-center justify-between gap-2 rounded-sm border border-border bg-surface-sunken px-3 py-2 text-sm"
-          >
-            <span className="text-ink">
-              {bloco.startLocalTime ? `${bloco.startLocalTime} · ` : ""}
-              {bloco.title?.trim() ? bloco.title.trim() : ROTULO_DA_ATIVIDADE[bloco.activity]}
-            </span>
-            <span className="text-ink-muted">{formatarDuracao(bloco)}</span>
-          </li>
-        ))}
+        {blocos.map((bloco) => {
+          const rotulo = bloco.title?.trim() ? bloco.title.trim() : ROTULO_DA_ATIVIDADE[bloco.activity];
+          return (
+            <li
+              key={bloco.id}
+              className="flex items-center justify-between gap-2 rounded-sm border border-border bg-surface-sunken px-3 py-2 text-sm"
+            >
+              <span className="text-ink">
+                {bloco.startLocalTime ? `${bloco.startLocalTime} · ` : ""}
+                {rotulo}
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="text-ink-muted">{formatarDuracao(bloco)}</span>
+                {/* O tempo do foco conta para este bloco e, ao alcançar o planejado, paga o XP de bloco cumprido. */}
+                <button
+                  type="button"
+                  onClick={() => void focarNoBloco({ id: bloco.id, rotulo })}
+                  aria-label={`Focar neste bloco: ${rotulo}`}
+                  className="rounded-sm border border-border bg-surface px-2 py-1 text-xs text-ink transition duration-150 ease-out motion-reduce:transition-none hover:bg-surface-raised active:scale-97"
+                >
+                  Focar
+                </button>
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </>
   );

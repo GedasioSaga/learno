@@ -4,5 +4,6 @@ export {
   DURACAO_SEGUNDOS,
   FOCUS_SESSIONS_BEFORE_LONG_BREAK,
   usePomodoroStore,
+  type BlocoAlvo,
   type StatusPomodoro,
 } from "./store";

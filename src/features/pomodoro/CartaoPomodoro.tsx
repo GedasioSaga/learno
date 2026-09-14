@@ -36,6 +36,8 @@ export function CartaoPomodoro() {
   const iniciar = usePomodoroStore((state) => state.iniciar);
   const pausar = usePomodoroStore((state) => state.pausar);
   const reiniciar = usePomodoroStore((state) => state.reiniciar);
+  const blocoAlvo = usePomodoroStore((state) => state.blocoAlvo);
+  const desvincularBloco = usePomodoroStore((state) => state.desvincularBloco);
 
   // O tique só força um redesenho — o valor mostrado vem de
   // `segundosRestantes()`, lido de novo a cada render.
@@ -61,6 +63,23 @@ export function CartaoPomodoro() {
       <h2 id="cartao-pomodoro-titulo" className="text-sm font-medium text-ink-muted">
         {ROTULO_DA_FASE[fase](focusNumeroNoCiclo)}
       </h2>
+
+      {blocoAlvo ? (
+        <p className="mt-1 flex items-center gap-2 text-sm text-ink-muted">
+          <span>
+            Focando em: <span className="text-ink">{blocoAlvo.rotulo}</span>
+          </span>
+          {status === "idle" ? (
+            <button
+              type="button"
+              onClick={desvincularBloco}
+              className="rounded-sm px-1 text-xs text-ink-muted transition duration-150 ease-out hover:text-ink"
+            >
+              Desvincular
+            </button>
+          ) : null}
+        </p>
+      ) : null}
 
       {/*
         Ação de alta frequência: o texto muda a cada segundo e não recebe

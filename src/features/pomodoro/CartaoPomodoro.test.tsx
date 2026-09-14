@@ -23,6 +23,7 @@ function sessao(overrides: Partial<PomodoroSessionRow> & Pick<PomodoroSessionRow
     endedAt: null,
     durationSeconds: DURACAO_SEGUNDOS.focus,
     completed: false,
+    planBlockId: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -49,6 +50,7 @@ beforeEach(() => {
     restantesAoPausar: null,
     sessionId: null,
     erro: null,
+    blocoAlvo: null,
   });
 });
 
@@ -57,6 +59,16 @@ afterEach(() => {
 });
 
 describe("CartaoPomodoro", () => {
+  it("mostra o bloco em foco e deixa desvincular com o cronômetro parado", async () => {
+    usePomodoroStore.setState({ blocoAlvo: { id: "b1", rotulo: "Leitura de SQL" } });
+    render(<CartaoPomodoro />);
+
+    expect(screen.getByText("Leitura de SQL")).toBeInTheDocument();
+    await clicarEEsperar("Desvincular");
+
+    expect(screen.queryByText("Leitura de SQL")).not.toBeInTheDocument();
+  });
+
   it("parado, mostra a duração cheia do foco 1 de 4 e só o botão Iniciar", () => {
     render(<CartaoPomodoro />);
 

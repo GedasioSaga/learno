@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { pomodoroToday, semanaDeEstudo, type BlocoPlanejado, type PomodoroToday, type SemanaDeEstudo } from "../../lib/ipc";
+import {
+  pomodoroToday,
+  semanaDeEstudo,
+  startPomodoro,
+  type BlocoPlanejado,
+  type PomodoroToday,
+  type SemanaDeEstudo,
+} from "../../lib/ipc";
 import { SECAO_PADRAO, useNavegacaoStore } from "../navegacao";
+import { usePomodoroStore } from "../pomodoro";
 import { PlanoDoDia } from "./PlanoDoDia";
 
 vi.mock("../../lib/ipc", async (importOriginal) => {
@@ -11,6 +19,7 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     ...actual,
     semanaDeEstudo: vi.fn(),
     pomodoroToday: vi.fn(),
+    startPomodoro: vi.fn(),
   };
 });
 
@@ -71,6 +80,16 @@ beforeEach(() => {
   // completos travariam esse polling sem um `advanceTimersByTime` manual.
   vi.setSystemTime(new Date(2026, 8, 10, 10, 0));
   useNavegacaoStore.setState({ secaoAtiva: SECAO_PADRAO, painelRecolhido: false, ultimaTrocaPor: null });
+  usePomodoroStore.setState({
+    fase: "focus",
+    status: "idle",
+    focusNumeroNoCiclo: 1,
+    terminaEm: null,
+    restantesAoPausar: null,
+    sessionId: null,
+    erro: null,
+    blocoAlvo: null,
+  });
 });
 
 afterEach(() => {
@@ -78,6 +97,34 @@ afterEach(() => {
 });
 
 describe("PlanoDoDia", () => {
+  it("Focar num bloco de hoje inicia o Pomodoro ligado a ele", async () => {
+    semanaDeEstudoMock.mockResolvedValue(
+      semana({
+        dias: semana().dias.map((dia) =>
+          dia.data === HOJE ? { ...dia, blocos: [bloco({ id: "b1", title: "Revisar SQL" })] } : dia,
+        ),
+      }),
+    );
+    pomodoroTodayMock.mockResolvedValue(pomodoro());
+    vi.mocked(startPomodoro).mockResolvedValue({
+      id: "s1",
+      kind: "focus",
+      startedAt: "2026-09-10T13:00:00.000Z",
+      endedAt: null,
+      durationSeconds: 1500,
+      completed: false,
+      planBlockId: "b1",
+      createdAt: "2026-09-10T13:00:00.000Z",
+    });
+    const user = userEvent.setup();
+    render(<PlanoDoDia />);
+
+    await user.click(await screen.findByRole("button", { name: "Focar neste bloco: Revisar SQL" }));
+
+    expect(startPomodoro).toHaveBeenCalledWith("focus", 1500, "b1");
+    expect(usePomodoroStore.getState().blocoAlvo).toEqual({ id: "b1", rotulo: "Revisar SQL" });
+  });
+
   it("mostra os blocos de hoje e não os de outro dia", async () => {
     semanaDeEstudoMock.mockResolvedValue(
       semana({

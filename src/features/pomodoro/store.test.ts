@@ -21,6 +21,7 @@ function sessao(overrides: Partial<PomodoroSessionRow> & Pick<PomodoroSessionRow
     endedAt: null,
     durationSeconds: DURACAO_SEGUNDOS.focus,
     completed: false,
+    planBlockId: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -46,11 +47,63 @@ beforeEach(() => {
     restantesAoPausar: null,
     sessionId: null,
     erro: null,
+    blocoAlvo: null,
   });
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("usePomodoroStore — foco ligado a um bloco", () => {
+  it("focar num bloco inicia um foco ligado a ele", async () => {
+    startMock.mockResolvedValue(sessao({ id: "sessao-1", planBlockId: "b1" }));
+
+    await usePomodoroStore.getState().focarNoBloco({ id: "b1", rotulo: "Leitura" });
+
+    expect(startMock).toHaveBeenCalledWith("focus", DURACAO_SEGUNDOS.focus, "b1");
+    expect(usePomodoroStore.getState().status).toBe("executando");
+    expect(usePomodoroStore.getState().blocoAlvo).toEqual({ id: "b1", rotulo: "Leitura" });
+  });
+
+  it("a pausa entre dois focos não é ligada ao bloco", async () => {
+    usePomodoroStore.setState({ fase: "short_break", blocoAlvo: { id: "b1", rotulo: "Leitura" } });
+    startMock.mockResolvedValue(sessao({ id: "pausa-1", kind: "short_break" }));
+
+    await usePomodoroStore.getState().iniciar();
+
+    expect(startMock).toHaveBeenCalledWith("short_break", DURACAO_SEGUNDOS.short_break);
+  });
+
+  it("outro bloco com pomodoro em andamento é recusado, e desvincular só vale parado", async () => {
+    usePomodoroStore.setState({
+      status: "executando",
+      sessionId: "sessao-1",
+      terminaEm: Date.now() + 60_000,
+      blocoAlvo: { id: "b1", rotulo: "Leitura" },
+    });
+
+    await usePomodoroStore.getState().focarNoBloco({ id: "b2", rotulo: "Redação" });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(usePomodoroStore.getState().blocoAlvo?.id).toBe("b1");
+    expect(usePomodoroStore.getState().erro).toMatch(/Reinicie/);
+
+    usePomodoroStore.getState().desvincularBloco();
+    expect(usePomodoroStore.getState().blocoAlvo?.id).toBe("b1");
+
+    usePomodoroStore.setState({ status: "idle", sessionId: null, terminaEm: null });
+    usePomodoroStore.getState().desvincularBloco();
+    expect(usePomodoroStore.getState().blocoAlvo).toBeNull();
+  });
+
+  it("focar de novo no mesmo bloco já em andamento não faz nada", async () => {
+    usePomodoroStore.setState({ status: "executando", sessionId: "sessao-1", terminaEm: Date.now() + 60_000, blocoAlvo: { id: "b1", rotulo: "Leitura" } });
+
+    await usePomodoroStore.getState().focarNoBloco({ id: "b1", rotulo: "Leitura" });
+
+    expect(startMock).not.toHaveBeenCalled();
+    expect(usePomodoroStore.getState().erro).toBeNull();
+  });
 });
 
 describe("usePomodoroStore", () => {

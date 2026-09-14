@@ -19,6 +19,12 @@ export const FOCUS_SESSIONS_BEFORE_LONG_BREAK = 4;
 
 export type StatusPomodoro = "idle" | "executando" | "pausado";
 
+/** O bloco do cronograma que um foco executa: o id vai ao backend, o rótulo só aparece na tela. */
+export interface BlocoAlvo {
+  id: string;
+  rotulo: string;
+}
+
 interface EstadoPomodoro {
   fase: PomodoroKind;
   status: StatusPomodoro;
@@ -35,6 +41,12 @@ interface EstadoPomodoro {
   /** Sessão aberta no backend por `startPomodoro`. `null` em `idle`. */
   sessionId: string | null;
   erro: string | null;
+  /**
+   * O bloco que os próximos FOCOS executam ("Focar neste bloco"). Continua
+   * escolhido entre um foco e outro, porque um bloco de 50 minutos pede dois,
+   * até alguém desvincular. A pausa do meio nunca é ligada a ele.
+   */
+  blocoAlvo: BlocoAlvo | null;
 
   /** Quantos segundos faltam AGORA — calculado contra o relógio (`Date.now()`), nunca contra uma contagem de tiques. */
   segundosRestantes: () => number;
@@ -49,6 +61,10 @@ interface EstadoPomodoro {
    * clássico de medir tempo contando quantas vezes um `setInterval` disparou.
    */
   verificarFimDaFase: () => void;
+  /** Escolhe o bloco e já inicia o foco ligado a ele. Recusado com um pomodoro em andamento. */
+  focarNoBloco: (bloco: BlocoAlvo) => Promise<void>;
+  /** Tira o bloco escolhido. Só vale com o cronômetro parado: a sessão em andamento já está ligada a ele. */
+  desvincularBloco: () => void;
 }
 
 function mensagemDoErro(erro: unknown, resposta: string): string {
@@ -127,6 +143,7 @@ export const usePomodoroStore = create<EstadoPomodoro>((set, get) => {
     restantesAoPausar: null,
     sessionId: null,
     erro: null,
+    blocoAlvo: null,
 
     segundosRestantes: () => {
       const estado = get();
@@ -148,8 +165,11 @@ export const usePomodoroStore = create<EstadoPomodoro>((set, get) => {
       }
 
       const duracao = DURACAO_SEGUNDOS[estado.fase];
+      const bloco = estado.fase === "focus" ? estado.blocoAlvo : null;
       try {
-        const sessao = await startPomodoro(estado.fase, duracao);
+        const sessao = bloco
+          ? await startPomodoro(estado.fase, duracao, bloco.id)
+          : await startPomodoro(estado.fase, duracao);
         set({ status: "executando", sessionId: sessao.id, terminaEm: Date.now() + duracao * 1000, erro: null });
       } catch (erro) {
         set({ erro: mensagemDoErro(erro, "Não foi possível iniciar o pomodoro.") });
@@ -194,6 +214,21 @@ export const usePomodoroStore = create<EstadoPomodoro>((set, get) => {
       // chamariam `finishPomodoro` duas vezes para a mesma sessão.
       set({ status: "idle", terminaEm: null, sessionId: null });
       void concluirFase(faseConcluida, sessionIdConcluido);
+    },
+
+    focarNoBloco: async (bloco) => {
+      const estado = get();
+      if (estado.status !== "idle") {
+        if (estado.blocoAlvo?.id === bloco.id) return;
+        set({ erro: "Reinicie o pomodoro em andamento antes de focar em outro bloco." });
+        return;
+      }
+      set({ fase: "focus", blocoAlvo: bloco, erro: null });
+      await get().iniciar();
+    },
+
+    desvincularBloco: () => {
+      if (get().status === "idle") set({ blocoAlvo: null });
     },
   };
 });
