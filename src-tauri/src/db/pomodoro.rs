@@ -9,7 +9,9 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::db::gamificacao::{GamificacaoRepository, XP_POR_POMODORO_CONCLUIDO};
-use crate::db::ids::{DbId, IdBind};
+#[cfg(test)]
+use crate::db::gamificacao::XP_POR_BLOCO_CRONOGRAMA;
+use crate::db::ids::{DbId, DbIdOpt, IdBind};
 use crate::error::{Error, Result};
 
 /// Os três valores que `kind` aceita — espelha o `CHECK (kind IN (...))` da
@@ -28,6 +30,10 @@ pub struct PomodoroRow {
     pub ended_at: Option<DateTime<Utc>>,
     pub duration_seconds: i64,
     pub completed: bool,
+    /// O bloco do cronograma que este foco executa, quando começou por "Focar
+    /// neste bloco". `NULL` para foco avulso e para toda pausa.
+    #[sqlx(try_from = "DbIdOpt")]
+    pub plan_block_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -41,7 +47,7 @@ pub struct PomodoroResumo {
     pub sequencia_dias: i64,
 }
 
-const SESSION_COLUMNS: &str = "id, kind, started_at, ended_at, duration_seconds, completed, created_at";
+const SESSION_COLUMNS: &str = "id, kind, started_at, ended_at, duration_seconds, completed, plan_block_id, created_at";
 
 pub struct PomodoroRepository {
     pool: SqlitePool,
@@ -59,7 +65,12 @@ impl PomodoroRepository {
     /// solução para "sessão nunca finalizada não pode travar a próxima": não
     /// existe nenhum estado global de "sessão em andamento" para travar
     /// contra — cada linha é independente, e só `finish` decide se ela conta.
-    pub async fn start(&self, kind: &str, duration_seconds: i64) -> Result<PomodoroRow> {
+    ///
+    /// `plan_block_id` liga um FOCO a um bloco do cronograma ("Focar neste
+    /// bloco"): é o que faz o tempo desta sessão contar para o bloco e, ao
+    /// fechar, pagar o XP de bloco cumprido. Pausa não executa bloco nenhum, e
+    /// ligar uma a um bloco é recusado; bloco que não existe é `NotFound`.
+    pub async fn start(&self, kind: &str, duration_seconds: i64, plan_block_id: Option<Uuid>) -> Result<PomodoroRow> {
         if !VALID_KINDS.contains(&kind) {
             return Err(Error::Invalid(format!(
                 "tipo de sessão inválido: {kind:?} (esperado um de {VALID_KINDS:?})"
@@ -67,6 +78,18 @@ impl PomodoroRepository {
         }
         if duration_seconds <= 0 {
             return Err(Error::Invalid("duração do pomodoro precisa ser maior que zero segundos".into()));
+        }
+        if let Some(block_id) = plan_block_id {
+            if kind != "focus" {
+                return Err(Error::Invalid("só um foco pode ser ligado a um bloco do cronograma, não uma pausa".into()));
+            }
+            let existe: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM study_plan_blocks WHERE id = $1)")
+                .bind(block_id.db())
+                .fetch_one(&self.pool)
+                .await?;
+            if !existe {
+                return Err(Error::NotFound(format!("bloco do cronograma {block_id}")));
+            }
         }
 
         let id = Uuid::now_v7();
@@ -79,8 +102,8 @@ impl PomodoroRepository {
         // instante em que a sessão COMEÇA, e `finish` nunca os toca depois.
         let (local_date, utc_offset_minutes) = now_local_date_and_offset();
         let sql = format!(
-            "INSERT INTO pomodoro_sessions (id, kind, duration_seconds, local_date, utc_offset_minutes) \
-             VALUES ($1, $2, $3, $4, $5) RETURNING {SESSION_COLUMNS}"
+            "INSERT INTO pomodoro_sessions (id, kind, duration_seconds, local_date, utc_offset_minutes, plan_block_id) \
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING {SESSION_COLUMNS}"
         );
         let row = sqlx::query_as::<_, PomodoroRow>(&sql)
             .bind(id.db())
@@ -88,6 +111,7 @@ impl PomodoroRepository {
             .bind(duration_seconds)
             .bind(&local_date)
             .bind(utc_offset_minutes)
+            .bind(plan_block_id.db())
             .fetch_one(&self.pool)
             .await?;
 
@@ -120,6 +144,11 @@ impl PomodoroRepository {
     /// falhar de verdade, a transação inteira reverte e a sessão CONTINUA
     /// aberta (`ended_at` continua `NULL`) para o chamador tentar `finish`
     /// de novo, em vez de ficar "concluída" sem o XP correspondente.
+    ///
+    /// Um foco ligado a um bloco (`plan_block_id`) também pode pagar o XP do
+    /// BLOCO, na mesma transação, quando o tempo realizado nele (este foco
+    /// incluído) alcança o planejado — ver
+    /// `GamificacaoRepository::creditar_xp_de_bloco_se_cumprido`.
     pub async fn finish(&self, session_id: Uuid, completed: bool) -> Result<PomodoroRow> {
         let sql = format!(
             "UPDATE pomodoro_sessions SET ended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), completed = $2 \
@@ -159,6 +188,9 @@ impl PomodoroRepository {
                 &session_id.hyphenated().to_string(),
             )
             .await?;
+            if let Some(block_id) = row.plan_block_id {
+                GamificacaoRepository::creditar_xp_de_bloco_se_cumprido(&mut tx, block_id).await?;
+            }
         }
 
         tx.commit().await?;
@@ -380,7 +412,7 @@ mod start_writes_local_date {
         let pool = connect_and_migrate(&db_path).await.unwrap();
         let repo = PomodoroRepository::new(pool.clone());
 
-        let session = repo.start("focus", 1500).await.unwrap();
+        let session = repo.start("focus", 1500, None).await.unwrap();
 
         let (local_date, utc_offset_minutes): (Option<String>, Option<i64>) =
             sqlx::query_as("SELECT local_date, utc_offset_minutes FROM pomodoro_sessions WHERE id = $1")
@@ -432,7 +464,7 @@ mod finish_credits_xp {
         let (pool, data_dir) = banco_migrado("foco-concluido").await;
         let repo = PomodoroRepository::new(pool.clone());
 
-        let sessao = repo.start("focus", 1500).await.unwrap();
+        let sessao = repo.start("focus", 1500, None).await.unwrap();
         repo.finish(sessao.id, true).await.unwrap();
 
         assert_eq!(contar_xp_de_pomodoro(&pool, sessao.id).await, 1);
@@ -454,7 +486,7 @@ mod finish_credits_xp {
         let (pool, data_dir) = banco_migrado("foco-cancelado").await;
         let repo = PomodoroRepository::new(pool.clone());
 
-        let sessao = repo.start("focus", 1500).await.unwrap();
+        let sessao = repo.start("focus", 1500, None).await.unwrap();
         repo.finish(sessao.id, false).await.unwrap();
 
         assert_eq!(contar_xp_de_pomodoro(&pool, sessao.id).await, 0, "sessão cancelada não pode pagar XP");
@@ -470,7 +502,7 @@ mod finish_credits_xp {
         let (pool, data_dir) = banco_migrado("pausa-concluida").await;
         let repo = PomodoroRepository::new(pool.clone());
 
-        let sessao = repo.start("short_break", 300).await.unwrap();
+        let sessao = repo.start("short_break", 300, None).await.unwrap();
         repo.finish(sessao.id, true).await.unwrap();
 
         assert_eq!(contar_xp_de_pomodoro(&pool, sessao.id).await, 0, "pausa não é foco — não pode pagar XP de pomodoro");
@@ -490,7 +522,7 @@ mod finish_credits_xp {
         let (pool, data_dir) = banco_migrado("falha-xp").await;
         let repo = PomodoroRepository::new(pool.clone());
 
-        let sessao = repo.start("focus", 1500).await.unwrap();
+        let sessao = repo.start("focus", 1500, None).await.unwrap();
         sqlx::query("DROP TABLE xp_events").execute(&pool).await.unwrap();
 
         let resultado = repo.finish(sessao.id, true).await;
@@ -504,6 +536,76 @@ mod finish_credits_xp {
                 .unwrap();
         assert_eq!(ended_at, None, "a transação revertida não pode deixar a sessão fechada");
         assert!(!completed, "completed não pode ter avançado se a transação reverteu");
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    async fn bloco_de_hoje(pool: &SqlitePool, minutos_planejados: i64) -> Uuid {
+        let (dia, _) = now_local_date_and_offset();
+        crate::db::CronogramaRepository::new(pool.clone())
+            .criar_bloco(&dia, "pomodoro", minutos_planejados, None, None, None, None, None, None)
+            .await
+            .unwrap()
+            .id
+    }
+
+    async fn xp_de_bloco(pool: &SqlitePool, block_id: Uuid) -> Vec<i64> {
+        sqlx::query_scalar("SELECT amount FROM xp_events WHERE origin = 'cronograma_bloco' AND reference_id = $1")
+            .bind(block_id.hyphenated().to_string())
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn foco_ligado_ao_bloco_paga_o_bloco_uma_vez_quando_o_tempo_alcanca_o_planejado() {
+        let (pool, data_dir) = banco_migrado("bloco-cumprido").await;
+        let repo = PomodoroRepository::new(pool.clone());
+        let bloco = bloco_de_hoje(&pool, 50).await;
+
+        let primeiro = repo.start("focus", 1500, Some(bloco)).await.unwrap();
+        assert_eq!(primeiro.plan_block_id, Some(bloco));
+        repo.finish(primeiro.id, true).await.unwrap();
+        assert!(xp_de_bloco(&pool, bloco).await.is_empty(), "25 de 50 minutos ainda não cumprem o bloco");
+
+        let segundo = repo.start("focus", 1500, Some(bloco)).await.unwrap();
+        repo.finish(segundo.id, true).await.unwrap();
+        assert_eq!(xp_de_bloco(&pool, bloco).await, vec![XP_POR_BLOCO_CRONOGRAMA], "50 de 50 minutos cumprem o bloco");
+
+        let terceiro = repo.start("focus", 1500, Some(bloco)).await.unwrap();
+        repo.finish(terceiro.id, true).await.unwrap();
+        assert_eq!(xp_de_bloco(&pool, bloco).await.len(), 1, "passar do planejado não paga o bloco de novo");
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test]
+    async fn foco_cancelado_ou_sem_bloco_nao_paga_bloco() {
+        let (pool, data_dir) = banco_migrado("bloco-nao-cumprido").await;
+        let repo = PomodoroRepository::new(pool.clone());
+        let bloco = bloco_de_hoje(&pool, 25).await;
+
+        let cancelado = repo.start("focus", 1500, Some(bloco)).await.unwrap();
+        repo.finish(cancelado.id, false).await.unwrap();
+        let avulso = repo.start("focus", 1500, None).await.unwrap();
+        repo.finish(avulso.id, true).await.unwrap();
+
+        assert!(xp_de_bloco(&pool, bloco).await.is_empty(), "nem o foco cancelado nem o avulso executam o bloco");
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test]
+    async fn so_foco_se_liga_a_bloco_e_o_bloco_precisa_existir() {
+        let (pool, data_dir) = banco_migrado("bloco-invalido").await;
+        let repo = PomodoroRepository::new(pool.clone());
+        let bloco = bloco_de_hoje(&pool, 25).await;
+
+        assert!(matches!(repo.start("short_break", 300, Some(bloco)).await, Err(Error::Invalid(_))));
+        assert!(matches!(repo.start("focus", 1500, Some(Uuid::now_v7())).await, Err(Error::NotFound(_))));
 
         pool.close().await;
         let _ = std::fs::remove_dir_all(&data_dir);

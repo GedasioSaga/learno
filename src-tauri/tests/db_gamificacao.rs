@@ -223,7 +223,7 @@ async fn xp_total_e_a_soma_das_linhas_e_muda_ao_apagar_um_evento() {
 
     repo.registrar_xp_revisao_cartao(review_id).await.unwrap();
 
-    let sessao = PomodoroRepository::new(db.pool.clone()).start("focus", 1500).await.unwrap();
+    let sessao = PomodoroRepository::new(db.pool.clone()).start("focus", 1500, None).await.unwrap();
     PomodoroRepository::new(db.pool.clone()).finish(sessao.id, true).await.unwrap();
     let evento_pomodoro = repo.registrar_xp_pomodoro_concluido(sessao.id).await.unwrap();
 
@@ -312,11 +312,11 @@ async fn progresso_de_focar_minutos_sai_do_historico_real_de_pomodoro_sessions()
     let repo = GamificacaoRepository::new(db.pool.clone());
     let pomodoro = PomodoroRepository::new(db.pool.clone());
 
-    let sessao = pomodoro.start("focus", 1500).await.unwrap(); // 25 minutos
+    let sessao = pomodoro.start("focus", 1500, None).await.unwrap(); // 25 minutos
     pomodoro.finish(sessao.id, true).await.unwrap();
 
     // Uma sessão CANCELADA não deve contar.
-    let cancelada = pomodoro.start("focus", 600).await.unwrap();
+    let cancelada = pomodoro.start("focus", 600, None).await.unwrap();
     pomodoro.finish(cancelada.id, false).await.unwrap();
 
     let desafios = repo.desafios_hoje().await.unwrap();
@@ -418,7 +418,7 @@ async fn registrar_xp_pomodoro_concluido_rejeita_sessao_cancelada() {
     let pomodoro = PomodoroRepository::new(db.pool.clone());
     let repo = GamificacaoRepository::new(db.pool.clone());
 
-    let sessao = pomodoro.start("focus", 1500).await.unwrap();
+    let sessao = pomodoro.start("focus", 1500, None).await.unwrap();
     pomodoro.finish(sessao.id, false).await.unwrap();
 
     let result = repo.registrar_xp_pomodoro_concluido(sessao.id).await;

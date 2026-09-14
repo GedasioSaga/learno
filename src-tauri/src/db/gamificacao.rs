@@ -115,6 +115,42 @@ pub const XP_POR_BLOCO_CRONOGRAMA: i64 = 20;
 /// puxa o usuário a fechar as três categorias.
 pub const XP_POR_DESAFIO_DIARIO: i64 = 50;
 
+/// `planned_minutes` do bloco, ou `None` se ele não existe.
+async fn minutos_planejados_do_bloco<'e, E>(executor: E, block_id: Uuid) -> Result<Option<i64>>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    Ok(sqlx::query_scalar("SELECT planned_minutes FROM study_plan_blocks WHERE id = $1")
+        .bind(block_id.db())
+        .fetch_optional(executor)
+        .await?)
+}
+
+/// Minutos de fato realizados para o bloco `block_id`, somando as duas fontes
+/// que `study_day_totals` (`0024_cronograma.sql`) já reconhece como tempo
+/// realizado — sessão de pomodoro de foco concluída ligada a ele, e lançamento
+/// manual ligado a ele — restrito a um bloco só em vez do dia inteiro.
+async fn minutos_realizados_do_bloco<'e, E>(executor: E, block_id: Uuid) -> Result<i64>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let (segundos_pomodoro, minutos_manuais): (i64, i64) = sqlx::query_as(
+        "SELECT \
+             COALESCE((SELECT SUM(duration_seconds) FROM pomodoro_sessions \
+                        WHERE plan_block_id = $1 AND kind = 'focus' AND completed = 1), 0), \
+             COALESCE((SELECT SUM(minutes) FROM study_time_entries WHERE plan_block_id = $1), 0)",
+    )
+    .bind(block_id.db())
+    .fetch_one(executor)
+    .await?;
+
+    // Segundos -> minuto inteiro arredondado ao mais próximo — mesma regra de
+    // conversão que `study_day_totals` usa ("+30 s, divide por 60"), para
+    // "bloco cumprido" bater com o tempo que a tela do cronograma mostra.
+    let minutos_pomodoro = segundos_pomodoro.saturating_add(30) / 60;
+    Ok(minutos_pomodoro.saturating_add(minutos_manuais))
+}
+
 // ---------------------------------------------------------------------
 // Curva de nível — pura, sem tocar o banco.
 // ---------------------------------------------------------------------
@@ -567,42 +603,41 @@ impl GamificacaoRepository {
         self.inserir_evento_xp(XP_POR_POMODORO_CONCLUIDO, "pomodoro_focus", &reference_id).await
     }
 
-    /// Minutos de fato realizados para o bloco `block_id`, somando as duas
-    /// fontes que `study_day_totals` (`0024_cronograma.sql`) já reconhece
-    /// como tempo realizado — sessão de pomodoro de foco concluída ligada a
-    /// ele, e lançamento manual ligado a ele — restrito a um bloco só em vez
-    /// do dia inteiro.
-    async fn minutos_realizados_do_bloco(&self, block_id: Uuid) -> Result<i64> {
-        let (segundos_pomodoro, minutos_manuais): (i64, i64) = sqlx::query_as(
-            "SELECT \
-                 COALESCE((SELECT SUM(duration_seconds) FROM pomodoro_sessions \
-                            WHERE plan_block_id = $1 AND kind = 'focus' AND completed = 1), 0), \
-                 COALESCE((SELECT SUM(minutes) FROM study_time_entries WHERE plan_block_id = $1), 0)",
-        )
-        .bind(block_id.db())
-        .fetch_one(&self.pool)
-        .await?;
-
-        // Segundos -> minuto inteiro arredondado ao mais próximo — mesma
-        // regra de conversão que `study_day_totals` usa ("+30 s, divide por
-        // 60"), para "bloco cumprido" bater com o tempo que a tela do
-        // cronograma mostra. Soma final usada numa comparação de limiar
-        // (nunca alimenta outra divisão) — `saturating_add` é a resposta
-        // certa aqui.
-        let minutos_pomodoro = segundos_pomodoro.saturating_add(30) / 60;
-        Ok(minutos_pomodoro.saturating_add(minutos_manuais))
+    /// Credita [`XP_POR_BLOCO_CRONOGRAMA`] dentro de uma transação de domínio
+    /// já aberta: `PomodoroRepository::finish`, quando o foco que acabou de
+    /// fechar estava ligado a um bloco. O próprio foco já conta, porque o
+    /// `UPDATE` de `finish` veio antes, na mesma `tx`.
+    ///
+    /// `None` quando o tempo realizado ainda não alcançou o planejado, ou
+    /// quando o bloco não existe mais (apagado durante o foco). Passar do
+    /// planejado não paga de novo: a referência é o bloco, e `xp_events` tem
+    /// `UNIQUE (origin, reference_id)`.
+    pub async fn creditar_xp_de_bloco_se_cumprido(
+        tx: &mut Transaction<'_, Sqlite>,
+        block_id: Uuid,
+    ) -> Result<Option<XpEventRow>> {
+        let Some(planejados) = minutos_planejados_do_bloco(&mut **tx, block_id).await? else {
+            return Ok(None);
+        };
+        if minutos_realizados_do_bloco(&mut **tx, block_id).await? < planejados {
+            return Ok(None);
+        }
+        Self::creditar_xp_na_transacao(tx, XP_POR_BLOCO_CRONOGRAMA, "cronograma_bloco", &block_id.hyphenated().to_string())
+            .await
+            .map(Some)
     }
 
     /// Credita [`XP_POR_BLOCO_CRONOGRAMA`] pelo bloco `block_id`, só quando
-    /// o tempo já realizado (ver [`Self::minutos_realizados_do_bloco`])
-    /// alcançou `planned_minutes` — nunca confia numa alegação de "cumpri"
-    /// vinda do IPC sem checar contra o histórico real.
+    /// o tempo já realizado (ver [`minutos_realizados_do_bloco`]) alcançou
+    /// `planned_minutes` — nunca confia numa alegação de "cumpri" vinda do IPC
+    /// sem checar contra o histórico real. Caminho de reprocessamento: no uso
+    /// normal o crédito sai sozinho em [`Self::creditar_xp_de_bloco_se_cumprido`].
     pub async fn registrar_xp_bloco_cronograma(&self, block_id: Uuid) -> Result<XpEventRow> {
-        let planned_minutes: Option<i64> =
-            sqlx::query_scalar("SELECT planned_minutes FROM study_plan_blocks WHERE id = $1").bind(block_id.db()).fetch_optional(&self.pool).await?;
-        let planned_minutes = planned_minutes.ok_or_else(|| Error::NotFound(format!("bloco do cronograma {block_id}")))?;
+        let planned_minutes = minutos_planejados_do_bloco(&self.pool, block_id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("bloco do cronograma {block_id}")))?;
 
-        let realizados = self.minutos_realizados_do_bloco(block_id).await?;
+        let realizados = minutos_realizados_do_bloco(&self.pool, block_id).await?;
         if realizados < planned_minutes {
             return Err(Error::Invalid(format!(
                 "bloco {block_id} ainda não foi cumprido: {realizados} de {planned_minutes} minutos realizados"

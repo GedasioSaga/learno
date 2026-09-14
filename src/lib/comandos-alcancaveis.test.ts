@@ -246,15 +246,15 @@ const REGISTRADOS_SEM_TELA: Record<string, string> = {
   delete_note: "nao ha tela de editar cartao nem navegador de notas; so criar e estudar existem",
   list_notes: "nao ha tela de editar cartao nem navegador de notas; so criar e estudar existem",
 
-  // --- Gamificacao: a Fase 2 ligou nivel_atual/desafios_hoje/xp_total/
-  //     registrar_xp_desafio_diario/recordes_pessoais ao CartaoDeProgresso e
-  //     ao PainelDeConquistas (features/gamificacao). Os quatro abaixo ainda
-  //     nao tem chamador: creditar XP de revisao/pomodoro/bloco e o resumo de
-  //     sessao dependem de um gatilho nas telas de Cartoes/Pomodoro/
-  //     Cronograma, que pertencem a outro recorte de trabalho ---
-  registrar_xp_revisao_cartao: "a camada de motivacao existe no Rust; falta a tela de Cartoes chamar isto ao responder um cartao",
-  registrar_xp_pomodoro_concluido: "a camada de motivacao existe no Rust; falta a tela de Pomodoro chamar isto ao concluir um foco",
-  registrar_xp_bloco_cronograma: "a camada de motivacao existe no Rust; falta a tela de Cronograma chamar isto ao cumprir um bloco",
+  // --- Gamificacao: o XP de revisao, de foco e de bloco cumprido sai SOZINHO,
+  //     na mesma transacao do evento (answer_card, e finish do pomodoro com
+  //     plan_block_id). Nenhuma tela deve chamar os tres abaixo no fluxo
+  //     normal: ficam como reprocessamento do historico gravado antes do
+  //     credito automatico existir (decisao do usuario, 13/09/2026; ver o
+  //     comentario de modulo de ipc/gamificacao_commands.rs) ---
+  registrar_xp_revisao_cartao: "reprocessamento: revisoes gravadas antes do credito automatico em answer_card nunca geraram XP, e so este comando idempotente as credita",
+  registrar_xp_pomodoro_concluido: "reprocessamento: focos concluidos antes do credito automatico em finish nunca geraram XP, e so este comando idempotente os credita",
+  registrar_xp_bloco_cronograma: "reprocessamento: o credito normal sai em finish do foco ligado ao bloco; este comando confere o limiar e credita blocos antigos",
   resumo_de_sessao: "a camada de motivacao existe no Rust; nenhuma tela ainda fecha uma sessao de estudo com inicio/fim para resumir",
 
   // --- Tags: o indice (0041_tags.sql, db/tags.rs) e alimentado em toda

@@ -18,13 +18,24 @@ fn pomodoro_repository(state: &AppState) -> Result<PomodoroRepository> {
 /// `PomodoroRepository::start` (não deixado para o `CHECK` do banco
 /// reclamar cru); `duration_seconds` vem do timer do frontend, e é hostil
 /// como toda entrada de IPC — validado como maior que zero na mesma função.
+/// `plan_block_id` liga o foco a um bloco do cronograma ("Focar neste bloco").
 #[tauri::command]
-pub async fn start_pomodoro(state: State<'_, AppState>, kind: String, duration_seconds: i64) -> Result<PomodoroRow> {
-    start_pomodoro_inner(&state, &kind, duration_seconds).await
+pub async fn start_pomodoro(
+    state: State<'_, AppState>,
+    kind: String,
+    duration_seconds: i64,
+    plan_block_id: Option<Uuid>,
+) -> Result<PomodoroRow> {
+    start_pomodoro_inner(&state, &kind, duration_seconds, plan_block_id).await
 }
 
-async fn start_pomodoro_inner(state: &AppState, kind: &str, duration_seconds: i64) -> Result<PomodoroRow> {
-    pomodoro_repository(state)?.start(kind, duration_seconds).await
+async fn start_pomodoro_inner(
+    state: &AppState,
+    kind: &str,
+    duration_seconds: i64,
+    plan_block_id: Option<Uuid>,
+) -> Result<PomodoroRow> {
+    pomodoro_repository(state)?.start(kind, duration_seconds, plan_block_id).await
 }
 
 /// `finish_pomodoro`. Só fecha uma sessão ainda aberta — ver o comentário de
@@ -65,7 +76,7 @@ mod tests {
         #[tokio::test]
         async fn start_pomodoro_reports_not_connected() {
             let state = AppState::new();
-            let result = start_pomodoro_inner(&state, "focus", 1500).await;
+            let result = start_pomodoro_inner(&state, "focus", 1500, None).await;
             assert!(matches!(result, Err(Error::Config(_))));
         }
 
@@ -108,7 +119,7 @@ mod tests {
         async fn start_then_finish_round_trips_through_the_command_layer() {
             let (state, data_dir) = estado_com_banco("start-finish").await;
 
-            let started = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            let started = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
             assert!(!started.completed);
             assert!(started.ended_at.is_none());
 
@@ -124,7 +135,7 @@ mod tests {
         async fn an_invalid_kind_is_reported_as_invalid_not_a_raw_database_error() {
             let (state, data_dir) = estado_com_banco("kind-invalido").await;
 
-            let result = start_pomodoro_inner(&state, "almoço", 1500).await;
+            let result = start_pomodoro_inner(&state, "almoço", 1500, None).await;
             assert!(matches!(result, Err(Error::Invalid(_))), "esperava Error::Invalid, obtido {result:?}");
 
             state.take_pool().unwrap().close().await;
@@ -138,8 +149,8 @@ mod tests {
         async fn an_abandoned_open_session_never_blocks_starting_a_new_one() {
             let (state, data_dir) = estado_com_banco("sessao-abandonada").await;
 
-            let abandoned = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
-            let next = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            let abandoned = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
+            let next = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
 
             assert_ne!(abandoned.id, next.id);
             assert!(abandoned.ended_at.is_none(), "a sessão abandonada continua aberta, e está tudo bem");
@@ -155,7 +166,7 @@ mod tests {
         async fn an_abandoned_open_session_does_not_count_toward_today() {
             let (state, data_dir) = estado_com_banco("sessao-nao-conta").await;
 
-            start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
             let resumo = pomodoro_today_inner(&state).await.unwrap();
 
             assert_eq!(resumo.focos_completos, 0);
@@ -169,7 +180,7 @@ mod tests {
         async fn a_completed_focus_session_counts_toward_today_and_the_streak() {
             let (state, data_dir) = estado_com_banco("conta-hoje").await;
 
-            let session = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            let session = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
             finish_pomodoro_inner(&state, session.id, true).await.unwrap();
 
             let resumo = pomodoro_today_inner(&state).await.unwrap();
@@ -187,7 +198,7 @@ mod tests {
         async fn a_cancelled_focus_session_does_not_count_as_completed() {
             let (state, data_dir) = estado_com_banco("cancelado").await;
 
-            let session = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            let session = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
             finish_pomodoro_inner(&state, session.id, false).await.unwrap();
 
             let resumo = pomodoro_today_inner(&state).await.unwrap();
@@ -201,7 +212,7 @@ mod tests {
         async fn finishing_the_same_session_twice_is_rejected_on_the_second_call() {
             let (state, data_dir) = estado_com_banco("finaliza-2x").await;
 
-            let session = start_pomodoro_inner(&state, "focus", 1500).await.unwrap();
+            let session = start_pomodoro_inner(&state, "focus", 1500, None).await.unwrap();
             finish_pomodoro_inner(&state, session.id, true).await.unwrap();
 
             let second = finish_pomodoro_inner(&state, session.id, true).await;

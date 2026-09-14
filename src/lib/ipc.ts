@@ -1098,6 +1098,8 @@ export interface PomodoroSessionRow {
   endedAt: string | null;
   durationSeconds: number;
   completed: boolean;
+  /** O bloco do cronograma que este foco executa ("Focar neste bloco"); `null` para foco avulso e pausa. */
+  planBlockId: string | null;
   createdAt: string;
 }
 
@@ -1109,9 +1111,17 @@ export interface PomodoroToday {
   sequenciaDias: number;
 }
 
-/** Abre uma sessão; o temporizador em si roda no frontend. */
-export function startPomodoro(kind: PomodoroKind, durationSeconds: number): Promise<PomodoroSessionRow> {
-  return call<PomodoroSessionRow>("start_pomodoro", { kind, durationSeconds });
+/**
+ * Abre uma sessão; o temporizador em si roda no frontend. `planBlockId` liga um
+ * FOCO a um bloco do cronograma: ao terminar, o tempo conta para o bloco e pode
+ * pagar o XP de bloco cumprido. Pausa ligada a bloco é recusada no backend.
+ */
+export function startPomodoro(
+  kind: PomodoroKind,
+  durationSeconds: number,
+  planBlockId: string | null = null,
+): Promise<PomodoroSessionRow> {
+  return call<PomodoroSessionRow>("start_pomodoro", { kind, durationSeconds, planBlockId });
 }
 
 /** Fecha a sessão; `completed: false` quando o usuário interrompeu antes do fim. */

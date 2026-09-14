@@ -26,24 +26,16 @@
 //! seis métodos pedidos escreve em `study_time_entries`); a tabela e a view já
 //! estão prontas para quando esse comando existir.
 //!
-//! ## XP de bloco cumprido: DELIBERADAMENTE fora deste módulo, por enquanto
+//! ## XP de bloco cumprido: sai do Pomodoro ligado ao bloco
 //!
-//! `db::cards`/`db::pomodoro` passaram a creditar XP como CONSEQUÊNCIA do
-//! evento de domínio, na mesma transação que grava esse evento (ver o
-//! comentário de módulo de `db::gamificacao`). Este módulo NÃO ganhou o
-//! mesmo tratamento para "bloco do cronograma cumprido" porque o parágrafo
-//! acima já registra o motivo: NENHUM método aqui escreve em
-//! `study_time_entries`, e `PomodoroRepository::start` nunca preenche
-//! `pomodoro_sessions.plan_block_id` — ou seja, não existe HOJE nenhuma
-//! escrita que empurre `minutos_realizados_do_bloco` (`db::gamificacao`)
-//! através do limiar de `planned_minutes`. Não há transação de domínio para
-//! anexar o crédito de XP porque não há a OPERAÇÃO de domínio em si
-//! ("marcar/lançar tempo que cumpre um bloco"). Inventar essa operação está
-//! fora do escopo desta peça — o pedido que motivou esta mudança é
-//! explícito: prometer na tela um gatilho que não existe é o defeito que
-//! esta peça corrige, não um novo a criar. `GamificacaoRepository::registrar_xp_bloco_cronograma`
-//! continua existindo (idempotente, valida o limiar de verdade) para o dia
-//! em que esse comando de lançamento existir, ou como reprocessamento manual.
+//! Nenhum método daqui escreve em `study_time_entries`. A operação de domínio
+//! que cumpre um bloco é o FOCO ligado a ele: `PomodoroRepository::start`
+//! aceita `plan_block_id` ("Focar neste bloco"), e `finish` credita o XP do
+//! bloco na mesma transação quando o tempo realizado alcança
+//! `planned_minutes` (`GamificacaoRepository::creditar_xp_de_bloco_se_cumprido`).
+//! Só tempo medido pelo timer conta, por decisão do usuário (13/09/2026).
+//! `GamificacaoRepository::registrar_xp_bloco_cronograma` continua existindo
+//! como reprocessamento.
 //!
 //! ## Fuso
 //!
