@@ -824,6 +824,64 @@ mod tests {
         banco_da_outra_quebra_de_linha_abre_e_e_reparado(false).await;
     }
 
+    /// A próxima atualização de quem criou o banco do zero com um instalador de
+    /// checksum CRLF (v0.1.0/v0.2.0): checksums da outra quebra de linha E uma
+    /// migração pendente. O reparo precisa rodar antes da checagem de pendência
+    /// e do backup; se for parar depois, o `Migrator::run` acusa
+    /// `VersionMismatch`, o backup é restaurado e o app fica na tela de erro.
+    #[tokio::test]
+    async fn checksum_de_outra_quebra_de_linha_com_migracao_pendente_e_reparado_e_migra() {
+        use sqlx::migrate::Migrate;
+
+        let db_path = temp_database_path("eol-pending");
+        let backup_dir = std::env::temp_dir().join(format!("learno-pool-eol-pending-{}", uuid::Uuid::new_v4()));
+        let ultima = MIGRATOR.iter().last().expect("esperava pelo menos uma migração embutida");
+
+        // Aplica tudo menos a última, para ela ficar pendente E aplicável:
+        // apagar o registro dela forçaria uma reaplicação que colide (ver
+        // `migracao_que_falha_e_revertida_para_o_backup_pre_migracao`).
+        let pool = abrir_sem_migrar(&db_path).await;
+        {
+            let mut conn = pool.acquire().await.unwrap();
+            conn.ensure_migrations_table().await.unwrap();
+            for migration in MIGRATOR.iter().filter(|m| m.version != ultima.version) {
+                conn.apply(migration).await.unwrap();
+            }
+        }
+        for migration in MIGRATOR.iter().filter(|m| m.version != ultima.version) {
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+                .bind(checksum_da_outra_quebra_de_linha(&migration.sql))
+                .bind(migration.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert!(
+            has_a_pending_migration_against_established_history(&pool).await.unwrap(),
+            "o cenário exige uma migração pendente sobre histórico estabelecido"
+        );
+        pool.close().await;
+
+        let reaberto = connect_migrate_with_rollback(&db_path, &backup_dir).await.unwrap();
+
+        let gravados = checksums_gravados(&reaberto).await;
+        assert_eq!(gravados.len(), MIGRATOR.iter().count(), "a migração pendente precisava ter sido aplicada");
+        for migration in MIGRATOR.iter() {
+            assert_eq!(
+                gravados.get(&migration.version).map(Vec::as_slice),
+                Some(migration.checksum.as_ref()),
+                "checksum da migração {} deveria ser o embutido",
+                migration.version
+            );
+        }
+        let records = ScheduleManifest::new(backup_dir.join(SCHEDULE_MANIFEST_FILE)).load().unwrap();
+        assert_eq!(records.len(), 1, "a migração pendente precisava do backup pré-migração");
+
+        reaberto.close().await;
+        cleanup_database_file(&db_path);
+        let _ = std::fs::remove_dir_all(&backup_dir);
+    }
+
     /// Divergência que não é quebra de linha continua sendo erro, e o valor
     /// gravado não é tocado — nos dois caminhos de abertura.
     #[tokio::test]

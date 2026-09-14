@@ -65,6 +65,17 @@ jobs:
           Write-Host "tag = $tag / tauri.conf.json = $($conf.version)"
           if ($conf.version -ne $tag) { throw "Tag v$tag diferente da versao $($conf.version) do tauri.conf.json. Build ABORTADO." }
 
+      # O sqlx guarda o SHA-384 dos bytes de cada migração no banco do usuário:
+      # um .sql embutido com CRLF trava todo banco já existente (incidente da
+      # v0.2.0). O .gitattributes evita; este passo barra o instalador se falhar.
+      # O teste-trava do cargo test roda só no ci.yml, em paralelo a este build.
+      - name: conferir quebra de linha das migrations
+        shell: pwsh
+        run: |
+          $comCR = Get-ChildItem src-tauri/migrations -Filter *.sql | Where-Object { [System.IO.File]::ReadAllBytes($_.FullName) -contains 13 }
+          if ($comCR) { throw "Migrations com CRLF: $($comCR.Name -join ', '). Build ABORTADO." }
+          Write-Host "migrations em LF: $((Get-ChildItem src-tauri/migrations -Filter *.sql).Count) arquivos"
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
