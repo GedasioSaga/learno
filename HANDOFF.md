@@ -66,7 +66,7 @@ Este Top 10 saiu de 4 análises (docs, código, produto e qualidade). O backlog 
 3. ~~**Criar o CI de teste em push/PR**~~ — **feito em 13/09/2026**, verde no GitHub. Ver a Evidência "CI de teste".
 4. ~~**Implementar a importação real de `.apkg`**~~ — **feito em 13/09/2026**, sem mídia. Ver a Evidência "Importação real do Anki".
 5. ~~**Gravar logs persistentes**, com panic hook e ErrorBoundary global~~ — **feito em 13/09/2026**. Ver a Evidência "Logs persistentes".
-6. **Creditar XP automaticamente** em revisão, pomodoro e bloco.
+6. **Creditar XP automaticamente** em revisão, pomodoro e bloco — **em andamento (13/09/2026)**. Estado verificado: revisão (`db/cards.rs:675`, dentro de `answer_card`) e foco concluído (`db/pomodoro.rs:155`, dentro de `finish`) JÁ creditam XP na mesma transação; o backlog estava desatualizado nesse ponto. Só o bloco do cronograma nunca dá XP, porque nenhuma escrita preenche `plan_block_id` (`db/cronograma.rs:29-46`). **Decisões do usuário:** (a) "Focar neste bloco" no Plano do dia e no bloco do Cronograma inicia o Pomodoro ligado ao bloco (`start_pomodoro` ganha `plan_block_id`), e o `finish` credita o XP do bloco na mesma transação quando o tempo medido alcança o planejado — só tempo do timer conta; (b) apagar os comandos avulsos `registrar_xp_revisao_cartao` e `registrar_xp_pomodoro_concluido` (Rust, `generate_handler!`, `ipc/mod.rs` e `REGISTRADOS_SEM_TELA`); (c) o resumo de sessão entra agora: ao esvaziar a fila de Cartões, "Nada para estudar agora" mostra cartões, tempo e XP daquela sessão (`resumo_de_sessao`).
 7. **Instalar o plugin de notificação do sistema.**
 8. **Criar o navegador de cartões** (editar, apagar, suspender).
 9. **Criar o pipeline de views do database** (filtro, ordenação e views salvas).
@@ -250,6 +250,8 @@ Commit `dab6e52`.
 - `cargo clippy` com os lints do projeto: exit 0. `tsc --noEmit`: exit 0.
 - vitest (registro, tela de erro, Configurações e as três travas): 7 arquivos, 35 testes.
 - **Trava da ligação:** um teste lê `main.tsx` e exige o `<App />` dentro do limite e `instalarRegistroDeErros()` ligado. Mutação: comentar a chamada deixou o teste vermelho.
+
+**CI:** run `34798336540` (commit `2d539f3`) verde nos 3 jobs: `rust` em 10 min, `frontend` em 4 min, `sidecar` em 21 s.
 
 **Não verificado:** o app não foi aberto com a mudança, e nenhum arquivo de log real foi visto em `%LOCALAPPDATA%\com.learno.app\logs` (a pasta não existe nesta máquina). A suíte e2e, que abriria o app de verdade, não foi rodada, pelo motivo da seção seguinte.
 
