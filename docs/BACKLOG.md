@@ -28,7 +28,7 @@ A ordem põe primeiro o que destrava o resto.
 
 1. ~~**Fazer os 2 testes de guarda do vitest passarem.**~~ **Feito em 13/09/2026.** As 6 structs de Rotina e Tags ganharam interface em `ipc.ts`; "criar categoria" ganhou tela nos dois formulários de Finanças (`NovaCategoria.tsx`); os 11 comandos de tags e rotina foram declarados em `REGISTRADOS_SEM_TELA`, com o motivo.
 2. ~~**Estabilizar o vitest sob carga.**~~ **Feito em 13/09/2026.** A causa do flake era o `findBy*` com limite padrão de 1 s disputando com debounce real; agora `asyncUtilTimeout` 5 s (`src/test/setup.ts`), `testTimeout` 15 s e CSS processado só onde algum teste o lê (`vite.config.ts`). Duas suítes simultâneas passaram 2226/2226.
-3. **Criar o CI de teste em push/PR** (`ci.yml`): tsc, vitest, clippy, cargo test e pytest. **Escrito em 13/09/2026** (`.github/workflows/ci.yml`), com os 5 comandos verdes localmente. Só vale como feito depois da primeira execução verde no GitHub.
+3. ~~**Criar o CI de teste em push/PR** (`ci.yml`): tsc, vitest, clippy, cargo test e pytest.~~ **Feito em 13/09/2026** (`.github/workflows/ci.yml`). A primeira execução pegou um teste que dependia do `rg` instalado. Depois da correção, a run `34793296565` ficou verde nos 3 jobs.
 4. **Implementar a importação real de `.apkg`.** Hoje ela diz "concluído" e importa 0 notas, e isso bloqueia a adoção por quem vem do Anki.
 5. **Gravar logs persistentes, com panic hook e ErrorBoundary global.** Sem isso, bug relatado não tem rastro.
 6. **Creditar XP automaticamente em revisão, pomodoro e bloco.** Hoje a gamificação parece quebrada.
@@ -85,7 +85,7 @@ A ordem põe primeiro o que destrava o resto.
 
 ### Qualidade e distribuição
 
-- [ ] **CI de teste/lint em push/PR** — o único workflow é o de release, sem testes, e `-SemTestes` publica sem nada (M) — `.github/workflows/release.yml:7`
+- [x] **CI de teste/lint em push/PR** — o único workflow é o de release, sem testes, e `-SemTestes` publica sem nada (M) — `.github/workflows/release.yml:7`
 - [ ] **Logs persistentes, panic hook e ErrorBoundary global** — em release o stdout se perde e não há arquivo de log para pedir ao usuário (M) — `src-tauri/src/lib.rs:45`
 - [x] **Estabilizar o vitest sob carga** — `App.test`, `EstudoSessao` e `ConteudoDeTrilha` estouram o tempo na suíte completa, o `SearchPalette` tem flake, e não há `testTimeout`/`maxWorkers` (P) — `vite.config.ts:47`
 - [ ] **Assinatura Authenticode do instalador e do sidecar** — SmartScreen para todo usuário novo, e o PyInstaller sem assinatura dispara antivírus (M) — `src-tauri/tauri.conf.json`

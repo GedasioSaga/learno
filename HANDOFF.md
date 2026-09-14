@@ -63,7 +63,7 @@ Este Top 10 saiu de 4 análises (docs, código, produto e qualidade). O backlog 
 
 1. ~~**Fazer os 2 testes de guarda do vitest passarem**~~ — **feito em 13/09/2026**, ver a Evidência "Travas verdes de novo".
 2. ~~**Estabilizar o vitest sob carga**~~ — **feito em 13/09/2026**, ver a Evidência "Vitest estável sob carga".
-3. **Criar o CI de teste em push/PR** (`ci.yml`) — **escrito em 13/09/2026**, verde localmente; falta a primeira execução no GitHub. Ver a Evidência "CI de teste".
+3. ~~**Criar o CI de teste em push/PR**~~ — **feito em 13/09/2026**, verde no GitHub. Ver a Evidência "CI de teste".
 4. **Implementar a importação real de `.apkg`**. Hoje ela devolve 0 notas.
 5. **Gravar logs persistentes**, com panic hook e ErrorBoundary global.
 6. **Creditar XP automaticamente** em revisão, pomodoro e bloco.
@@ -239,6 +239,7 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 - **Armadilha desta máquina:** `cargo test` sem `--jobs` falhou com `os error 1455` ("o arquivo de paginação é muito pequeno") ao linkar ~25 binários de teste em paralelo em 20 CPUs. Havia 42 GB de memória virtual e só 12 GB livres. Não é defeito de código. Localmente use `--jobs 2`; o `publicar.ps1` passou a usar.
 - **Primeira execução no GitHub** (run `34792565127`, commit `2864192`): `frontend` verde (4 min), `sidecar` verde (28 s), `rust` vermelho. Clippy e 894 testes da lib passaram; caiu `i4_only_record_values_rs_writes_to_database_record_values` com `ripgrep (rg) precisa estar disponível no PATH`. O teste chamava o `rg` como programa externo, e o runner não tem ripgrep. **Defeito real que só aparecia fora desta máquina** — exatamente o que o CI existe para pegar.
 - **Correção:** `src-tauri/tests/db_value_invariants.rs` varre `src/` em Rust puro (`escritas_em_record_values`), sem processo externo. Suíte `db_value_invariants`: 7/7; clippy com os lints do projeto: exit 0. **Mutação:** um arquivo temporário `src/db/mutacao_i4_temporaria.txt` com `INSERT INTO database_record_values` fez o teste falhar com `I4 violado: "src/db/mutacao_i4_temporaria.txt"`; removido o arquivo, voltou a passar.
+- **Segunda execução** (run `34793296565`, commit `d01f88c`): **verde nos 3 jobs**. `frontend` levou 4 min, `rust` 12 min e `sidecar` 28 s.
 
 ### Vitest estável sob carga (13/09/2026)
 
