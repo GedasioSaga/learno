@@ -31,7 +31,7 @@ A ordem põe primeiro o que destrava o resto.
 3. ~~**Criar o CI de teste em push/PR** (`ci.yml`): tsc, vitest, clippy, cargo test e pytest.~~ **Feito em 13/09/2026** (`.github/workflows/ci.yml`). A primeira execução pegou um teste que dependia do `rg` instalado. Depois da correção, a run `34793296565` ficou verde nos 3 jobs.
 4. ~~**Implementar a importação real de `.apkg`.**~~ **Feito em 13/09/2026, sem mídia.** Notas, cartões com agendamento e histórico entram, nos formatos novo e antigo, em `.apkg` e `.colpkg`. Validado numa coleção real de 24 mil notas em 6,6 s. A mídia virou item próprio abaixo.
 5. ~~**Gravar logs persistentes, com panic hook e ErrorBoundary global.**~~ **Feito em 13/09/2026**: um arquivo por dia em `%LOCALAPPDATA%\com.learno.app\logs`, 7 guardados; pânico com pilha; erros da interface no mesmo arquivo; tela de erro global; Configurações > Diagnóstico.
-6. **Creditar XP automaticamente em revisão, pomodoro e bloco.** Hoje a gamificação parece quebrada.
+6. ~~**Creditar XP automaticamente em revisão, pomodoro e bloco.**~~ **Feito em 14/09/2026.** Revisão e foco já creditavam na mesma transação; faltava o bloco, que agora é pago pelo foco iniciado em "Focar neste bloco" (Plano do dia e Cronograma). O resumo de sessão também ganhou tela.
 7. **Instalar o plugin de notificação do sistema.** Ele destrava o som/aviso do Pomodoro e o lembrete do Cronograma.
 8. **Criar o navegador de cartões (editar, apagar, suspender).** Hoje um cartão com erro não tem conserto.
 9. **Criar o pipeline de views do database (filtro, ordenação e views salvas).** Ele destrava kanban, calendário e galeria.
@@ -49,7 +49,7 @@ A ordem põe primeiro o que destrava o resto.
 - [x] **Importação real de `.apkg` (notas, agendamento, histórico)** — feita em 13/09/2026 no Rust (`src-tauri/src/anki/`). Cobre PLT-004 e SRS-149 sem mídia.
 - [ ] **Mídia do Anki e Check Media** — a importação conta a mídia e não a copia, porque a tela de estudo não mostra imagem nem áudio. Depende de "campos ricos" em Cartões. Cobre o resto de SRS-149 e PLT-015 (M) — `src-tauri/src/anki/importar.rs`
 - [ ] **Importar sem o agendamento** — opção de trazer os cartões como novos (SRS-150) (P) — `src-tauri/src/anki/importar.rs`
-- [ ] **Crédito automático de XP** — `registrar_xp_revisao_cartao`, `registrar_xp_pomodoro_concluido`, `registrar_xp_bloco_cronograma` e `resumo_de_sessao` nunca são chamados (M) — `src-tauri/src/ipc/gamificacao_commands.rs:49`
+- [x] **Crédito automático de XP** — `registrar_xp_revisao_cartao`, `registrar_xp_pomodoro_concluido`, `registrar_xp_bloco_cronograma` e `resumo_de_sessao` nunca são chamados (M) — `src-tauri/src/ipc/gamificacao_commands.rs:49`
 - [ ] **Remover o comentário velho em Estatísticas** — ele diz que um erro é "esperado", mas `study_stats` existe, então um erro real seria ignorado (P) — `src/features/cartoes/Estatisticas.tsx:51`
 - [ ] **Mídia com pasta de dados customizada** — falta `fs_scope().allow_directory` no `save_data_dir`, e o bloco de mídia falha para quem trocou a pasta (P) — `src-tauri/capabilities/default.json:4`
 - [ ] **Detecção de ciclo entre fórmulas** — só a auto-referência direta é barrada. Sem a DFS completa, fórmulas que dependem uma da outra podem entrar em loop na cascata (M) — `src-tauri/src/ipc/formula_commands.rs:126`
@@ -88,6 +88,7 @@ A ordem põe primeiro o que destrava o resto.
 ### Qualidade e distribuição
 
 - [x] **CI de teste/lint em push/PR** — o único workflow é o de release, sem testes, e `-SemTestes` publica sem nada (M) — `.github/workflows/release.yml:7`
+- [ ] **Bancos de teste acumulando no `%TEMP%`** — os testes de banco criam `learno-<rótulo>-<uuid>.sqlite` e só apagam no `teardown`; teste que falha antes deixa o arquivo. Em 14/09/2026 eram 7,8 GB desde 05/09, e o disco chegou a 0 GB. Precisa de um guarda com `Drop` (ou uma pasta única por execução, limpa no início) (P) — `src-tauri/tests/support/mod.rs:72`
 - [ ] **A suíte e2e apaga os dados reais da máquina** — `e2e/wdio.conf.mjs:117` apaga `%APPDATA%\com.learno.app` inteira (o banco, a mídia e os backups do app instalado ficam lá) e `:169` mata todo `learno.exe` pelo nome. Precisa isolar a pasta do app (um identificador próprio para e2e, ou recusar rodar quando houver `learno.sqlite` ali). Até lá, não rodar e2e na máquina de uso (P) — `e2e/wdio.conf.mjs:111`
 - [x] **Logs persistentes, panic hook e ErrorBoundary global** — em release o stdout se perde e não há arquivo de log para pedir ao usuário (M) — `src-tauri/src/lib.rs:45`
 - [x] **Estabilizar o vitest sob carga** — `App.test`, `EstudoSessao` e `ConteudoDeTrilha` estouram o tempo na suíte completa, o `SearchPalette` tem flake, e não há `testTimeout`/`maxWorkers` (P) — `vite.config.ts:47`
