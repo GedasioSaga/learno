@@ -1,6 +1,6 @@
 [package]
 name = "learno"
-version = "0.2.0"
+version = "0.2.1"
 description = "Learno — estudo com notas em blocos, repetição espaçada e mapa mental"
 authors = ["Gedasio Filho"]
 edition = "2021"
