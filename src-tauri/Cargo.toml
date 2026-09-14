@@ -61,6 +61,11 @@ fractional_index = "2.0.2"
 sha2 = "0.11.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Importação de .apkg/.colpkg do Anki (src/anki/). `zip` já vinha pelo updater;
+# aqui ganha só o deflate, que o formato antigo usa. `zstd` descomprime o
+# formato novo (collection.anki21b); sem features, porque só lemos.
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zstd = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }

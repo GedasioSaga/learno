@@ -4,6 +4,7 @@
 //! registra os comandos. Toda a lógica vive nos módulos abaixo, e cada um deles
 //! é dono exclusivo dos seus arquivos:
 //!
+//! - `anki` — leitura de pacotes `.apkg`/`.colpkg` do Anki, sem gravar nada.
 //! - `config` — a pasta de trabalho onde o arquivo do banco vive. Não tem
 //!   host, porta nem credencial: o banco é um arquivo local.
 //! - `db` — o banco SQLite: pool, migrações e os repositórios de página,
@@ -13,6 +14,7 @@
 //! - `sidecar` — processo Python empacotado e o protocolo que fala com ele.
 //! - `ipc` — os comandos `#[tauri::command]` que o frontend chama.
 
+pub mod anki;
 pub mod backup;
 pub mod config;
 pub mod db;
