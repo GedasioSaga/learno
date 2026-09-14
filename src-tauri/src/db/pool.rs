@@ -16,6 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use sha2::{Digest, Sha384};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::backup::schedule::ScheduleConfig;
@@ -100,9 +101,107 @@ pub async fn connect_and_migrate(database_path: &Path) -> Result<SqlitePool> {
         .connect_with(connect_options(database_path))
         .await?;
 
+    reconcile_and_log(&pool).await?;
     sqlx::migrate!().run(&pool).await?;
 
     Ok(pool)
+}
+
+/// Verdadeiro se este banco já tem a tabela de histórico do sqlx.
+///
+/// `sqlite_master` é consultado em vez de `to_regclass` (o equivalente
+/// Postgres): SQLite não tem catálogo de OID, só a tabela `sqlite_master`
+/// listando o que existe por nome — e ela sempre existe, mesmo num arquivo
+/// recém-criado, então não precisa de um caso especial "tabela de catálogo
+/// não existe ainda" como a versão Postgres precisava.
+async fn migrations_table_exists(pool: &SqlitePool) -> Result<bool> {
+    let table_exists: Option<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
+            .fetch_optional(pool)
+            .await?;
+    Ok(table_exists.is_some())
+}
+
+/// SHA-384 de `sql`, exatamente como o sqlx calcula o checksum que grava em
+/// `_sqlx_migrations` (`sqlx-core` `Migration::new`: digest dos bytes crus).
+fn sqlx_checksum(sql: &str) -> Vec<u8> {
+    Sha384::digest(sql.as_bytes()).to_vec()
+}
+
+/// Repara checksums de migração que divergem SÓ pela quebra de linha.
+///
+/// O sqlx grava em `_sqlx_migrations.checksum` o SHA-384 dos BYTES do `.sql`,
+/// não do SQL em si, e `Migrator::run` recusa abrir (`VersionMismatch`,
+/// "was previously applied but has been modified") quando o checksum embutido
+/// no binário difere do gravado. O instalador v0.2.0 foi compilado no CI
+/// Windows com `core.autocrlf`, então embutiu os `.sql` com CRLF; bancos
+/// criados por build local têm checksum LF. As duas populações existem, e
+/// qualquer build novo (LF, pelo `.gitattributes`) deixaria uma delas sem
+/// abrir o app.
+///
+/// Para cada migração embutida já aplicada cujo checksum gravado difere do
+/// embutido, compara o gravado com o hash da variante LF e da CRLF do mesmo
+/// SQL. Só reescreve quando bate com uma delas — ou seja, quando o SQL é
+/// comprovadamente o mesmo, só com outra quebra de linha. Divergência que não
+/// bate com nenhuma variante fica intocada, para o sqlx continuar acusando
+/// migração realmente alterada. Todas as reescritas vão numa transação só.
+///
+/// Devolve quantas linhas foram reparadas.
+async fn reconcile_line_ending_checksums(pool: &SqlitePool) -> Result<u64> {
+    if !migrations_table_exists(pool).await? {
+        return Ok(0);
+    }
+
+    let recorded: Vec<(i64, Vec<u8>)> =
+        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations WHERE success").fetch_all(pool).await?;
+    let recorded: std::collections::HashMap<i64, Vec<u8>> = recorded.into_iter().collect();
+
+    let mut repairs: Vec<(i64, &[u8])> = Vec::new();
+    for migration in MIGRATOR.iter() {
+        let Some(stored) = recorded.get(&migration.version) else {
+            continue;
+        };
+        if stored.as_slice() == migration.checksum.as_ref() {
+            continue;
+        }
+        let lf = migration.sql.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        if *stored == sqlx_checksum(&lf) || *stored == sqlx_checksum(&crlf) {
+            repairs.push((migration.version, migration.checksum.as_ref()));
+        }
+    }
+
+    if repairs.is_empty() {
+        return Ok(0);
+    }
+
+    let mut tx = pool.begin().await?;
+    let mut repaired: u64 = 0;
+    for (version, checksum) in repairs {
+        let result = sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(checksum)
+            .bind(version)
+            .execute(&mut *tx)
+            .await?;
+        repaired += result.rows_affected();
+    }
+    tx.commit().await?;
+
+    Ok(repaired)
+}
+
+/// Roda [`reconcile_line_ending_checksums`] e registra no log do app quando
+/// algo foi reparado — os dois caminhos de abertura chamam isto antes de
+/// qualquer `Migrator::run`.
+async fn reconcile_and_log(pool: &SqlitePool) -> Result<()> {
+    let repaired = reconcile_line_ending_checksums(pool).await?;
+    if repaired > 0 {
+        tracing::warn!(
+            reparadas = repaired,
+            "checksums de migração divergiam só por quebra de linha (LF/CRLF); regravados com o do binário"
+        );
+    }
+    Ok(())
 }
 
 /// Toda migração embutida neste build, em ordem de versão. Compartilhado por
@@ -119,17 +218,9 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 /// primeiro não tem nada que valha proteger, o segundo não tem nada prestes
 /// a mudar contra o que um backup defenderia.
 ///
-/// `sqlite_master` é consultado em vez de `to_regclass` (o equivalente
-/// Postgres): SQLite não tem catálogo de OID, só a tabela `sqlite_master`
-/// listando o que existe por nome — e ela sempre existe, mesmo num arquivo
-/// recém-criado, então não precisa de um caso especial "tabela de catálogo
-/// não existe ainda" como a versão Postgres precisava.
+/// A existência da tabela de histórico vem de [`migrations_table_exists`].
 async fn has_a_pending_migration_against_established_history(pool: &SqlitePool) -> Result<bool> {
-    let table_exists: Option<String> =
-        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
-            .fetch_optional(pool)
-            .await?;
-    if table_exists.is_none() {
+    if !migrations_table_exists(pool).await? {
         return Ok(false);
     }
 
@@ -214,6 +305,8 @@ pub async fn connect_migrate_with_rollback(database_path: &Path, backup_dir: &Pa
         .max_connections(MAX_POOL_CONNECTIONS)
         .connect_with(connect_options(database_path))
         .await?;
+
+    reconcile_and_log(&pool).await?;
 
     if !has_a_pending_migration_against_established_history(&pool).await? {
         sqlx::migrate!().run(&pool).await?;
@@ -640,5 +733,132 @@ mod tests {
 
         cleanup_database_file(&db_path);
         let _ = std::fs::remove_dir_all(&backup_dir);
+    }
+
+    /// O `.gitattributes` com `eol=lf` é o que impede um build de CI com
+    /// `autocrlf` de embutir CRLF de novo (o incidente da v0.2.0). Se ele sumir
+    /// ou deixar de cobrir `migrations/`, é aqui que aparece.
+    #[test]
+    fn embedded_migrations_have_no_carriage_return() {
+        for migration in MIGRATOR.iter() {
+            assert!(
+                !migration.sql.contains('\r'),
+                "a migração {} foi embutida com CR (quebra de linha CRLF); confira o `.gitattributes` \
+                 (eol=lf para migrations/*.sql) e o checkout do build",
+                migration.version
+            );
+        }
+    }
+
+    /// Checksum da variante com a OUTRA quebra de linha: se o embutido é LF,
+    /// o hash CRLF; se é CRLF, o hash LF.
+    fn checksum_da_outra_quebra_de_linha(sql: &str) -> Vec<u8> {
+        let lf = sql.replace("\r\n", "\n");
+        if sql.contains('\r') { sqlx_checksum(&lf) } else { sqlx_checksum(&lf.replace('\n', "\r\n")) }
+    }
+
+    /// Pool cru sobre o arquivo, sem reconciliar nem migrar.
+    async fn abrir_sem_migrar(db_path: &Path) -> SqlitePool {
+        SqlitePoolOptions::new().max_connections(1).connect_with(connect_options(db_path)).await.unwrap()
+    }
+
+    async fn checksums_gravados(pool: &SqlitePool) -> std::collections::HashMap<i64, Vec<u8>> {
+        let linhas: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations").fetch_all(pool).await.unwrap();
+        linhas.into_iter().collect()
+    }
+
+    /// Simula o banco da outra população (LF vs CRLF) e prova que o caminho de
+    /// abertura escolhido o repara e abre.
+    async fn banco_da_outra_quebra_de_linha_abre_e_e_reparado(com_rollback: bool) {
+        let db_path = temp_database_path("eol-repair");
+        let backup_dir = std::env::temp_dir().join(format!("learno-pool-eol-backup-{}", uuid::Uuid::new_v4()));
+
+        connect_and_migrate(&db_path).await.unwrap().close().await;
+
+        let pool = abrir_sem_migrar(&db_path).await;
+        for migration in MIGRATOR.iter() {
+            let outro = checksum_da_outra_quebra_de_linha(&migration.sql);
+            assert_ne!(outro.as_slice(), migration.checksum.as_ref(), "a variante precisa diferir do embutido");
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+                .bind(outro)
+                .bind(migration.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool.close().await;
+
+        let reaberto = if com_rollback {
+            connect_migrate_with_rollback(&db_path, &backup_dir).await
+        } else {
+            connect_and_migrate(&db_path).await
+        };
+        let reaberto = reaberto.unwrap();
+
+        let gravados = checksums_gravados(&reaberto).await;
+        assert_eq!(gravados.len(), MIGRATOR.iter().count());
+        for migration in MIGRATOR.iter() {
+            assert_eq!(
+                gravados.get(&migration.version).map(Vec::as_slice),
+                Some(migration.checksum.as_ref()),
+                "checksum da migração {} deveria ter voltado ao embutido",
+                migration.version
+            );
+        }
+        // Já reparado: uma segunda passada não tem nada a fazer.
+        assert_eq!(reconcile_line_ending_checksums(&reaberto).await.unwrap(), 0);
+
+        reaberto.close().await;
+        cleanup_database_file(&db_path);
+        let _ = std::fs::remove_dir_all(&backup_dir);
+    }
+
+    #[tokio::test]
+    async fn checksum_de_outra_quebra_de_linha_e_reparado_por_connect_migrate_with_rollback() {
+        banco_da_outra_quebra_de_linha_abre_e_e_reparado(true).await;
+    }
+
+    #[tokio::test]
+    async fn checksum_de_outra_quebra_de_linha_e_reparado_por_connect_and_migrate() {
+        banco_da_outra_quebra_de_linha_abre_e_e_reparado(false).await;
+    }
+
+    /// Divergência que não é quebra de linha continua sendo erro, e o valor
+    /// gravado não é tocado — nos dois caminhos de abertura.
+    #[tokio::test]
+    async fn checksum_realmente_diferente_continua_acusado_e_intocado() {
+        let lixo = vec![0u8; 48];
+        for com_rollback in [false, true] {
+            let db_path = temp_database_path("eol-garbage");
+            let backup_dir = std::env::temp_dir().join(format!("learno-pool-eol-garbage-{}", uuid::Uuid::new_v4()));
+
+            connect_and_migrate(&db_path).await.unwrap().close().await;
+            let pool = abrir_sem_migrar(&db_path).await;
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 1")
+                .bind(&lixo)
+                .execute(&pool)
+                .await
+                .unwrap();
+            pool.close().await;
+
+            let resultado = if com_rollback {
+                connect_migrate_with_rollback(&db_path, &backup_dir).await
+            } else {
+                connect_and_migrate(&db_path).await
+            };
+            let erro = resultado.expect_err("checksum lixo precisava impedir a abertura");
+            assert!(
+                erro.to_string().contains("was previously applied but has been modified"),
+                "mensagem inesperada (com_rollback={com_rollback}): {erro}"
+            );
+
+            let pool = abrir_sem_migrar(&db_path).await;
+            assert_eq!(checksums_gravados(&pool).await.get(&1), Some(&lixo), "o checksum lixo não pode ser reescrito");
+            pool.close().await;
+
+            cleanup_database_file(&db_path);
+            let _ = std::fs::remove_dir_all(&backup_dir);
+        }
     }
 }
