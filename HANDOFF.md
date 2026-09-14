@@ -271,7 +271,17 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 **Varredura curta** (`docs/varredura-2026-09-14-v021.md`, 7 agentes, sem erro): 2 CONFIRMADO médios, os dois corrigidos antes do release. (1) Nenhum teste passava pelo ramo "reparo + migração pendente + backup"; entrou `checksum_de_outra_quebra_de_linha_com_migracao_pendente_e_reparado_e_migra`. (2) O `release.yml` gerava o instalador sem nenhuma checagem de CR; entrou o passo "conferir quebra de linha das migrations" antes do `tauri-action`.
 
-**Pendente de evidência:** release v0.2.1, instalação manual por cima da v0.2.0 (o app travado não mostra o aviso), o app abrindo e a 0044 aplicada no banco real.
+**Release v0.2.1:**
+- `publicar.ps1`: vitest com 233 arquivos e 2274 testes; `cargo test --jobs 2` com 30 binários, 1223 testes e 0 falhas.
+- A primeira tentativa morreu com `LNK1318` com o disco em 0 GB. Com autorização do usuário, só `target\debug\incremental` foi apagado (9,9 GB livres).
+- CI run `34852118790` verde. O release run `34852119326` ficou verde, com o passo "conferir quebra de linha das migrations" passando.
+- O release traz `learno_0.2.1_x64-setup.exe`, `.sig` e `latest.json`.
+
+**Instalação real:**
+- O usuário instalou a v0.2.1 à mão e o app abriu.
+- O `learno.exe` instalado embute o checksum LF da 0001 e não o CRLF.
+- Numa cópia do banco com `-wal` e `-shm`: 41 migrações, 0 falhas, a 44 aplicada em `2026-09-14 14:09:32` e 27 páginas preservadas. Houve backup pré-migração às 14:09:32Z.
+- Copiar só o `learno.sqlite` sem o `-wal` mostra a 44 como pendente, o que é um falso negativo.
 
 **Achado de processo:** `build.rs` não tem `cargo:rerun-if-changed=migrations`, então editar só um `.sql` não recompila o `sqlx::migrate!()` localmente.
 
