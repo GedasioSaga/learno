@@ -192,10 +192,12 @@ export function EstudoSessao() {
   }
 
   // A ordem vem com o cartão (`fieldNames`), calculada no backend a partir do
-  // tipo de nota — é a fonte certa, e chega sempre. O tipo carregado na store
-  // fica como primeira opção só porque é o mesmo dado e evita divergir se o
-  // usuário renomear campos com uma sessão aberta; `Object.keys` é o último
-  // recurso, e a ordem dele é a de inserção do JSON, não a de exibição.
+  // tipo de nota E do template deste cartão: num cartão invertido, o campo que
+  // o template mostra primeiro vem na frente (`frente_pelo_template` em
+  // `db/cards.rs`). Só o backend sabe isso, então ela vence a lista de campos
+  // do tipo na store, que é a mesma para todos os cartões da nota e fica só
+  // como reserva. `Object.keys` é o último recurso, e a ordem dele é a de
+  // inserção do JSON, não a de exibição.
   //
   // Antes daqui só existir `Object.keys(atual.fields)`: o backend mandava
   // `fields` como LISTA e o TypeScript declarava mapa, então indexar por nome
@@ -207,7 +209,7 @@ export function EstudoSessao() {
   // `notes.rs`. O verso é que muda: "Múltipla escolha" não pode herdar o
   // genérico (listaria as erradas como se fossem resposta), então é
   // recalculado abaixo por nome de campo, não por posição.
-  const ordemDosCampos = tipoDoCartao?.fields ?? atual.fieldNames ?? Object.keys(atual.fields);
+  const ordemDosCampos = atual.fieldNames ?? tipoDoCartao?.fields ?? Object.keys(atual.fields);
   const [primeiroCampo, ...camposRestantes] = ordemDosCampos;
   const frente = primeiroCampo ? (atual.fields[primeiroCampo] ?? "") : "";
   const versoEsperado = atual.fields["Verso"] ?? "";

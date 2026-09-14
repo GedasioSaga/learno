@@ -432,6 +432,20 @@ describe("EstudoSessao", () => {
     expect(screen.getByText("Paris")).toBeInTheDocument();
   });
 
+  it("a frente é o primeiro campo que o backend manda para ESTE cartão, não o primeiro do tipo (cartão invertido)", async () => {
+    // O tipo na store diz Frente, Verso — igual para todos os cartões da nota.
+    // O template deste cartão começa por Verso, e só o backend sabe disso.
+    useCartoesStore.setState({ noteTypes: [TIPO_BASICO], noteTypesStatus: "ready" });
+    nextCardMock.mockResolvedValue(cardToStudy({ fieldNames: ["Verso", "Frente"] }));
+
+    render(<EstudoSessao />);
+
+    expect(await screen.findByText("Paris")).toBeInTheDocument();
+    expect(screen.queryByText("Qual a capital da França?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Mostrar resposta/ }));
+    expect(screen.getByText("Qual a capital da França?")).toBeInTheDocument();
+  });
+
   it("mostra a procedência 'de: <página>' quando o cartão tem bloco de origem conhecido", async () => {
     usePageTreeStore.setState({
       pagesById: new Map([["pagina-1", pageRow({ id: "pagina-1", title: "Biologia celular" })]]),

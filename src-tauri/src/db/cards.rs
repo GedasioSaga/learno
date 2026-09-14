@@ -837,8 +837,8 @@ impl CardRepository {
         .await?
         .ok_or_else(|| Error::NotFound(format!("nota {} do cartão {}", card.note_id, card.id)))?;
 
-        let (nomes_dos_campos, kind): (serde_json::Value, String) =
-            sqlx::query_as("SELECT fields, kind FROM note_types WHERE id = $1")
+        let (nomes_dos_campos, kind, templates): (serde_json::Value, String, serde_json::Value) =
+            sqlx::query_as("SELECT fields, kind, templates FROM note_types WHERE id = $1")
                 .bind(note.note_type_id.db())
                 .fetch_optional(&self.pool)
                 .await?
@@ -850,8 +850,13 @@ impl CardRepository {
             .await?
             .ok_or_else(|| Error::NotFound(format!("baralho {}", card.deck_id)))?;
 
-        let (field_names, fields) = campos_ordenados(&nomes_dos_campos, &note.field_values);
+        let (mut field_names, fields) = campos_ordenados(&nomes_dos_campos, &note.field_values);
         let cloze = (kind == NOTE_TYPE_KIND_CLOZE).then(|| segmentos_cloze_do_cartao(&card, &field_names, &fields));
+        // Cloze lê as lacunas do primeiro campo do TIPO; o template dele pode
+        // começar por outro campo (um título), e reordenar aqui esconderia a lacuna.
+        if cloze.is_none() {
+            frente_pelo_template(&mut field_names, &templates, card.template_ordinal);
+        }
 
         Ok(CardToStudy { card, note, fields, field_names, deck_name, cloze })
     }
@@ -1262,6 +1267,49 @@ fn campos_ordenados(
     (nomes, mapa)
 }
 
+/// Leva para o início de `field_names` o campo que o template DESTE cartão
+/// mostra primeiro, porque a tela de estudo lê o primeiro nome como frente.
+///
+/// Num tipo com cartão invertido (no Anki, «Basic (and reversed card)»), o
+/// segundo template começa por `{{Back}}`; sem isto, os dois cartões da nota
+/// perguntariam a mesma coisa. Os tipos de fábrica começam o template pelo
+/// próprio primeiro campo, então para eles nada muda. Template ausente ou sem
+/// campo reconhecível deixa a ordem do tipo.
+fn frente_pelo_template(field_names: &mut Vec<String>, templates: &serde_json::Value, ordinal: i64) {
+    let frente = usize::try_from(ordinal)
+        .ok()
+        .and_then(|indice| templates.get(indice))
+        .and_then(|template| template.get("front"))
+        .and_then(serde_json::Value::as_str);
+    let Some(posicao) = frente.and_then(|frente| primeiro_campo_do_template(frente, field_names)) else {
+        return;
+    };
+    let campo = field_names.remove(posicao);
+    field_names.insert(0, campo);
+}
+
+/// A posição em `field_names` do primeiro campo que `template` exibe.
+/// `{{#Campo}}`, `{{^Campo}}` e `{{/Campo}}` são condição, não exibição;
+/// filtros (`type:`, `text:`) vêm antes do nome; `{{FrontSide}}` não é campo
+/// e cai sozinho por não estar na lista.
+fn primeiro_campo_do_template(template: &str, field_names: &[String]) -> Option<usize> {
+    let mut resto = template;
+    while let Some(inicio) = resto.find("{{") {
+        let depois = &resto[inicio + 2..];
+        let fim = depois.find("}}")?;
+        let marcador = depois[..fim].trim();
+        resto = &depois[fim + 2..];
+        if marcador.starts_with(['#', '^', '/', '!']) {
+            continue;
+        }
+        let nome = marcador.rsplit(':').next().unwrap_or_default().trim();
+        if let Some(posicao) = field_names.iter().position(|campo| campo == nome) {
+            return Some(posicao);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     // Regra 3 isenta `#[cfg(test)]` do banimento de unwrap/expect; o lint do
@@ -1294,6 +1342,47 @@ mod tests {
 
         assert!(ordem.iter().all(|nome| mapa.contains_key(nome)));
         assert_eq!(mapa.len(), ordem.len(), "valor não declarado no tipo de nota não entra no mapa");
+    }
+
+    fn nomes(lista: &[&str]) -> Vec<String> {
+        lista.iter().map(|nome| (*nome).to_string()).collect()
+    }
+
+    #[test]
+    fn primeiro_campo_do_template_pula_condicao_filtro_e_frontside() {
+        let campos = nomes(&["Front", "Back"]);
+        assert_eq!(primeiro_campo_do_template("{{Front}}", &campos), Some(0));
+        assert_eq!(primeiro_campo_do_template("<b>{{Back}}</b>", &campos), Some(1));
+        assert_eq!(primeiro_campo_do_template("{{#Back}}{{Back}}{{/Back}}", &campos), Some(1));
+        assert_eq!(primeiro_campo_do_template("{{FrontSide}}<hr>{{type:Back}}", &campos), Some(1));
+        assert_eq!(primeiro_campo_do_template("{{ Back }}", &campos), Some(1));
+        assert_eq!(primeiro_campo_do_template("sem campo {{Desconhecido}}", &campos), None);
+        assert_eq!(primeiro_campo_do_template("{{Back", &campos), None);
+    }
+
+    #[test]
+    fn cartao_invertido_leva_o_campo_do_template_para_a_frente() {
+        let templates = serde_json::json!([
+            { "name": "Card 1", "front": "{{Front}}", "back": "{{Back}}" },
+            { "name": "Card 2", "front": "{{Back}}", "back": "{{Front}}" },
+        ]);
+
+        let mut invertido = nomes(&["Front", "Back", "Extra"]);
+        frente_pelo_template(&mut invertido, &templates, 1);
+        assert_eq!(invertido, nomes(&["Back", "Front", "Extra"]));
+
+        let mut normal = nomes(&["Front", "Back", "Extra"]);
+        frente_pelo_template(&mut normal, &templates, 0);
+        assert_eq!(normal, nomes(&["Front", "Back", "Extra"]));
+    }
+
+    #[test]
+    fn sem_template_para_o_ordinal_a_ordem_do_tipo_fica() {
+        let mut campos = nomes(&["Front", "Back"]);
+        frente_pelo_template(&mut campos, &serde_json::json!([{ "front": "{{Back}}" }]), 3);
+        frente_pelo_template(&mut campos, &serde_json::json!("corrompido"), 0);
+        frente_pelo_template(&mut campos, &serde_json::json!([{ "front": "{{Back}}" }]), -1);
+        assert_eq!(campos, nomes(&["Front", "Back"]));
     }
 
     #[test]

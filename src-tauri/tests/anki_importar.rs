@@ -341,6 +341,30 @@ async fn cloze_com_a_lacuna_fora_do_primeiro_campo_estuda_a_lacuna_certa() {
 }
 
 #[tokio::test]
+async fn cartao_invertido_importado_estuda_com_a_frente_do_proprio_template() {
+    let db = IsolatedDatabase::setup("anki-invertido").await;
+    let pasta = Pasta::nova("invertido");
+    let mut fixture = Fixture::exemplo();
+    fixture.notas.retain(|nota| nota.guid == "g-invertido");
+    // Só o cartão invertido (ord 1) fica na fila: o normal está suspenso.
+    fixture.cartoes = vec![
+        CartaoFixture { fila: -1, ..CartaoFixture::novo(12, 2, 100, 0) },
+        CartaoFixture::novo(13, 2, 100, 1),
+    ];
+    fixture.revisoes.clear();
+    let caminho = anki_fixture::pacote_novo(&pasta.0, &fixture).await;
+
+    importar_pacote(&db.pool, &caminho).await.unwrap();
+
+    let estudo = learno_lib::db::CardRepository::new(db.pool.clone()).next_card(None).await.unwrap().unwrap();
+    assert_eq!(estudo.card.template_ordinal, 1);
+    assert_eq!(estudo.field_names, vec!["Back", "Front"]);
+    assert_eq!(estudo.fields.get("Back").map(String::as_str), Some("Unidade funcional"));
+
+    db.teardown().await;
+}
+
+#[tokio::test]
 async fn gravar_colecao_aceita_colecao_ja_lida() {
     let db = IsolatedDatabase::setup("anki-gravar").await;
     let pasta = Pasta::nova("gravar");
