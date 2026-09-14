@@ -49,6 +49,21 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    css: true,
+    // Acima do `asyncUtilTimeout` de `src/test/setup.ts` (5 s), para que um
+    // `findBy` que não acha nada falhe com a mensagem dele, e não com um
+    // "Test timed out" genérico. O teste mais lento mede ~2 s com duas
+    // suítes inteiras rodando ao mesmo tempo; o padrão de 5 s ficava apertado
+    // quando o `cargo build` disputava a CPU.
+    testTimeout: 15000,
+    // Só `formatting-buttons.test.tsx` lê CSS de arquivo (a fonte e o fundo
+    // de `<code>` em `basic-marks.css`). Processar os outros ~40 `.css` com o
+    // Tailwind custava CPU em todo worker sem provar nada: medido em
+    // 13/09/2026, transform somado 30 s -> 24 s e import 97 s -> 66 s. Um
+    // teste novo que dependa de outro `.css` precisa entrar nesta lista.
+    //
+    // Sem `maxWorkers` de propósito: duas suítes inteiras simultâneas (40
+    // workers em 20 CPUs) passaram 2226/2226, e limitar os workers deixaria
+    // mais lenta a rodada de todo dia.
+    css: { include: [/basic-marks\.css$/] },
   },
 });
