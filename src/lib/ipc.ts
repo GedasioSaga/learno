@@ -485,33 +485,35 @@ export function checkDatabase(): Promise<IntegrityReport> {
   return call<IntegrityReport>("check_database");
 }
 
-/**
- * Espelha `ApkgImportResult` em `src-tauri/src/ipc/commands.rs`. Nesta fase
- * (PLT-004) o sidecar Python só valida o `.apkg` como zip e responde — ler
- * as notas de dentro dele de verdade é Fase 4 — por isso `notes_imported`
- * sempre chega `0` por enquanto. O tipo já espelha o formato final para não
- * precisar mudar nada aqui quando a leitura real for implementada.
- */
-export interface ApkgImportResult {
-  notes_imported: number;
+/** Espelha `anki::importar::RelatorioDeImportacao`: o que uma importação do Anki fez. */
+export interface RelatorioDeImportacao {
+  notasImportadas: number;
+  /** Mesmo guid do Anki já presente: pulada sem tocar no progresso feito no Learno. */
+  notasJaExistentes: number;
+  notasSemCartao: number;
+  cartoesImportados: number;
+  revisoesImportadas: number;
+  /** Reagendamento manual e histórico de cartão que não está no pacote (apagado no Anki). */
+  revisoesIgnoradas: number;
+  baralhosCriados: number;
+  tiposDeNotaCriados: number;
+  /** A mídia não é copiada: a tela de estudo ainda não mostra imagem nem áudio. */
+  midiasIgnoradas: number;
 }
 
 /**
- * PLT-004: envia `path` (de um `.apkg` já escolhido pelo usuário via
- * `@tauri-apps/plugin-dialog`) ao sidecar Python e espera o resultado.
- * Rejeita com `AppError` de `kind: "invalid"` (caminho vazio) ou
- * `kind: "sidecar"` (sidecar não encontrado, não respondeu a tempo, ou
- * morreu no meio) — nunca uma exceção não tratada, conforme o critério de
- * aceite de PLT-004.
+ * PLT-004: importa um `.apkg` ou `.colpkg` já escolhido pelo usuário via
+ * `@tauri-apps/plugin-dialog`. Tudo acontece no Rust, numa transação só: um
+ * arquivo que falha no meio não deixa nada gravado. Rejeita com `AppError` de
+ * `kind: "invalid"` (caminho vazio, arquivo que não é pacote do Anki) ou
+ * `kind: "io"` (arquivo inexistente ou ilegível).
  *
- * PLT-013: import de baralho é o outro gatilho de operação de risco com
- * código real por trás — um import pode sobrescrever cartões existentes, entao
- * o backend faz uma copia de seguranca antes de chamar o sidecar. Um backup
- * que falhar aborta o import inteiro, e o erro chega aqui igual a qualquer
- * outro erro deste módulo.
+ * PLT-013: importar é operação de risco, então o backend faz uma cópia de
+ * segurança antes de gravar. Um backup que falhar aborta a importação inteira,
+ * e o erro chega aqui igual a qualquer outro erro deste módulo.
  */
-export function importApkg(path: string): Promise<ApkgImportResult> {
-  return call<ApkgImportResult>("import_apkg", { path });
+export function importApkg(path: string): Promise<RelatorioDeImportacao> {
+  return call<RelatorioDeImportacao>("import_apkg", { path });
 }
 
 /**

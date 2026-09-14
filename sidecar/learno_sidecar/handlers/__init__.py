@@ -8,9 +8,8 @@ loop never change.
 from __future__ import annotations
 
 from learno_sidecar.dispatcher import Dispatcher
-from learno_sidecar.handlers import apkg, health
+from learno_sidecar.handlers import health
 
 
 def register_all(dispatcher: Dispatcher) -> None:
-    apkg.register(dispatcher)
     health.register(dispatcher)

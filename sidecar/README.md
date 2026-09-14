@@ -3,11 +3,16 @@
 Processo Python 3.12 empacotado com PyInstaller, iniciado pelo núcleo Rust via
 `tauri-plugin-shell`. Fala com o Rust por stdio: uma linha JSON por mensagem,
 em ambas as direções. Fase 1 (PLT-003) construiu o transporte e o
-health-check; PLT-004 ligou a primeira ponte de verdade — `apkg.import` — ao
-comando `ipc::commands::import_apkg`, subido e encerrado pelo `tauri::Builder`
-de `lib.rs`. FSRS e leitura de PDF chegam do mesmo jeito: só um novo handler
+health-check, e o processo é subido e encerrado pelo `tauri::Builder` de
+`lib.rs`. Trabalho que precise de Python chega do mesmo jeito: um novo handler
 em `learno_sidecar/handlers/` e uma nova chamada `SidecarProcess::call`, sem
 tocar no transporte.
+
+A importação de `.apkg` passou por aqui (PLT-004) enquanto era só um stub que
+confirmava o zip e devolvia 0 notas. A leitura de verdade foi para o Rust
+(`src-tauri/src/anki`), onde está o banco — ler e gravar numa transação só,
+sem JSON gigante pela ponte nem o timeout de 30 s de `SidecarProcess::call`.
+Hoje nenhum comando de produção chama o sidecar.
 
 ## Protocolo
 
@@ -33,24 +38,11 @@ Resposta de erro:
 permite pipeline de várias chamadas concorrentes sem esperar uma responder
 antes de mandar a próxima. `code` de erro é estável (`invalid_request`,
 `method_not_found`, `internal_error`, mais os que cada handler futuro
-definir, ex.: `apkg_invalido`); `message` é só para humano/log.
+definir); `message` é só para humano/log.
 
 `capabilities` no `health.check` reflete os métodos que o dispatcher tem
 registrados naquele momento — cresce sozinho conforme `handlers/__init__.py`
 ganha novos módulos, sem precisar editar o handler de saúde.
-
-### `apkg.import` (PLT-004)
-
-```json
-{"id": "a1b2c3", "method": "apkg.import", "params": {"path": "C:/baralhos/meu.apkg"}}
-```
-
-Fase 1 só prova a ponte: `handlers/apkg.py` confere que `path` existe e é um
-zip de verdade (`zipfile.is_zipfile`) e sempre devolve
-`{"notes_imported": 0}` — ou `apkg_invalido` se o arquivo não existe ou não é
-um zip. Ler o `collection.anki2` de dentro e converter nota/cartão de verdade
-é Fase 4; a forma da resposta já é a final (`ApkgImportResult` do lado Rust)
-para o contrato de IPC não mudar quando isso chegar.
 
 ## Rodar localmente
 
@@ -58,7 +50,7 @@ para o contrato de IPC não mudar quando isso chegar.
 cd sidecar
 pip install -e ".[dev]"
 python -m learno_sidecar          # espera linhas JSON no stdin
-pytest                             # 33 testes, sem processo nenhum de fora
+pytest                             # 24 testes, sem processo nenhum de fora
 ```
 
 ## Empacotar com PyInstaller
@@ -95,9 +87,9 @@ para `binaries/learno-sidecar` (ver a nota sobre ela mais abaixo — não é o
 que faz o `spawn` funcionar, mas documenta a intenção); `lib.rs` sobe um
 `SidecarProcess` em `.setup()`, guarda o handle em `ipc::AppState` via
 `set_sidecar`, e desliga o processo em `ExitRequested` via
-`AppState::sidecar()` + `SidecarProcess::shutdown()`. `ipc::commands::
-import_apkg` lê o handle do mesmo jeito que os comandos de página leem
-`state.pool()`.
+`AppState::sidecar()` + `SidecarProcess::shutdown()`. Um comando que precise
+do sidecar lê o handle por `state.sidecar()`, do mesmo jeito que os comandos
+de página leem `state.pool()`.
 
 ## Por que `SidecarProcess::spawn` em si não tem teste automático — mas o resto do cruzamento com o processo real tem
 
@@ -119,15 +111,12 @@ fronteira — tem teste, e roda contra o binário empacotado de verdade:
 traduz o stdout real do processo real para os mesmos `CommandEvent` que o
 plugin entregaria, e roda esse stream pelo `reader::run`/`PendingRequests`
 de produção — não um canal `oneshot` fabricado à mão. Prova de ponta a
-ponta, hoje com quatro testes: um `health.check` de sucesso, um método
+ponta, hoje com dois testes: um `health.check` de sucesso e um método
 desconhecido cujo `method_not_found` chega inteiro do processo real até
-`Error::Sidecar`, e (PLT-004) um `apkg.import` real — com um `.apkg`
-mínimo de verdade escrito em disco pelo próprio teste — que confere tanto o
-caminho de sucesso (`notes_imported: 0`) quanto o `apkg_invalido` para um
-arquivo que não é um zip.
+`Error::Sidecar`.
 
 Como `sidecar/dist/` é artefato de build (não versionado — ver a seção
-".gitignore" acima), os quatro testes nascem `#[ignore]`, mesmo padrão dos
+".gitignore" acima), os dois testes nascem `#[ignore]`, mesmo padrão dos
 testes que exigem Postgres vivo: `cargo test -- --ignored` depois de rodar
 `pyinstaller learno_sidecar.spec` (comando desta seção) os executa de
 verdade. Tudo que roda antes e depois da fronteira de I/O — montar/parsear a

@@ -907,3 +907,26 @@ limpo. Foi assim que quatro defeitos reais da camada de dados apareceram —
 em `db/record_values.rs`, `= ANY($2)` em `ipc/formula_commands.rs` e a busca
 global inteira ainda escrita em `tsvector` — todos corrigidos nesta mesma
 revisão.
+
+---
+
+## Revisão de 13/09/2026 — a importação do Anki saiu do sidecar
+
+- **PLT-004** — o título e o critério falam de uma ponte com o sidecar Python.
+  A importação real ficou no Rust (`src-tauri/src/anki`), por decisão do
+  usuário ao planejar a peça: o banco mora no Rust, e ler e gravar numa
+  transação só evita mandar a coleção inteira como JSON por uma ponte com
+  timeout de 30 s. O que o critério exige continua sendo o que se prova: a UI
+  responde durante a importação (a leitura do pacote roda em `spawn_blocking`,
+  e `ImportApkgSection.test.tsx` clica em outro controle com a importação
+  pendente), e o resultado chega como relatório com a contagem de notas ou
+  como erro tipado (`invalid`, `io`), nunca como exceção. Medido numa coleção
+  real de 24.029 notas: 6,6 s. O handler Python `apkg.import`, que só conferia
+  o zip e devolvia 0 notas, foi apagado.
+- **SRS-149** — cumprido em parte. Notas, cartões com intervalo, facilidade e
+  vencimento, e o histórico de revisões entram; a mídia não (a tela de estudo
+  ainda não mostra imagem nem áudio, e o relatório diz quantos arquivos
+  ficaram de fora).
+- **SRS-150** — não feito: não há opção de importar descartando o agendamento.
+
+Nenhum item foi criado, removido ou movido de fase nesta revisão.

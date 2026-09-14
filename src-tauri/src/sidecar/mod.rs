@@ -1,8 +1,9 @@
 //! Bridge to the Python sidecar: one JSON request/response per line over
-//! stdio (see `protocol.rs`). Fase 1 wired the transport and a health check;
-//! PLT-004 (`ipc::commands::import_apkg`) is the first real caller of
-//! `SidecarProcess::call`, sending `apkg.import` — FSRS scheduling and PDF
-//! reading arrive later the same way, no change needed here. `lib.rs`'s
+//! stdio (see `protocol.rs`). Fase 1 wired the transport and a health check.
+//! No production command calls `SidecarProcess::call` today: `.apkg` import,
+//! its first caller, moved to Rust (`crate::anki`), where the database lives.
+//! Work that genuinely needs Python arrives the same way, no change needed
+//! here. `lib.rs`'s
 //! `tauri::Builder` chain spawns one `SidecarProcess` in `.setup()`, stores
 //! it in `ipc::AppState`, and shuts it down on `ExitRequested`; see
 //! `sidecar/README.md` for the `externalBin`/capability entries that make
@@ -359,76 +360,6 @@ mod tests {
                 .unwrap_err();
 
             assert!(matches!(err, Error::Sidecar(msg) if msg.contains("method_not_found")));
-        }
-
-        /// The smallest file `zipfile.is_zipfile` (Python stdlib, used by the
-        /// sidecar's `apkg.import` handler in `handlers/apkg.py`) accepts as
-        /// a real zip archive: just the 22-byte End Of Central Directory
-        /// record, no entries. PLT-004's bridge only needs to prove the
-        /// round trip end to end — a `.apkg` with a real `collection.anki2`
-        /// inside is Fase 4's fixture, not this one's.
-        const EMPTY_ZIP_BYTES: [u8; 22] = [
-            0x50, 0x4B, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        /// Removes the fixture file on drop, including on a panicking
-        /// assertion — same convention as `backup::autosave`'s `ScratchDir`.
-        struct TempApkg(std::path::PathBuf);
-
-        impl TempApkg {
-            fn minimal() -> Self {
-                let path = std::env::temp_dir()
-                    .join(format!("learno-plt004-{}.apkg", uuid::Uuid::new_v4()));
-                std::fs::write(&path, EMPTY_ZIP_BYTES)
-                    .expect("failed to write the minimal .apkg fixture");
-                Self(path)
-            }
-        }
-
-        impl Drop for TempApkg {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-
-        /// The test PLT-004 actually asks for: a real `.apkg` path sent
-        /// through the real bridge — spawned process, real stdio, real
-        /// `apkg.import` handler on the Python side — proving the two
-        /// halves built in earlier fases (`sidecar/learno_sidecar`'s
-        /// protocol/dispatcher and this crate's `SidecarProcess`) are now
-        /// actually wired together, not just each independently tested.
-        #[tokio::test]
-        #[ignore = "requires the packaged sidecar binary — run `pyinstaller learno_sidecar.spec` in sidecar/ first"]
-        async fn apkg_import_round_trips_through_the_real_packaged_process() {
-            let apkg = TempApkg::minimal();
-
-            let result: serde_json::Value = call_real_sidecar(
-                "apkg.import",
-                serde_json::json!({ "path": apkg.0.to_string_lossy() }),
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(result["notes_imported"], 0);
-        }
-
-        #[tokio::test]
-        #[ignore = "requires the packaged sidecar binary — run `pyinstaller learno_sidecar.spec` in sidecar/ first"]
-        async fn apkg_import_surfaces_the_sidecar_apkg_invalido_error_for_a_bad_file() {
-            let bad_path = std::env::temp_dir()
-                .join(format!("learno-plt004-invalido-{}.apkg", uuid::Uuid::new_v4()));
-            std::fs::write(&bad_path, b"isto nao e um zip").expect("failed to write the bad fixture");
-
-            let err = call_real_sidecar::<serde_json::Value>(
-                "apkg.import",
-                serde_json::json!({ "path": bad_path.to_string_lossy() }),
-            )
-            .await
-            .unwrap_err();
-
-            let _ = std::fs::remove_file(&bad_path);
-            assert!(matches!(err, Error::Sidecar(msg) if msg.contains("apkg_invalido")));
         }
     }
 }

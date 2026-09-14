@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
+use crate::anki::{importar_pacote, RelatorioDeImportacao};
 use crate::backup::{trigger_risky_operation_backup, ScheduleConfig};
 use crate::config::{self, AppConfig};
 use crate::db::{
@@ -20,20 +21,6 @@ use crate::db::{
 use crate::error::{Error, Result};
 use crate::ipc::backup_commands;
 use crate::ipc::state::AppState;
-
-/// O que a UI recebe quando um import de `.apkg` termina com sucesso.
-///
-/// Também é o formato que o sidecar devolve na resposta de `apkg.import`
-/// (por isso `Deserialize` além de `Serialize`) — um único tipo cobre a
-/// ponte inteira, do wire format do sidecar até o `invoke()` do frontend,
-/// sem uma struct intermediária redundante. O handler Python de Fase 1
-/// (`sidecar/learno_sidecar/handlers/apkg.py`) só prova a ponte: sempre
-/// devolve `notes_imported: 0`. Ler o `.apkg` de verdade e contar as notas é
-/// Fase 4.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ApkgImportResult {
-    pub notes_imported: u32,
-}
 
 /// Lê a pasta de trabalho salva, se o usuário já escolheu uma. `None`
 /// significa "nunca escolheu" — e, desde a migração para SQLite, isso não é
@@ -279,24 +266,19 @@ pub async fn save_data_dir(app: AppHandle, state: State<'_, AppState>, data_dir:
     Ok(app_config)
 }
 
-/// Importa um baralho `.apkg` através do sidecar Python.
+/// Importa um `.apkg` ou `.colpkg` do Anki: notas, cartões com o agendamento
+/// e o histórico de revisões, numa transação só. Ler e gravar é de
+/// [`crate::anki::importar_pacote`]; este comando só valida a entrada e faz a
+/// cópia de segurança antes.
 ///
-/// PLT-004: manda `path` para o método `apkg.import` do sidecar (ver
-/// `sidecar::SidecarProcess::call`) e devolve a resposta dele. O timeout, a
-/// detecção de processo morto e a conversão para `Error::Sidecar` já vivem em
-/// `SidecarProcess::call`/`await_response` — este comando só valida a entrada
-/// e propaga o que a ponte devolver, exatamente como `search_pages_inner`
-/// propaga o que `SearchRepository` devolve.
-///
-/// PLT-013: import de baralho é um dos dois gatilhos de operação de risco
-/// que já têm código real por trás (o outro é `check_database` abaixo) — um
-/// `.apkg` malformado ou um import repetido pode sobrescrever cartões que já
-/// existiam. Este comando resolve `backup_dir`/`manifest_path`/
-/// `schedule_config` aqui (a única camada com um `AppHandle` de verdade) e
-/// entrega prontos a `import_apkg_inner`, que fica testável sem `AppHandle` —
-/// mesmo desenho de `open_workspace`/`open_workspace_and_wire_state` acima.
+/// PLT-013: importar é um dos dois gatilhos de operação de risco que já têm
+/// código real por trás (o outro é `check_database` abaixo). Este comando
+/// resolve `backup_dir`/`manifest_path`/`schedule_config` aqui (a única camada
+/// com um `AppHandle` de verdade) e entrega prontos a `import_apkg_inner`, que
+/// fica testável sem `AppHandle` — mesmo desenho de
+/// `open_workspace`/`open_workspace_and_wire_state` acima.
 #[tauri::command]
-pub async fn import_apkg(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<ApkgImportResult> {
+pub async fn import_apkg(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<RelatorioDeImportacao> {
     let schedule_config = backup_commands::get_backup_schedule_config(app.clone()).await?;
     let backup_dir = backup_commands::backup_root_dir(&app)?;
     let manifest_path = backup_commands::schedule_manifest_path(&app)?;
@@ -309,9 +291,8 @@ pub async fn import_apkg(app: AppHandle, state: State<'_, AppState>, path: Strin
 /// of resolving it itself — see that function's doc comment.
 ///
 /// Order matters: the empty-path check runs first (so a call with nothing to
-/// import never touches the database or the filesystem at all, same as
-/// before this change), but everything past it — including the backup — now
-/// runs *before* the sidecar call, never after. A backup that failed
+/// import never touches the database or the filesystem at all), and the
+/// backup runs *before* the package is even opened, never after. A backup that failed
 /// silently would be worse than no backup (the user would act believing a
 /// safety net exists), so `?` here means a failed backup aborts the import
 /// outright; [`dump::run_backup`](crate::backup::dump::run_backup)'s own
@@ -324,17 +305,15 @@ async fn import_apkg_inner(
     backup_dir: &Path,
     manifest_path: &Path,
     schedule_config: &ScheduleConfig,
-) -> Result<ApkgImportResult> {
+) -> Result<RelatorioDeImportacao> {
     if path.trim().is_empty() {
         return Err(Error::Invalid("caminho do arquivo .apkg está vazio".into()));
     }
 
-    trigger_risky_operation_backup(&state.pool()?, backup_dir, manifest_path, schedule_config, "import_apkg").await?;
+    let pool = state.pool()?;
+    trigger_risky_operation_backup(&pool, backup_dir, manifest_path, schedule_config, "import_apkg").await?;
 
-    state
-        .sidecar()?
-        .call("apkg.import", serde_json::json!({ "path": path }))
-        .await
+    importar_pacote(&pool, Path::new(&path)).await
 }
 
 /// Every page command needs the same repository built from the same pool —
@@ -685,7 +664,7 @@ mod tests {
     /// Neither of `import_apkg_inner`'s early-return branches below ever
     /// looks at `backup_dir`/`manifest_path`/`schedule_config`, so a plain
     /// temp path stands in for all three — these tests are about the
-    /// ordering of the two checks in front of the sidecar, not about backup
+    /// ordering of the two checks in front of the import, not about backup
     /// mechanics (that's `schedule.rs`'s own tests, and the `live_database`
     /// module further down for the reachability proof PLT-013 actually
     /// asks for).
@@ -696,25 +675,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn import_apkg_rejects_an_empty_path_without_touching_the_sidecar() {
+    async fn import_apkg_rejects_an_empty_path_without_touching_the_database() {
         let state = AppState::new();
         let (backup_dir, manifest_path, schedule_config) = unused_backup_args();
         let result = import_apkg_inner(&state, String::new(), &backup_dir, &manifest_path, &schedule_config).await;
         assert!(matches!(result, Err(Error::Invalid(_))));
     }
 
-    // PLT-013 changed this test's own expectation: before the backup gate
-    // existed, a session with no connection at all still reached the
-    // sidecar check first and failed there. Now the backup has to be
-    // *attempted* before the sidecar is ever touched, e um backup precisa do
-    // pool — então uma sessão que ainda não abriu a pasta de trabalho falha
-    // em `state.pool()` (`Error::Config`), nunca em `Error::Sidecar`, mesmo
-    // este `AppState` também não tendo sidecar. O caminho "sidecar não está
-    // pronto" que este teste cobria virou
-    // `com_banco::import_apkg_backs_up_before_reporting_the_sidecar_is_not_ready`
-    // abaixo.
+    // O backup precisa do pool, então uma sessão que ainda não abriu a pasta
+    // de trabalho falha em `state.pool()` (`Error::Config`) antes de o
+    // arquivo ser aberto — "baralho.apkg" nem existe, e o erro não é de
+    // arquivo. O caminho com banco está em
+    // `com_banco::import_apkg_backs_up_before_reading_the_package` abaixo.
     #[tokio::test]
-    async fn import_apkg_reports_no_connection_configured_before_touching_the_sidecar() {
+    async fn import_apkg_reports_no_connection_configured_before_reading_the_package() {
         let state = AppState::new();
         let (backup_dir, manifest_path, schedule_config) = unused_backup_args();
         let result =
@@ -987,16 +961,15 @@ mod tests {
             let _ = std::fs::remove_dir_all(&risky_backup_dir);
         }
 
-        /// O outro gatilho real de operação de risco do PLT-013. Nenhum
-        /// sidecar está ligado neste processo de teste (`AppState::new()`
-        /// nunca chama `set_sidecar`), que é exatamente o que este teste
-        /// precisa: prova que o backup roda ANTES — e independentemente — do
-        /// passo do sidecar, não só num caminho em que o import dá certo. Se
-        /// a ordem em `import_apkg_inner` fosse invertida, este teste ainda
-        /// veria `Error::Sidecar`, mas as asserções de manifesto abaixo
+        /// O outro gatilho real de operação de risco do PLT-013. O caminho
+        /// aponta para um arquivo que não existe, e é isso que este teste
+        /// precisa: prova que o backup roda ANTES — e independentemente — de o
+        /// pacote ser aberto, não só num caminho em que a importação dá certo.
+        /// Se a ordem em `import_apkg_inner` fosse invertida, este teste ainda
+        /// veria o erro de arquivo, mas as asserções de manifesto abaixo
         /// falhariam, porque backup nenhum teria rodado.
         #[tokio::test]
-        async fn import_apkg_backs_up_before_reporting_the_sidecar_is_not_ready() {
+        async fn import_apkg_backs_up_before_reading_the_package() {
             let state = AppState::new();
             let data_dir = pasta_temporaria("apkg-dados");
             let connect_backup_dir = pasta_temporaria("apkg-conexao");
@@ -1011,8 +984,8 @@ mod tests {
                     .await;
 
             assert!(
-                matches!(result, Err(Error::Sidecar(_))),
-                "esperava o erro de sidecar indisponível depois de o backup já ter rodado, obtido {result:?}"
+                matches!(result, Err(Error::Io(_))),
+                "esperava o erro de arquivo inexistente depois de o backup já ter rodado, obtido {result:?}"
             );
 
             let manifest = ScheduleManifest::new(&manifest_path);

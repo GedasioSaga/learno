@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AppError, importApkg } from "../../lib/ipc";
+import { AppError, importApkg, type RelatorioDeImportacao } from "../../lib/ipc";
+import { useCartoesStore } from "../cartoes/store";
 
 type ImportStatus =
   | { kind: "idle" }
   | { kind: "importing"; fileName: string }
-  | { kind: "done"; fileName: string; notesImported: number }
+  | { kind: "done"; fileName: string; relatorio: RelatorioDeImportacao }
   | { kind: "error"; message: string };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -22,41 +23,57 @@ function fileNameFromPath(path: string): string {
   return segments[segments.length - 1] || path;
 }
 
+/** O que o resumo diz além da linha principal: só o que de fato aconteceu. */
+function detalhesDoRelatorio(relatorio: RelatorioDeImportacao): string[] {
+  const linhas: string[] = [];
+  if (relatorio.notasJaExistentes > 0) {
+    linhas.push(`${relatorio.notasJaExistentes} nota(s) já importada(s) antes: pulada(s), sem mexer no progresso.`);
+  }
+  if (relatorio.revisoesImportadas > 0) {
+    linhas.push(`${relatorio.revisoesImportadas} revisão(ões) do histórico.`);
+  }
+  if (relatorio.baralhosCriados > 0) {
+    linhas.push(`${relatorio.baralhosCriados} baralho(s) novo(s).`);
+  }
+  if (relatorio.tiposDeNotaCriados > 0) {
+    linhas.push(`${relatorio.tiposDeNotaCriados} tipo(s) de nota novo(s).`);
+  }
+  if (relatorio.notasSemCartao > 0) {
+    linhas.push(`${relatorio.notasSemCartao} nota(s) sem cartão ficaram de fora.`);
+  }
+  if (relatorio.midiasIgnoradas > 0) {
+    linhas.push(
+      `${relatorio.midiasIgnoradas} arquivo(s) de mídia não importado(s): imagem e áudio ainda não aparecem nos cartões.`,
+    );
+  }
+  return linhas;
+}
+
 /**
- * PLT-004: único ponto de entrada real do import de `.apkg` — antes deste
- * componente, `import_apkg` (que fala de verdade com o sidecar Python
- * empacotado, provado por teste que roda o binário e importa um `.apkg`
- * real) não tinha seletor de arquivo, botão nem feedback de progresso que o
- * alcançasse a partir da UI: um grep por "apkg" em `src/` não achava nada.
+ * PLT-004: o único ponto de entrada da importação do Anki (`.apkg` e
+ * `.colpkg`). O backend lê o pacote e grava notas, cartões com o agendamento
+ * e o histórico numa transação só (`src-tauri/src/anki`).
  *
- * `handlePickFile` nunca bloqueia a thread de UI enquanto o sidecar
- * processa — é um `await` comum sobre uma Promise, então cliques e scroll em
- * qualquer outro lugar da tela continuam funcionando durante os até 30s que
- * `SidecarProcess::call` espera antes de expirar (ver `CALL_TIMEOUT` em
- * `src-tauri/src/sidecar/mod.rs`), o que o teste deste componente confirma
- * mantendo a Promise pendente e interagindo com outro elemento antes de
- * resolvê-la.
+ * `handlePickFile` nunca bloqueia a thread de UI enquanto o backend importa —
+ * é um `await` comum sobre uma Promise, então cliques e scroll em qualquer
+ * outro lugar da tela continuam funcionando (uma coleção de 24 mil notas leva
+ * alguns segundos), o que o teste deste componente confirma mantendo a
+ * Promise pendente e interagindo com outro elemento antes de resolvê-la.
  *
- * Nesta fase o sidecar só valida o arquivo como zip e sempre devolve
- * `notes_imported: 0` — ler as notas de verdade é Fase 4 (ver o comentário
- * em `sidecar/learno_sidecar/handlers/apkg.py`). A mensagem de sucesso
- * mostra esse número tal como o backend devolve, sem prometer que alguma
- * nota já virou cartão estudável: é isso que "honesto sobre o que ocorreu"
- * significa aqui.
+ * O resumo mostra o que o backend contou, sem arredondar para "deu certo":
+ * nota pulada por já ter sido importada e mídia deixada de fora aparecem por
+ * escrito.
  *
- * PLT-013: um import pode sobrescrever cartões que já existiam, então é um
- * dos dois gatilhos de operação de risco do checklist com código real por
- * trás — o backend faz uma cópia de segurança (`VACUUM INTO`, sem senha
- * nem processo externo) antes de chamar o sidecar (mesma ideia de
- * `BackupSettings`/`CheckDatabaseSection`).
+ * PLT-013: o backend faz uma cópia de segurança do banco (`VACUUM INTO`)
+ * antes de gravar qualquer coisa.
  */
 export function ImportApkgSection() {
   const [status, setStatus] = useState<ImportStatus>({ kind: "idle" });
 
   async function handlePickFile() {
     const selected = await open({
-      title: "Selecionar baralho do Anki",
-      filters: [{ name: "Baralho do Anki", extensions: ["apkg"] }],
+      title: "Selecionar baralho ou coleção do Anki",
+      filters: [{ name: "Anki", extensions: ["apkg", "colpkg"] }],
     });
 
     // Usuário fechou o diálogo sem escolher nada — não é erro, só nada a fazer.
@@ -65,45 +82,55 @@ export function ImportApkgSection() {
     const fileName = fileNameFromPath(selected);
     setStatus({ kind: "importing", fileName });
     try {
-      const result = await importApkg(selected);
-      setStatus({ kind: "done", fileName, notesImported: result.notes_imported });
+      const relatorio = await importApkg(selected);
+      // A importação pode criar tipos de nota, e a store de Cartões guarda os
+      // tipos de uma carga só. Voltar para "idle" faz a próxima tela de
+      // Cartões que montar buscar de novo, em vez de seguir sem os tipos novos
+      // até o app reiniciar.
+      useCartoesStore.setState({ noteTypesStatus: "idle" });
+      setStatus({ kind: "done", fileName, relatorio });
     } catch (error) {
-      // Cobre tanto `ApkgInvalido` (zip corrompido/não é .apkg) e as falhas
-      // do backup pré-import (PLT-013: disco cheio, permissão negada na
-      // pasta) quanto `SidecarTimeout`/`SidecarCrashed` do critério de
-      // aceite de PLT-004 — todas chegam aqui como `AppError` com `message`
-      // já pronta para o usuário (ver o comentário de `importApkg` em
-      // `src/lib/ipc.ts`), nunca como exceção não tratada.
-      setStatus({ kind: "error", message: errorMessage(error, "Não foi possível importar o arquivo .apkg.") });
+      // Arquivo que não é pacote do Anki, arquivo ilegível e falha do backup
+      // pré-importação (PLT-013: disco cheio, permissão negada) chegam todos
+      // como `AppError` com `message` pronta para o usuário.
+      setStatus({ kind: "error", message: errorMessage(error, "Não foi possível importar o arquivo do Anki.") });
     }
   }
 
   const isImporting = status.kind === "importing";
-  const canImport = !isImporting;
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-ink-muted">
-        Importa um baralho exportado do Anki (arquivo <code>.apkg</code>). O app continua respondendo
-        durante o processamento, mesmo em arquivos grandes. Antes de importar, o app faz uma cópia de
-        segurança do banco atual.
+        Importa um baralho (<code>.apkg</code>) ou uma coleção inteira (<code>.colpkg</code>) exportados do Anki, com
+        o progresso de estudo e o histórico de revisões. O texto dos cartões chega sem formatação, e importar o mesmo
+        arquivo de novo não duplica nada. Antes de importar, o app faz uma cópia de segurança do banco atual.
       </p>
 
       <div>
         <button
           type="button"
-          disabled={!canImport}
+          disabled={isImporting}
           onClick={() => void handlePickFile()}
           className="rounded-sm border border-border bg-surface px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
         >
-          {isImporting ? `Importando "${status.fileName}"…` : "Importar baralho do Anki (.apkg)"}
+          {isImporting ? `Importando "${status.fileName}"…` : "Importar do Anki (.apkg ou .colpkg)"}
         </button>
       </div>
 
       {status.kind === "done" ? (
-        <p role="status" className="text-sm text-mint-ink">
-          {`"${status.fileName}": ${status.notesImported} nota(s) importada(s).`}
-        </p>
+        <div role="status" className="text-sm text-mint-ink">
+          <p>
+            {`"${status.fileName}": ${status.relatorio.notasImportadas} nota(s) e ${status.relatorio.cartoesImportados} cartão(ões) importados.`}
+          </p>
+          {detalhesDoRelatorio(status.relatorio).length > 0 ? (
+            <ul className="mt-1 list-disc pl-5 text-ink-muted">
+              {detalhesDoRelatorio(status.relatorio).map((linha) => (
+                <li key={linha}>{linha}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
       {status.kind === "error" ? (
         <p role="alert" className="text-sm text-terracotta-ink">

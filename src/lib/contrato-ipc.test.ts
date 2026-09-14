@@ -38,7 +38,12 @@ import { describe, expect, it } from "vitest";
 
 const RAIZ = path.resolve(__dirname, "../..");
 const IPC_TS = path.join(RAIZ, "src/lib/ipc.ts");
-const PASTAS_RUST = [path.join(RAIZ, "src-tauri/src/db"), path.join(RAIZ, "src-tauri/src/ipc")];
+const PASTAS_RUST = [
+  path.join(RAIZ, "src-tauri/src/db"),
+  path.join(RAIZ, "src-tauri/src/ipc"),
+  // `import_apkg` devolve `anki::importar::RelatorioDeImportacao`.
+  path.join(RAIZ, "src-tauri/src/anki"),
+];
 
 /**
  * Pares em que o tipo TypeScript e a struct Rust descrevem a mesma coisa com

@@ -3,8 +3,7 @@
 //!
 //! `db` já expõe os repositórios de página, histórico de versão e busca —
 //! cada comando aqui monta o repositório certo a partir de `state.pool()` e
-//! delega a ele; `import_apkg` segue o mesmo desenho com `state.sidecar()`
-//! e `sidecar::SidecarProcess::call`.
+//! delega a ele; `import_apkg` delega da mesma forma a `anki::importar_pacote`.
 
 // `pub(crate)` (não `mod` privado): `tauri::generate_handler!` em `lib.rs`
 // referencia os comandos pelo caminho completo `ipc::commands::…` — a macro
@@ -72,7 +71,7 @@ pub use commands::{
     get_app_config, get_data_dir, get_theme, open_workspace, get_page_breadcrumb, import_apkg, list_page_tree,
     list_page_versions, list_trashed_pages, move_page, permanently_delete_page, rename_page,
     restore_page, restore_page_version, save_data_dir, search_pages, set_page_favorite,
-    save_theme, set_page_icon, trash_page, ApkgImportResult,
+    save_theme, set_page_icon, trash_page,
 };
 pub use financas_commands::{
     atualizar_lancamento, atualizar_recorrente, confirmar_recorrente, criar_categoria_financas, criar_lancamento,

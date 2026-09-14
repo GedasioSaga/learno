@@ -1,8 +1,7 @@
 """Routes a decoded request to the handler registered for its method.
 
 Registration is separate from the transport loop so later fases add handlers
-(``apkg.import``, ``fsrs.schedule``, ``pdf.extract``) in `handlers/` without
-touching `transport.py`.
+in `handlers/` without touching `transport.py`.
 """
 
 from __future__ import annotations

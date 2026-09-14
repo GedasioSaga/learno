@@ -1,9 +1,10 @@
 """Learno sidecar: a stdio JSON process the Rust core hands heavy work to.
 
-Fase 1 ships only the transport, the request/response protocol and a health
-check. Later fases add ``.apkg`` import, FSRS scheduling and PDF reading as
-handlers registered in ``learno_sidecar.handlers`` — the protocol and the
-stdio loop in ``transport.py`` do not change when they land.
+It ships the transport, the request/response protocol and a health check.
+Heavy work that needs Python lands as handlers registered in
+``learno_sidecar.handlers`` — the protocol and the stdio loop in
+``transport.py`` do not change when it does. ``.apkg`` import is not one of
+them: it moved to Rust (``src-tauri/src/anki``), where the database lives.
 """
 
 __version__ = "0.1.0"
