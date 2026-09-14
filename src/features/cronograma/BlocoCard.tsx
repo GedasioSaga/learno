@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { BlocoPlanejado } from "../../lib/ipc";
 import type { CorDaGrade } from "./cores";
+import { useNavegacaoStore } from "../navegacao";
+import { usePomodoroStore } from "../pomodoro";
 import { formatarDuracao, rotuloDoBloco, ROTULO_DA_ATIVIDADE } from "./format";
 import { useCronogramaStore } from "./store";
 
@@ -17,7 +19,16 @@ interface BlocoCardProps {
 /** Um bloco planejado dentro da coluna do dia: horário, o que fazer, duração, e remover. */
 export function BlocoCard({ bloco, cor }: BlocoCardProps) {
   const removerBloco = useCronogramaStore((state) => state.removerBloco);
+  const focarNoBloco = usePomodoroStore((state) => state.focarNoBloco);
+  const irPara = useNavegacaoStore((state) => state.irPara);
   const [removendo, setRemovendo] = useState(false);
+
+  // O cronômetro mora em Hoje: ir para lá antes de iniciar é o que deixa o
+  // foco visível. O tempo conta para este bloco e paga o XP de bloco cumprido.
+  async function handleFocar() {
+    irPara("hoje");
+    await focarNoBloco({ id: bloco.id, rotulo: rotuloDoBloco(bloco) });
+  }
 
   async function handleRemover() {
     setRemovendo(true);
@@ -47,7 +58,19 @@ export function BlocoCard({ bloco, cor }: BlocoCardProps) {
     >
       <div className="min-w-0">
         <p className="truncate text-xs font-medium text-ink">{cabecalho}</p>
-        <p className="text-xs text-ink-muted">{formatarDuracao(bloco)}</p>
+        {/* O Focar fica na linha da duração, à esquerda: a área de toque do ✕
+            avança 8px para a esquerda e não pode cobrir outro botão. */}
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
+          <span>{formatarDuracao(bloco)}</span>
+          <button
+            type="button"
+            onClick={() => void handleFocar()}
+            aria-label={`Focar neste bloco: ${rotulo}`}
+            className="rounded-sm text-xs text-ink-muted underline-offset-2 transition duration-150 ease-out hover:text-ink hover:underline"
+          >
+            Focar
+          </button>
+        </p>
       </div>
       {/* `relative` + `after:-inset-*`: o ✕ desenha pequeno, mas a área que
           reage cresce (≈36×42px, o mais perto de `--hit-min` que cabe sem

@@ -5,6 +5,7 @@ import {
   deckCounts,
   listNoteTypes,
   nextCard,
+  resumoDeSessao,
   type CardRow,
   type CardToStudy,
   type NoteRow,
@@ -24,6 +25,7 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     answerCard: vi.fn(),
     listNoteTypes: vi.fn(),
     deckCounts: vi.fn(),
+    resumoDeSessao: vi.fn(),
   };
 });
 
@@ -266,6 +268,57 @@ describe("EstudoSessao com cartão cloze", () => {
     fireEvent.click(screen.getByRole("button", { name: /Bom/ }));
 
     await waitFor(() => expect(answerCardMock).toHaveBeenCalledWith("card-1", "good"));
+  });
+});
+
+describe("EstudoSessao — resumo da sessão", () => {
+  it("ao esvaziar a fila depois de responder, mostra cartões, tempo, XP e o que vence amanhã", async () => {
+    nextCardMock.mockResolvedValueOnce(cardToStudy()).mockResolvedValue(null);
+    answerCardMock.mockResolvedValue({ proximaRevisao: "2026-09-08T12:00:00.000Z", intervaloDias: 3, estado: "review" });
+    vi.mocked(resumoDeSessao).mockResolvedValue({
+      cartoesRevisados: 1,
+      segundosEstudados: 125,
+      xpGanho: 10,
+      cartoesVencendoAmanha: 4,
+    });
+    render(<EstudoSessao />);
+    await screen.findByText("Qual a capital da França?");
+
+    fireEvent.click(screen.getByRole("button", { name: /Mostrar resposta/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bom/ }));
+
+    const resumo = await screen.findByRole("region", { name: "Resumo da sessão" });
+    expect(resumo).toHaveTextContent("1 cartão(ões) revisado(s)");
+    expect(resumo).toHaveTextContent("2 min de estudo");
+    expect(resumo).toHaveTextContent("+10 XP");
+    expect(resumo).toHaveTextContent("4 cartão(ões) vencem amanhã");
+    expect(resumoDeSessao).toHaveBeenCalledWith(expect.any(String), expect.any(String));
+    const [inicio, fim] = vi.mocked(resumoDeSessao).mock.calls[0];
+    expect(Date.parse(inicio)).toBeLessThanOrEqual(Date.parse(fim));
+  });
+
+  it("fila vazia desde o começo não é sessão: nenhum resumo", async () => {
+    nextCardMock.mockResolvedValue(null);
+    render(<EstudoSessao />);
+
+    expect(await screen.findByText("Nada para estudar agora")).toBeInTheDocument();
+    expect(resumoDeSessao).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Resumo da sessão" })).not.toBeInTheDocument();
+  });
+
+  it("falha ao buscar o resumo não quebra a tela de fila vazia", async () => {
+    nextCardMock.mockResolvedValueOnce(cardToStudy()).mockResolvedValue(null);
+    answerCardMock.mockResolvedValue({ proximaRevisao: "2026-09-08T12:00:00.000Z", intervaloDias: 3, estado: "review" });
+    vi.mocked(resumoDeSessao).mockRejectedValue(new Error("banco fora do ar"));
+    render(<EstudoSessao />);
+    await screen.findByText("Qual a capital da França?");
+
+    fireEvent.click(screen.getByRole("button", { name: /Mostrar resposta/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bom/ }));
+
+    expect(await screen.findByText("Nada para estudar agora")).toBeInTheDocument();
+    await waitFor(() => expect(resumoDeSessao).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Resumo da sessão" })).not.toBeInTheDocument();
   });
 });
 

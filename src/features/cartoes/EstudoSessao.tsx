@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppError, answerCard, nextCard, type CardRating, type CardToStudy } from "../../lib/ipc";
+import {
+  AppError,
+  answerCard,
+  nextCard,
+  resumoDeSessao,
+  type CardRating,
+  type CardToStudy,
+  type ResumoDeSessao,
+} from "../../lib/ipc";
 import { LeitorDeVoz } from "./LeitorDeVoz";
 import { MultiplaEscolha } from "./MultiplaEscolha";
 import { formatarIntervalo, preverIntervaloDias } from "./previsao";
@@ -54,6 +62,12 @@ export function EstudoSessao() {
   const [revelado, setRevelado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // O resumo da sessão cobre do instante em que esta tela montou até a fila
+  // esvaziar, e só existe se houve alguma resposta nela: abrir com a fila já
+  // vazia não é uma sessão de estudo.
+  const inicioDaSessaoRef = useRef(new Date().toISOString());
+  const respostasNaSessaoRef = useRef(0);
+  const [resumo, setResumo] = useState<ResumoDeSessao | null>(null);
   // Só usado por "Múltipla escolha" — qual alternativa o usuário escolheu,
   // controlado aqui (não dentro de `MultiplaEscolha`) porque é o mesmo dado
   // que decide `revelado`.
@@ -105,6 +119,22 @@ export function EstudoSessao() {
     void carregarProximo();
   }, [carregarProximo]);
 
+  useEffect(() => {
+    if (status !== "vazio" || respostasNaSessaoRef.current === 0) return;
+    let cancelado = false;
+    resumoDeSessao(inicioDaSessaoRef.current, new Date().toISOString())
+      .then((resultado) => {
+        if (!cancelado) setResumo(resultado);
+      })
+      .catch(() => {
+        // Sem resumo a tela continua certa: a fila acabou do mesmo jeito.
+        if (!cancelado) setResumo(null);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [status]);
+
   const responder = useCallback(
     async (rating: CardRating) => {
       if (!atual || enviandoRef.current) return;
@@ -113,6 +143,7 @@ export function EstudoSessao() {
       setErrorMessage(null);
       try {
         await answerCard(atual.card.id, rating);
+        respostasNaSessaoRef.current += 1;
         await refreshAllCounts();
         await carregarProximo();
       } catch (error) {
@@ -180,6 +211,21 @@ export function EstudoSessao() {
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <h2 className="font-display text-xl text-ink">Nada para estudar agora</h2>
         <p className="max-w-sm text-sm text-ink-muted">Você concluiu a fila de hoje. Volte mais tarde ou crie novos cartões.</p>
+        {resumo ? (
+          <section aria-label="Resumo da sessão" className="mt-2 rounded-md border border-border bg-surface px-5 py-4 text-sm">
+            <h3 className="font-medium text-ink">Nesta sessão</h3>
+            <ul className="mt-2 space-y-1 text-ink-muted">
+              <li>{`${resumo.cartoesRevisados} cartão(ões) revisado(s)`}</li>
+              <li>
+                {resumo.segundosEstudados < 60
+                  ? "Menos de 1 min de estudo"
+                  : `${Math.round(resumo.segundosEstudados / 60)} min de estudo`}
+              </li>
+              <li>{`+${resumo.xpGanho} XP`}</li>
+              <li>{`${resumo.cartoesVencendoAmanha} cartão(ões) vencem amanhã`}</li>
+            </ul>
+          </section>
+        ) : null}
         <button
           type="button"
           onClick={() => irPara("resumo")}

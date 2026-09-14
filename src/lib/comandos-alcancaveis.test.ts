@@ -255,7 +255,6 @@ const REGISTRADOS_SEM_TELA: Record<string, string> = {
   registrar_xp_revisao_cartao: "reprocessamento: revisoes gravadas antes do credito automatico em answer_card nunca geraram XP, e so este comando idempotente as credita",
   registrar_xp_pomodoro_concluido: "reprocessamento: focos concluidos antes do credito automatico em finish nunca geraram XP, e so este comando idempotente os credita",
   registrar_xp_bloco_cronograma: "reprocessamento: o credito normal sai em finish do foco ligado ao bloco; este comando confere o limiar e credita blocos antigos",
-  resumo_de_sessao: "a camada de motivacao existe no Rust; nenhuma tela ainda fecha uma sessao de estudo com inicio/fim para resumir",
 
   // --- Tags: o indice (0041_tags.sql, db/tags.rs) e alimentado em toda
   //     escrita de bloco, mas a marca # no editor e o painel de navegacao por
