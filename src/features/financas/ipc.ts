@@ -6,6 +6,7 @@ export {
   atualizarLancamento,
   atualizarRecorrente,
   confirmarRecorrente,
+  criarCategoriaFinancas,
   criarLancamento,
   criarRecorrente,
   encerrarRecorrente,

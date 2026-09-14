@@ -325,6 +325,18 @@ export function listOutgoingLinks(pageId: string): Promise<OutgoingLinkRow[]> {
   return call<OutgoingLinkRow[]>("list_outgoing_links", { pageId });
 }
 
+/** Espelha `db::tags::TagSummaryRow`: uma `#tag` com ao menos uma página viva, e quantas páginas a carregam. */
+export interface TagSummaryRow {
+  name: string;
+  pageCount: number;
+}
+
+/** Espelha `db::tags::TagPageRow`: uma página que carrega a tag pedida, ou uma tag aninhada sob ela. */
+export interface TagPageRow {
+  id: string;
+  title: string;
+}
+
 /**
  * Espelha `backup::autosave::JournalEntry` em `src-tauri/src/backup/autosave.rs`
  * — o rascunho não salvo de uma página, gravado em disco fora do Postgres.
@@ -1244,6 +1256,43 @@ export function removerMateria(materiaId: string): Promise<void> {
 /** A "semana modelo": duplica os blocos planejados de uma semana para outra. NÃO é idempotente (chamar duas vezes duplica de novo) e não copia a meta semanal. */
 export function copiarSemana(semanaOrigemInicio: string, semanaDestinoInicio: string): Promise<BlocoPlanejado[]> {
   return call<BlocoPlanejado[]>("copiar_semana", { semanaOrigemInicio, semanaDestinoInicio });
+}
+
+/** Espelha `Rotina`: o MOLDE de um dia de estudo, nunca o plano em si. */
+export interface Rotina {
+  id: string;
+  name: string;
+  /** Máscara de 7 posições (`0`/`1`), posição 1 = segunda. Só pré-preenche o diálogo de aplicar. */
+  defaultWeekdays: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Espelha `ItemDeRotina`: uma linha do molde. Sem `position` — o horário de início é obrigatório e já é a ordem. */
+export interface ItemDeRotina {
+  id: string;
+  routineId: string;
+  startLocalTime: string;
+  plannedMinutes: number;
+  activity: AtividadeDoBloco;
+  pomodoroCycles: number | null;
+  title: string;
+  subjectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Espelha `DiaDeRotinaPulado`: um dia que já tinha bloco e por isso ficou intocado. */
+export interface DiaDeRotinaPulado {
+  data: string;
+  motivo: string;
+}
+
+/** Espelha `AplicacaoDeRotina`: o relatório de `aplicar_rotina` — a idempotência só é visível por ele. */
+export interface AplicacaoDeRotina {
+  diasAplicados: string[];
+  diasPulados: DiaDeRotinaPulado[];
+  totalBlocosCriados: number;
 }
 
 /* =========================================================================

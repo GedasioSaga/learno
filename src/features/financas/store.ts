@@ -5,6 +5,7 @@ import {
   atualizarLancamento as ipcAtualizarLancamento,
   atualizarRecorrente as ipcAtualizarRecorrente,
   confirmarRecorrente as ipcConfirmarRecorrente,
+  criarCategoriaFinancas as ipcCriarCategoria,
   criarLancamento as ipcCriarLancamento,
   criarRecorrente as ipcCriarRecorrente,
   encerrarRecorrente as ipcEncerrarRecorrente,
@@ -70,6 +71,9 @@ interface FinancasState {
   definirMes: (mes: string) => Promise<void>;
   deslocarMes: (deslocamento: number) => Promise<void>;
   carregar: () => Promise<void>;
+
+  /** Devolve a categoria criada para o formulário já deixá-la escolhida. Falha sobe para quem chamou. */
+  criarCategoria: (nome: string, tipo: TipoFinanceiro) => Promise<CategoriaRow>;
 
   criarLancamento: (novo: NovoLancamento) => Promise<void>;
   atualizarLancamento: (lancamentoId: string, patch: LancamentoPatchInput) => Promise<void>;
@@ -146,6 +150,14 @@ export const useFinancasStore = create<FinancasState>((set, get) => {
         if (carga !== cargaAtual) return;
         set({ status: "error", errorMessage: messageFor(error, "Não foi possível carregar as finanças.") });
       }
+    },
+
+    criarCategoria: async (nome, tipo) => {
+      const criada = await ipcCriarCategoria(nome, tipo);
+      // O backend põe a categoria no fim da ordem do tipo dela (MAX(ordem) + 1),
+      // então acrescentar no fim reproduz a lista sem recarregar o mês inteiro.
+      set({ categorias: [...get().categorias, criada] });
+      return criada;
     },
 
     criarLancamento: (novo) =>

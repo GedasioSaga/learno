@@ -3,6 +3,7 @@ import { AppError } from "../../lib/ipc";
 import { ehMesValido, lerReais } from "./dinheiro";
 import { BOTAO_PRIMARIO, BOTAO_TEXTO, CAMPO, ROTULO } from "./estilos";
 import type { TipoFinanceiro } from "./ipc";
+import { NovaCategoria } from "./NovaCategoria";
 import { useFinancasStore } from "./store";
 
 function messageFor(error: unknown, fallback: string): string {
@@ -102,17 +103,20 @@ export function RecorrenteForm({ onFechar }: { onFechar: () => void }) {
         />
       </label>
 
-      <label className="sm:col-span-2">
-        <span className={ROTULO}>Categoria</span>
-        <select value={categoriaId} onChange={(event) => setCategoriaId(event.currentTarget.value)} className={CAMPO}>
-          <option value="">Sem categoria</option>
-          {opcoes.map((categoria) => (
-            <option key={categoria.id} value={categoria.id}>
-              {categoria.nome}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="sm:col-span-2">
+        <label className="block">
+          <span className={ROTULO}>Categoria</span>
+          <select value={categoriaId} onChange={(event) => setCategoriaId(event.currentTarget.value)} className={CAMPO}>
+            <option value="">Sem categoria</option>
+            {opcoes.map((categoria) => (
+              <option key={categoria.id} value={categoria.id}>
+                {categoria.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <NovaCategoria tipo={tipo} onCriada={(categoria) => setCategoriaId(categoria.id)} />
+      </div>
 
       <div className="flex items-end justify-end gap-1.5 sm:col-span-2 lg:col-span-3">
         {erro ? (

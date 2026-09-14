@@ -257,6 +257,27 @@ const REGISTRADOS_SEM_TELA: Record<string, string> = {
   registrar_xp_bloco_cronograma: "a camada de motivacao existe no Rust; falta a tela de Cronograma chamar isto ao cumprir um bloco",
   resumo_de_sessao: "a camada de motivacao existe no Rust; nenhuma tela ainda fecha uma sessao de estudo com inicio/fim para resumir",
 
+  // --- Tags: o indice (0041_tags.sql, db/tags.rs) e alimentado em toda
+  //     escrita de bloco, mas a marca # no editor e o painel de navegacao por
+  //     tag ainda nao existem. As interfaces TagSummaryRow/TagPageRow ja estao
+  //     no ipc.ts; o wrapper entra junto com a tela. ---
+  list_all_tags: "o indice de #tags existe no backend; falta o painel que lista as tags e leva as paginas de cada uma",
+  list_pages_for_tag: "o indice de #tags existe no backend; falta o painel que lista as tags e leva as paginas de cada uma",
+
+  // --- Cronograma: rotina diaria (o MOLDE de um dia, 0024) tem backend e
+  //     testes completos, e nenhuma tela. aplicar_rotina ainda aplica um dia
+  //     so — o intervalo de datas e a fatia 2 do plano. As interfaces
+  //     Rotina/ItemDeRotina/AplicacaoDeRotina ja estao no ipc.ts. ---
+  criar_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  listar_rotinas: "a rotina diaria nao tem tela no Cronograma ainda",
+  atualizar_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  remover_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  criar_item_de_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  listar_itens_de_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  atualizar_item_de_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  remover_item_de_rotina: "a rotina diaria nao tem tela no Cronograma ainda",
+  aplicar_rotina: "a rotina diaria nao tem tela no Cronograma ainda; aplicar a um intervalo de datas tambem falta no Rust",
+
   // --- Avulsos ---
   get_page_breadcrumb: "o Breadcrumb deriva a trilha da store da arvore de paginas em vez de ir ao backend, entao este comando nunca e chamado; decidir se ele fica como API ou sai",
   trigger_backup_for_risky_operation: "o backup antes de operacao arriscada e disparado pelo proprio Rust; nenhuma tela precisa aciona-lo",

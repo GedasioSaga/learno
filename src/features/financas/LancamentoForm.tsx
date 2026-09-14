@@ -3,6 +3,7 @@ import { AppError } from "../../lib/ipc";
 import { formatarReais, lerReais, mesDe, primeiroDiaDoMes } from "./dinheiro";
 import { BOTAO_PRIMARIO, BOTAO_TEXTO, CAMPO, ROTULO } from "./estilos";
 import type { CategoriaRow, LancamentoRow, TipoFinanceiro } from "./ipc";
+import { NovaCategoria } from "./NovaCategoria";
 import { useFinancasStore } from "./store";
 
 interface LancamentoFormProps {
@@ -143,18 +144,21 @@ export function LancamentoForm({ lancamento, onFechar }: LancamentoFormProps) {
         />
       </label>
 
-      <label className="sm:col-span-2 lg:col-span-2">
-        <span className={ROTULO}>Categoria</span>
-        <select value={categoriaId} onChange={(event) => setCategoriaId(event.currentTarget.value)} className={CAMPO}>
-          {podeFicarSemCategoria ? <option value="">Sem categoria</option> : null}
-          {!podeFicarSemCategoria && categoriaId === "" ? <option value="">Escolha…</option> : null}
-          {opcoes.map((categoria) => (
-            <option key={categoria.id} value={categoria.id}>
-              {categoria.nome}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="sm:col-span-2 lg:col-span-2">
+        <label className="block">
+          <span className={ROTULO}>Categoria</span>
+          <select value={categoriaId} onChange={(event) => setCategoriaId(event.currentTarget.value)} className={CAMPO}>
+            {podeFicarSemCategoria ? <option value="">Sem categoria</option> : null}
+            {!podeFicarSemCategoria && categoriaId === "" ? <option value="">Escolha…</option> : null}
+            {opcoes.map((categoria) => (
+              <option key={categoria.id} value={categoria.id}>
+                {categoria.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <NovaCategoria tipo={tipo} onCriada={(categoria) => setCategoriaId(categoria.id)} />
+      </div>
 
       <div className="flex items-end justify-end gap-1.5 sm:col-span-2 lg:col-span-3">
         {erro ? (

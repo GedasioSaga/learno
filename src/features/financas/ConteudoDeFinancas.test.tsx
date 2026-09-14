@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConteudoDeFinancas } from "./ConteudoDeFinancas";
+import { AppError } from "../../lib/ipc";
 import {
   confirmarRecorrente,
+  criarCategoriaFinancas,
   criarLancamento,
   criarRecorrente,
   listarCategoriasFinancas,
@@ -32,6 +34,7 @@ vi.mock("./ipc", async (importOriginal) => {
     confirmarRecorrente: vi.fn(),
     criarRecorrente: vi.fn(),
     mudarValorRecorrente: vi.fn(),
+    criarCategoriaFinancas: vi.fn(),
   };
 });
 
@@ -207,6 +210,89 @@ describe("ConteudoDeFinancas", () => {
     await user.click(within(form).getByRole("button", { name: "Cadastrar" }));
 
     expect(criarRecorrente).toHaveBeenCalledWith("Telefone", "saida", null, 6000, "2026-09");
+  });
+
+  it("criar categoria no lançamento deixa a nova escolhida, e o Enter não envia o lançamento", async () => {
+    const pets: CategoriaRow = {
+      id: "c-pets",
+      nome: "Pets",
+      tipo: "saida",
+      ordem: 3,
+      arquivada: false,
+      createdAt: CRIADO,
+      updatedAt: CRIADO,
+    };
+    vi.mocked(criarCategoriaFinancas).mockResolvedValue(pets);
+    vi.mocked(criarLancamento).mockResolvedValue(mercado);
+    const user = userEvent.setup();
+    useFinancasStore.setState({ subAba: "lancamentos" });
+    render(<ConteudoDeFinancas />);
+
+    await user.click(await screen.findByRole("button", { name: "+ Novo lançamento" }));
+    const form = screen.getByRole("form", { name: "Novo lançamento" });
+    await user.click(within(form).getByRole("button", { name: "+ Nova categoria" }));
+    await user.type(within(form).getByLabelText("Nome da nova categoria"), "  Pets  {Enter}");
+
+    expect(criarCategoriaFinancas).toHaveBeenCalledWith("Pets", "saida");
+    expect(criarLancamento).not.toHaveBeenCalled();
+    expect(within(form).getByLabelText("Categoria")).toHaveValue("c-pets");
+    expect(within(form).queryByLabelText("Nome da nova categoria")).not.toBeInTheDocument();
+
+    await user.type(within(form).getByLabelText("Descrição"), "Ração");
+    await user.type(within(form).getByLabelText("Valor (R$)"), "90");
+    await user.click(within(form).getByRole("button", { name: "Lançar" }));
+
+    expect(criarLancamento).toHaveBeenCalledWith(expect.any(String), "Ração", "saida", "c-pets", 9000);
+  });
+
+  it("nova categoria sem nome ou com nome repetido mostra o motivo e continua aberta", async () => {
+    vi.mocked(criarCategoriaFinancas).mockRejectedValue(
+      new AppError({ kind: "invalid", message: 'já existe uma categoria chamada "MEI"' }),
+    );
+    const user = userEvent.setup();
+    useFinancasStore.setState({ subAba: "lancamentos" });
+    render(<ConteudoDeFinancas />);
+
+    await user.click(await screen.findByRole("button", { name: "+ Novo lançamento" }));
+    const form = screen.getByRole("form", { name: "Novo lançamento" });
+    await user.click(within(form).getByRole("button", { name: "+ Nova categoria" }));
+
+    await user.click(within(form).getByRole("button", { name: "Criar" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("Dê um nome à categoria.");
+    expect(criarCategoriaFinancas).not.toHaveBeenCalled();
+
+    await user.type(within(form).getByLabelText("Nome da nova categoria"), "MEI");
+    await user.click(within(form).getByRole("button", { name: "Criar" }));
+
+    expect(await within(form).findByRole("alert")).toHaveTextContent('já existe uma categoria chamada "MEI"');
+    expect(within(form).getByLabelText("Nome da nova categoria")).toHaveValue("MEI");
+    expect(useFinancasStore.getState().categorias).toHaveLength(categorias.length);
+  });
+
+  it("categoria criada no item fixo nasce do tipo escolhido", async () => {
+    const freela: CategoriaRow = {
+      id: "c-freela",
+      nome: "Freelance",
+      tipo: "entrada",
+      ordem: 2,
+      arquivada: false,
+      createdAt: CRIADO,
+      updatedAt: CRIADO,
+    };
+    vi.mocked(criarCategoriaFinancas).mockResolvedValue(freela);
+    const user = userEvent.setup();
+    useFinancasStore.setState({ subAba: "renda-e-fixos" });
+    render(<ConteudoDeFinancas />);
+
+    await user.click(await screen.findByRole("button", { name: "+ Nova renda ou gasto fixo" }));
+    const form = screen.getByRole("form", { name: "Novo item fixo" });
+    await user.selectOptions(within(form).getByLabelText("Tipo"), "entrada");
+    await user.click(within(form).getByRole("button", { name: "+ Nova categoria" }));
+    await user.type(within(form).getByLabelText("Nome da nova categoria"), "Freelance");
+    await user.click(within(form).getByRole("button", { name: "Criar" }));
+
+    expect(criarCategoriaFinancas).toHaveBeenCalledWith("Freelance", "entrada");
+    expect(within(form).getByLabelText("Categoria")).toHaveValue("c-freela");
   });
 
   it("erro na primeira carga ocupa a tela com a mensagem", async () => {
