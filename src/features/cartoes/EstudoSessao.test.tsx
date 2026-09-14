@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   answerCard,
   deckCounts,
@@ -26,6 +26,19 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     deckCounts: vi.fn(),
   };
 });
+
+/**
+ * Espera o ouvinte de teclado da tela estar ligado ao cartão que já apareceu.
+ *
+ * `findByText` resolve assim que o texto está no DOM, mas o ouvinte de
+ * `keydown` é trocado num `useEffect`, que pode continuar pendente. Com a CPU
+ * disputada (a suíte inteira junto com o `cargo test`), a tecla chegou ao
+ * ouvinte da renderização anterior, ainda com `status` "carregando", e foi
+ * ignorada. `act` vazio aplica os efeitos pendentes antes da tecla.
+ */
+async function efeitosAplicados() {
+  await act(async () => {});
+}
 
 const nextCardMock = vi.mocked(nextCard);
 const answerCardMock = vi.mocked(answerCard);
@@ -226,6 +239,7 @@ describe("EstudoSessao com cartão cloze", () => {
     nextCardMock.mockResolvedValue(cartaoCloze());
     render(<EstudoSessao />);
     await screen.findByText("A capital da França é", { exact: false });
+    await efeitosAplicados();
 
     fireEvent.keyDown(window, { key: " " });
 
@@ -323,6 +337,7 @@ describe("EstudoSessao", () => {
     answerCardMock.mockResolvedValue({ proximaRevisao: "2026-09-08T12:00:00.000Z", intervaloDias: 3, estado: "review" });
     render(<EstudoSessao />);
     await screen.findByText("Qual a capital da França?");
+    await efeitosAplicados();
 
     fireEvent.keyDown(window, { key: "3" });
     expect(answerCardMock).not.toHaveBeenCalled();
@@ -541,6 +556,7 @@ describe("EstudoSessao", () => {
 
     render(<EstudoSessao />);
     await screen.findByText("Capital da França?");
+    await efeitosAplicados();
 
     fireEvent.keyDown(window, { key: " " });
 
@@ -601,6 +617,7 @@ describe("EstudoSessao", () => {
 
     render(<EstudoSessao />);
     await screen.findByText("Capital da França?");
+    await efeitosAplicados();
 
     fireEvent.keyDown(window, { key: " " });
 
@@ -611,6 +628,7 @@ describe("EstudoSessao", () => {
     nextCardMock.mockResolvedValue(cardToStudy());
     render(<EstudoSessao />);
     await screen.findByText("Qual a capital da França?");
+    await efeitosAplicados();
 
     fireEvent.keyDown(window, { key: " " });
 
