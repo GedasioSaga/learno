@@ -57,6 +57,23 @@ Três documentos, nesta ordem, antes de tocar em qualquer coisa:
 
 ## Próximos passos
 
+### Backlog consolidado (13/09/2026)
+
+Este Top 10 saiu de 4 análises (docs, código, produto e qualidade). O backlog completo está em `docs/BACKLOG.md`. Os itens 1-3 da lista antiga logo abaixo (leitor PDF/EPUB, tela da Trilha e UI de databases) já existem no código.
+
+1. ~~**Fazer os 2 testes de guarda do vitest passarem**~~ — **feito em 13/09/2026**, ver a Evidência "Travas verdes de novo".
+2. ~~**Estabilizar o vitest sob carga**~~ — **feito em 13/09/2026**, ver a Evidência "Vitest estável sob carga".
+3. **Criar o CI de teste em push/PR** (`ci.yml`) — **escrito em 13/09/2026**, verde localmente; falta a primeira execução no GitHub. Ver a Evidência "CI de teste".
+4. **Implementar a importação real de `.apkg`**. Hoje ela devolve 0 notas.
+5. **Gravar logs persistentes**, com panic hook e ErrorBoundary global.
+6. **Creditar XP automaticamente** em revisão, pomodoro e bloco.
+7. **Instalar o plugin de notificação do sistema.**
+8. **Criar o navegador de cartões** (editar, apagar, suspender).
+9. **Criar o pipeline de views do database** (filtro, ordenação e views salvas).
+10. **Assinar o instalador com Authenticode.**
+
+### Lista anterior
+
 1. **O leitor de PDF/EPUB depende de uma decisão do usuário**, e ela está pendente:
    instalar `pdfjs-dist` e `epubjs` (regra 12 — avisar antes de instalar). Sem a resposta,
    a Biblioteca continua sendo só a estante, e os quatro comandos `abrir_livro`,
@@ -214,12 +231,37 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### CI de teste (13/09/2026)
+
+- `.github/workflows/ci.yml`: em push e PR para a `master`, 3 jobs em `windows-latest`. `frontend` roda `npm ci`, `tsc --noEmit` e `vitest run`. `rust` cria um sidecar provisório e roda clippy e `cargo test`. `sidecar` roda pytest.
+- **Por que o sidecar provisório:** `src-tauri/binaries/` não é versionado, e o build script do `tauri-build` falha quando um `externalBin` não existe (`copy_file`, `tauri-build-2.6.3/src/lib.rs:44`). Um arquivo vazio basta, porque os 4 testes que executam o sidecar são `#[ignore]` (`src-tauri/src/sidecar/mod.rs:344-417`). A `dist/` não é necessária: sem `custom-protocol` e com `devUrl`, o `tauri-codegen` não embute assets (`context.rs:178`).
+- Validação local, com os mesmos comandos: YAML lido pelo PyYAML (3 jobs, gatilhos `push`/`pull_request`); clippy com os lints do projeto: **exit 0**; `cargo test --jobs 2`: **28 suítes, 1160 testes, 0 falhas, 4 ignorados**; pytest: **33 passed**; tsc e vitest como na seção abaixo.
+- **Armadilha desta máquina:** `cargo test` sem `--jobs` falhou com `os error 1455` ("o arquivo de paginação é muito pequeno") ao linkar ~25 binários de teste em paralelo em 20 CPUs. Havia 42 GB de memória virtual e só 12 GB livres. Não é defeito de código. Localmente use `--jobs 2`; o `publicar.ps1` passou a usar.
+- **Não verificado:** nenhuma execução no GitHub ainda. O runner tem outra memória e outro número de CPUs, e só a primeira execução prova o arquivo.
+
+### Vitest estável sob carga (13/09/2026)
+
+- **Causa do flake do `SearchPalette`, provada:** o `findBy*` da testing-library espera 1 s por padrão, e a busca gasta 200 ms reais de debounce antes de renderizar. Com a suíte disputando CPU, a margem sumia. Mutação: com `asyncUtilTimeout: 150`, os 4 testes que passam pelo debounce falham com `Unable to find an element with the text: Biologia` e os 3 que não passam ficam verdes.
+- **Correção:** `configure({ asyncUtilTimeout: 5000 })` em `src/test/setup.ts`; `testTimeout: 15000` em `vite.config.ts` (acima do `findBy`, para a falha sair com a mensagem certa); `css: { include: [/basic-marks\.css$/] }`, porque só `formatting-buttons.test.tsx` lê CSS de arquivo.
+- **Medições** (20 CPUs, 32 GB): suíte sozinha, antes: 48,3 s (transform somado 30,5 s, import 97,5 s); depois: 46,9 s (23,5 s e 65,6 s). Duas suítes simultâneas com a config nova: **226 arquivos, 2226 testes, 0 falhas em cada**, ~94 s. O teste mais lento sob essa carga levou ~2 s, contra 15 s de limite.
+- **`maxWorkers` não foi limitado:** 40 workers em 20 CPUs passaram, e o limite só deixaria a rodada normal mais lenta.
+- Os "3 arquivos lentos" do backlog (`App.test`, `EstudoSessao`, `ConteudoDeTrilha`) não estouraram em nenhuma das 5 rodadas completas desta sessão.
+- `rtk proxy npx tsc --noEmit`: exit 0.
+
+### Travas verdes de novo (13/09/2026)
+
+- `contrato-ipc`: `Rotina`, `ItemDeRotina`, `DiaDeRotinaPulado`, `AplicacaoDeRotina`, `TagSummaryRow` e `TagPageRow` agora têm interface em `src/lib/ipc.ts` e são comparadas campo a campo. Nenhuma virou ponto cego.
+- `comandos-alcancaveis`: `criar_categoria_financas` ganhou tela — o botão "+ Nova categoria" em `LancamentoForm` e `RecorrenteForm` (`src/features/financas/NovaCategoria.tsx`). Os 2 comandos de tags e os 9 de rotina entraram em `REGISTRADOS_SEM_TELA`, com motivo. Eles saem de lá quando as telas existirem (itens do backlog).
+- `rtk proxy npx tsc --noEmit`: exit 0.
+- `rtk proxy npx vitest run` nas 2 travas, na trava de telas e em `src/features/financas`: **7 arquivos, 62 testes, 0 falhas**. Três testes novos em `ConteudoDeFinancas.test.tsx`: a categoria criada fica escolhida e o Enter não envia o lançamento; nome vazio ou repetido mostra o motivo; no item fixo, a categoria nasce do tipo escolhido.
+- **Não verificado:** a tela não foi aberta no app, e a suíte vitest inteira não rodou (ela é instável sob carga — item 2).
+
 ### Repo público e auto-update pelo GitHub (13/09/2026)
 
 - Repo `https://github.com/GedasioSaga/learno` (público, branch `master`). Release v0.1.0 publicado pelo run `34788793978` (`gh run watch --exit-status`: exit 0). Assets: `learno_0.1.0_x64-setup.exe` (17,3 MB), `.sig` e `latest.json`.
 - `releases/latest/download/latest.json` responde `version=0.1.0` com assinatura de 416 bytes.
 - `cargo test`: todas as suítes `ok` (lib: 894 passed, 0 failed). `tsc --noEmit`: exit 0. `AtualizadorBanner.test.tsx`: 6/6.
-- **Pendente:** 2 testes-guarda do vitest falham desde antes (`comandos-alcancaveis`, `contrato-ipc`). É dívida de Rotina/Finanças: comandos sem tela e structs fora do contrato. Por isso `publicar.ps1` precisa de `-SemTestes` até corrigir.
+- ~~**Pendente:** 2 testes-guarda do vitest falham desde antes~~ — resolvido, ver "Travas verdes de novo" acima.
 - Não testado ainda: instalar a v0.1.0 e ver o banner oferecer a v0.1.1 de verdade.
 
 ### Biblioteca: estante organizada e páginas de anotação (08/09/2026)

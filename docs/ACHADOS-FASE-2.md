@@ -211,6 +211,10 @@ Portão de unidade no fechamento desta fase: `tsc --noEmit` exit 0; `vitest` 646
 passou em cinco execuções isoladas seguidas. É corrida de `userEvent`/`findByText` sob
 carga, anterior a esta fase e não investigada além disso.
 
+**Resolvido em 13/09/2026.** A causa era o limite padrão de 1 s do `findBy*` competindo com o
+debounce real de 200 ms da busca. Correção e prova estão no `HANDOFF.md` ("Vitest estável sob
+carga").
+
 ## Ambiente
 
 O disco `C:` encheu (0 bytes livres) no meio da sessão e chegou a bloquear até edição de
