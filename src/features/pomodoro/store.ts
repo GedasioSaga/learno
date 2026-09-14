@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import { AppError, finishPomodoro, startPomodoro, type PomodoroKind } from "../../lib/ipc";
+import { avisar } from "../../lib/notificacao";
+
+/** O aviso do sistema quando uma fase termina sozinha: com o app minimizado, é o que avisa a pessoa. */
+export function avisoDeFimDeFase(faseConcluida: PomodoroKind, proximaFase: PomodoroKind): [string, string] {
+  if (faseConcluida === "focus") {
+    return ["Foco concluído", proximaFase === "long_break" ? "Hora da pausa longa." : "Hora da pausa curta."];
+  }
+  return ["Pausa encerrada", "Hora de voltar ao foco."];
+}
 
 /**
  * Duração de cada fase, em segundos. Padrão clássico do método Pomodoro — 25
@@ -133,6 +142,7 @@ export const usePomodoroStore = create<EstadoPomodoro>((set, get) => {
     }
     const { proximaFase, proximoFocusNumero } = calcularProximaFase(faseConcluida, get().focusNumeroNoCiclo);
     set({ fase: proximaFase, focusNumeroNoCiclo: proximoFocusNumero, status: "idle" });
+    void avisar(...avisoDeFimDeFase(faseConcluida, proximaFase));
   }
 
   return {

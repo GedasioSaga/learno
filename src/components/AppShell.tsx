@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { useLembreteDeBlocos } from "../features/cronograma/useLembreteDeBlocos";
 import type { Secao } from "../features/navegacao/contrato";
 import { IconeMostrarPainel, IconeRecolherPainel } from "../features/navegacao/icones";
 import { Rail } from "../features/navegacao/Rail";
@@ -47,6 +48,9 @@ export function AppShell({ secoes, acoes }: AppShellProps) {
   const ultimaTrocaPor = useNavegacaoStore((estado) => estado.ultimaTrocaPor);
   const irPara = useNavegacaoStore((estado) => estado.irPara);
   const alternarPainel = useNavegacaoStore((estado) => estado.alternarPainel);
+
+  // Na casca, e não na seção Cronograma: o lembrete precisa valer com qualquer seção aberta.
+  useLembreteDeBlocos();
 
   // Uma seção persistida que a montagem atual não inclui (teste com subconjunto,
   // ou uma seção removida do app) cai na primeira, em vez de deixar a tela vazia.

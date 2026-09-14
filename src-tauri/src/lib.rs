@@ -61,6 +61,9 @@ pub fn run() {
         // instalador assinado e reinicia pelo plugin-process.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Avisos do sistema: fim de fase do Pomodoro e lembrete de bloco do
+        // Cronograma, disparados pelo frontend (`src/lib/notificacao.ts`).
+        .plugin(tauri_plugin_notification::init())
         .manage(ipc::AppState::new())
         .setup(|app| {
             // O log liga aqui, e não no começo de `run`: a pasta de logs vem do

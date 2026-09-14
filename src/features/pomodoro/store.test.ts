@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError, finishPomodoro, startPomodoro, type PomodoroSessionRow } from "../../lib/ipc";
-import { calcularProximaFase, DURACAO_SEGUNDOS, FOCUS_SESSIONS_BEFORE_LONG_BREAK, usePomodoroStore } from "./store";
+import { avisar } from "../../lib/notificacao";
+import {
+  avisoDeFimDeFase,
+  calcularProximaFase,
+  DURACAO_SEGUNDOS,
+  FOCUS_SESSIONS_BEFORE_LONG_BREAK,
+  usePomodoroStore,
+} from "./store";
 
 vi.mock("../../lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/ipc")>();
@@ -10,6 +17,8 @@ vi.mock("../../lib/ipc", async (importOriginal) => {
     finishPomodoro: vi.fn(),
   };
 });
+
+vi.mock("../../lib/notificacao", () => ({ avisar: vi.fn().mockResolvedValue(undefined) }));
 
 const startMock = vi.mocked(startPomodoro);
 const finishMock = vi.mocked(finishPomodoro);
@@ -39,6 +48,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
   startMock.mockReset();
   finishMock.mockReset();
+  vi.mocked(avisar).mockClear();
   usePomodoroStore.setState({
     fase: "focus",
     status: "idle",
@@ -53,6 +63,36 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("usePomodoroStore — aviso do sistema", () => {
+  it("o fim natural de um foco avisa a pausa que vem", async () => {
+    startMock.mockResolvedValue(sessao({ id: "sessao-1" }));
+    finishMock.mockResolvedValue(sessao({ id: "sessao-1", completed: true }));
+    await usePomodoroStore.getState().iniciar();
+
+    vi.setSystemTime(new Date(Date.now() + DURACAO_SEGUNDOS.focus * 1000 + 1000));
+    usePomodoroStore.getState().verificarFimDaFase();
+    await esvaziarMicrotarefas();
+
+    expect(avisar).toHaveBeenCalledWith("Foco concluído", "Hora da pausa curta.");
+  });
+
+  it("reiniciar no meio não avisa nada", async () => {
+    startMock.mockResolvedValue(sessao({ id: "sessao-1" }));
+    finishMock.mockResolvedValue(sessao({ id: "sessao-1" }));
+    await usePomodoroStore.getState().iniciar();
+
+    await usePomodoroStore.getState().reiniciar();
+    await esvaziarMicrotarefas();
+
+    expect(avisar).not.toHaveBeenCalled();
+  });
+
+  it("as mensagens dizem o que vem depois", () => {
+    expect(avisoDeFimDeFase("focus", "long_break")).toEqual(["Foco concluído", "Hora da pausa longa."]);
+    expect(avisoDeFimDeFase("short_break", "focus")).toEqual(["Pausa encerrada", "Hora de voltar ao foco."]);
+  });
 });
 
 describe("usePomodoroStore — foco ligado a um bloco", () => {
