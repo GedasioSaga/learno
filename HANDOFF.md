@@ -65,7 +65,7 @@ Este Top 10 saiu de 4 análises (docs, código, produto e qualidade). O backlog 
 2. ~~**Estabilizar o vitest sob carga**~~ — **feito em 13/09/2026**, ver a Evidência "Vitest estável sob carga".
 3. ~~**Criar o CI de teste em push/PR**~~ — **feito em 13/09/2026**, verde no GitHub. Ver a Evidência "CI de teste".
 4. ~~**Implementar a importação real de `.apkg`**~~ — **feito em 13/09/2026**, sem mídia. Ver a Evidência "Importação real do Anki".
-5. **Gravar logs persistentes**, com panic hook e ErrorBoundary global.
+5. ~~**Gravar logs persistentes**, com panic hook e ErrorBoundary global~~ — **feito em 13/09/2026**. Ver a Evidência "Logs persistentes".
 6. **Creditar XP automaticamente** em revisão, pomodoro e bloco.
 7. **Instalar o plugin de notificação do sistema.**
 8. **Criar o navegador de cartões** (editar, apagar, suspender).
@@ -231,6 +231,40 @@ suíte e2e contra o app real). Tudo isso está satisfeito.
 
 ## Evidência
 
+### Logs persistentes, pânico e tela de erro global (13/09/2026)
+
+Commit `dab6e52`.
+
+**Decisões do usuário:** `tracing-appender` (0.2.5, de 17/04/2026; dependência nova aprovada); 7 dias de log; tela de erro com Recarregar, Copiar detalhes e Abrir pasta de logs, e o mesmo botão em Configurações; erros da interface gravados pelo backend.
+
+**O que existe agora:**
+- `src-tauri/src/logs.rs`: um arquivo por dia (`learno.AAAA-MM-DD.log`) em `app_log_dir`, que no Windows é `%LOCALAPPDATA%\com.learno.app\logs`, com os 7 últimos guardados. O terminal continua recebendo tudo. A escrita é síncrona de propósito: um escritor em outra thread perderia a última linha antes de um pânico que derruba o processo. Pasta que não abre não impede o app de abrir: o log segue só no terminal e diz por quê.
+- O pânico vai para o log com a pilha (`Backtrace::force_capture`) e depois segue para o tratamento anterior.
+- O log liga dentro do `setup` do Tauri, porque a pasta vem do identificador, que só o `AppHandle` conhece. Uma falha antes do `setup` vai para o stderr.
+- `ipc/diagnostico_commands.rs`: `registrar_erro_da_interface` (mensagem cortada em 4 KB e pilha em 16 KB) e `abrir_pasta_de_logs`, que usa o opener pelo lado Rust.
+- `src/lib/registro-de-erros.ts`: `window` `error` e `unhandledrejection` vão para o log. O mesmo erro repetido em 5 s vira uma linha só, e uma falha ao registrar nunca vira outro erro.
+- `src/components/LimiteDeErroGlobal.tsx`, montado em volta do `<App />` em `main.tsx`. Configurações ganhou a seção Diagnóstico.
+
+**Portão:**
+- `cargo test --lib logs:: diagnostico_commands::`: 5/5, incluindo "a linha chega ao arquivo do dia sem cor de terminal" e "erro da interface chega ao arquivo com origem e pilha".
+- `cargo clippy` com os lints do projeto: exit 0. `tsc --noEmit`: exit 0.
+- vitest (registro, tela de erro, Configurações e as três travas): 7 arquivos, 35 testes.
+- **Trava da ligação:** um teste lê `main.tsx` e exige o `<App />` dentro do limite e `instalarRegistroDeErros()` ligado. Mutação: comentar a chamada deixou o teste vermelho.
+
+**Não verificado:** o app não foi aberto com a mudança, e nenhum arquivo de log real foi visto em `%LOCALAPPDATA%\com.learno.app\logs` (a pasta não existe nesta máquina). A suíte e2e, que abriria o app de verdade, não foi rodada, pelo motivo da seção seguinte.
+
+### ALERTA: a suíte e2e apaga os dados reais desta máquina (achado em 13/09/2026)
+
+**Não rode `npm run test:e2e` na máquina de uso do Learno** até isto ser corrigido.
+
+- `e2e/wdio.conf.mjs:117` faz `fs.rmSync(APP_DATA_DIR, { recursive: true, force: true })`, com `APP_DATA_DIR = %APPDATA%\com.learno.app`. O backup de antes (`:111-116`) guarda só o `config.json`.
+- Nesta máquina essa pasta tem o banco de verdade do app instalado: `learno.sqlite` (1 MB, alterado em 13/09 20:41), `media/` e `pre-migration-backups/`. O `config.json` só guarda o tema, então o banco está na pasta padrão, que é justamente a apagada. Conferido listando só os nomes, sem abrir o banco.
+- `e2e/wdio.conf.mjs:169` faz `taskkill /IM learno.exe /F /T`, que mata também o Learno instalado e aberto (havia um rodando). É o mesmo "matar por nome de imagem" que este documento já chama de inaceitável na nota de ambiente do menu de coluna.
+- O comentário de `backupAndWipeAppData` diz que "não apaga os dados de um dev de verdade sem devolvê-los depois". Isso só é verdade para o `config.json`.
+- Abrir o `learno.exe` de debug também não serve para testar à mão: ele usa a mesma pasta, aplicaria a migração `0044` no banco real, e a v0.1.0 instalada deixaria de abrir por encontrar uma migração que não conhece.
+
+### Importação real do Anki (13/09/2026)
+
 ### Importação real do Anki (13/09/2026)
 
 Commits `8e5eda6`, `90f3705`, `1cbb07a`, `f1cd8a2`, `523dcb1`. Código em `src-tauri/src/anki/` (`pacote.rs` abre o zip, `colecao.rs` lê, `importar.rs` grava, `html.rs` e `proto.rs` de apoio), migração `0044_notes_anki_guid.sql`.
@@ -265,6 +299,8 @@ Commits `8e5eda6`, `90f3705`, `1cbb07a`, `f1cd8a2`, `523dcb1`. Código em `src-t
 - Travas de IPC e tela de importação: 17/17. O relatório entrou no contrato: `contrato-ipc` agora também lê `src-tauri/src/anki`.
 - `vitest run` completo: **226 arquivos, 2229 testes, 0 falhas**.
 - **Instabilidade nova, achada nesta rodada:** com o vitest inteiro rodando junto com o `cargo test`, falhou `espaço continua revelando o Básico normalmente` (isolado passou 6 de 6). O teste apertava espaço logo que a frente aparecia, e a tecla podia chegar ao ouvinte de teclado da renderização anterior, ainda com `status` "carregando", porque o `useEffect` que troca o ouvinte continuava pendente. Correção: `efeitosAplicados()` (um `act` vazio) antes de cada tecla em `EstudoSessao.test.tsx`. É mecanismo deduzido do código, não reproduzido de forma determinística: a prova é a suíte seguinte verde sob a mesma carga, uma rodada só.
+
+**CI:** run `34797356671` (commit `672bc78`) verde nos 3 jobs: `frontend` em 4 min, `rust` em 11 min, `sidecar` em 21 s.
 
 **Não verificado / não feito:** a tela de importação não foi aberta no app rodando, e nenhuma spec e2e cobre a importação. A mídia não é importada, então SRS-149 está cumprido só em parte. Não há opção de importar sem o agendamento (SRS-150). Estado FSRS não é importado (a coleção real não tinha nenhum cartão FSRS).
 

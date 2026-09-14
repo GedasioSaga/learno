@@ -30,7 +30,7 @@ A ordem põe primeiro o que destrava o resto.
 2. ~~**Estabilizar o vitest sob carga.**~~ **Feito em 13/09/2026.** A causa do flake era o `findBy*` com limite padrão de 1 s disputando com debounce real; agora `asyncUtilTimeout` 5 s (`src/test/setup.ts`), `testTimeout` 15 s e CSS processado só onde algum teste o lê (`vite.config.ts`). Duas suítes simultâneas passaram 2226/2226.
 3. ~~**Criar o CI de teste em push/PR** (`ci.yml`): tsc, vitest, clippy, cargo test e pytest.~~ **Feito em 13/09/2026** (`.github/workflows/ci.yml`). A primeira execução pegou um teste que dependia do `rg` instalado. Depois da correção, a run `34793296565` ficou verde nos 3 jobs.
 4. ~~**Implementar a importação real de `.apkg`.**~~ **Feito em 13/09/2026, sem mídia.** Notas, cartões com agendamento e histórico entram, nos formatos novo e antigo, em `.apkg` e `.colpkg`. Validado numa coleção real de 24 mil notas em 6,6 s. A mídia virou item próprio abaixo.
-5. **Gravar logs persistentes, com panic hook e ErrorBoundary global.** Sem isso, bug relatado não tem rastro.
+5. ~~**Gravar logs persistentes, com panic hook e ErrorBoundary global.**~~ **Feito em 13/09/2026**: um arquivo por dia em `%LOCALAPPDATA%\com.learno.app\logs`, 7 guardados; pânico com pilha; erros da interface no mesmo arquivo; tela de erro global; Configurações > Diagnóstico.
 6. **Creditar XP automaticamente em revisão, pomodoro e bloco.** Hoje a gamificação parece quebrada.
 7. **Instalar o plugin de notificação do sistema.** Ele destrava o som/aviso do Pomodoro e o lembrete do Cronograma.
 8. **Criar o navegador de cartões (editar, apagar, suspender).** Hoje um cartão com erro não tem conserto.
@@ -88,7 +88,8 @@ A ordem põe primeiro o que destrava o resto.
 ### Qualidade e distribuição
 
 - [x] **CI de teste/lint em push/PR** — o único workflow é o de release, sem testes, e `-SemTestes` publica sem nada (M) — `.github/workflows/release.yml:7`
-- [ ] **Logs persistentes, panic hook e ErrorBoundary global** — em release o stdout se perde e não há arquivo de log para pedir ao usuário (M) — `src-tauri/src/lib.rs:45`
+- [ ] **A suíte e2e apaga os dados reais da máquina** — `e2e/wdio.conf.mjs:117` apaga `%APPDATA%\com.learno.app` inteira (o banco, a mídia e os backups do app instalado ficam lá) e `:169` mata todo `learno.exe` pelo nome. Precisa isolar a pasta do app (um identificador próprio para e2e, ou recusar rodar quando houver `learno.sqlite` ali). Até lá, não rodar e2e na máquina de uso (P) — `e2e/wdio.conf.mjs:111`
+- [x] **Logs persistentes, panic hook e ErrorBoundary global** — em release o stdout se perde e não há arquivo de log para pedir ao usuário (M) — `src-tauri/src/lib.rs:45`
 - [x] **Estabilizar o vitest sob carga** — `App.test`, `EstudoSessao` e `ConteudoDeTrilha` estouram o tempo na suíte completa, o `SearchPalette` tem flake, e não há `testTimeout`/`maxWorkers` (P) — `vite.config.ts:47`
 - [ ] **Assinatura Authenticode do instalador e do sidecar** — SmartScreen para todo usuário novo, e o PyInstaller sem assinatura dispara antivírus (M) — `src-tauri/tauri.conf.json`
 
