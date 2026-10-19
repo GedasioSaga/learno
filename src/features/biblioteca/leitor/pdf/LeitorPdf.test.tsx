@@ -1,7 +1,14 @@
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { aplicarMarcacao, limparMarcacao } from "../marcacao-de-vocabulario";
 import type { NavegacaoDoLeitor, SelecaoDeTexto } from "../tipos";
+
+// Mesma razão do `LeitorEpub.test.tsx`: no jsdom a marcação de verdade é
+// no-op; aqui só interessa ONDE e QUANDO ela é chamada.
+vi.mock("../marcacao-de-vocabulario", () => ({ aplicarMarcacao: vi.fn(), limparMarcacao: vi.fn() }));
+const aplicarMarcacaoMock = vi.mocked(aplicarMarcacao);
+const limparMarcacaoMock = vi.mocked(limparMarcacao);
 
 /**
  * `pdfjs-dist` de verdade não roda no jsdom (Web Worker real, canvas 2D sem
@@ -81,6 +88,7 @@ function renderizarLeitor(
     onVirarPagina: (info: { locator: string; fraction: number }) => void;
     onSelecaoDeTexto: (selecao: SelecaoDeTexto | null) => void;
     onErro: (mensagem: string) => void;
+    termosMarcados: readonly string[];
   }> = {},
 ) {
   const ref = createRef<NavegacaoDoLeitor>();
@@ -91,14 +99,71 @@ function renderizarLeitor(
     onVirarPagina: overrides.onVirarPagina ?? vi.fn(),
     onSelecaoDeTexto: overrides.onSelecaoDeTexto ?? vi.fn(),
     onErro: overrides.onErro ?? vi.fn(),
+    termosMarcados: overrides.termosMarcados ?? [],
   };
-  render(<LeitorPdf ref={ref} {...props} />);
-  return { ref, ...props };
+  const { rerender, unmount } = render(<LeitorPdf ref={ref} {...props} />);
+  return { ref, ...props, rerender, unmount };
 }
 
 beforeEach(() => {
   getDocumentMock.mockReset();
   textLayerRenderMock.mockClear();
+  aplicarMarcacaoMock.mockReset();
+  limparMarcacaoMock.mockReset();
+});
+
+describe("marcação do vocabulário no livro", () => {
+  function camadaDeTexto(): Element {
+    const camada = document.querySelector(".leitor-pdf-text-layer");
+    if (!camada) throw new Error("a camada de texto não montou");
+    return camada;
+  }
+
+  it("marca a camada de texto logo depois de o TextLayer desenhar a página", async () => {
+    resolverGetDocumentCom(criarDocumentoFake(10));
+
+    renderizarLeitor({ termosMarcados: ["voraz"] });
+
+    await waitFor(() => expect(textLayerRenderMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(aplicarMarcacaoMock).toHaveBeenCalledWith(camadaDeTexto(), ["voraz"]));
+  });
+
+  it("virar a página marca a camada nova com a lista de agora, não com a da montagem", async () => {
+    const doc = criarDocumentoFake(10);
+    resolverGetDocumentCom(doc);
+    // `unmount` sai da desestruturação só para não ir parar em `props` (e de lá para o componente).
+    const { rerender, unmount, ref, ...props } = renderizarLeitor({ termosMarcados: ["voraz"] });
+    await waitFor(() => expect(aplicarMarcacaoMock).toHaveBeenCalledWith(camadaDeTexto(), ["voraz"]));
+
+    rerender(<LeitorPdf ref={ref} {...props} termosMarcados={["ao léu"]} />);
+    // Depois do rerender: a remarcação da página 1 (efeito da lista) não pode contar como marcação da página 2.
+    aplicarMarcacaoMock.mockClear();
+    act(() => ref.current?.proximo());
+
+    await waitFor(() => expect(doc.getPage).toHaveBeenCalledWith(2));
+    await waitFor(() => expect(textLayerRenderMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(aplicarMarcacaoMock).toHaveBeenCalledWith(camadaDeTexto(), ["ao léu"]));
+    expect(aplicarMarcacaoMock).toHaveBeenCalledTimes(1);
+    // A marcação veio DEPOIS do segundo desenho do TextLayer, não antes.
+    expect(aplicarMarcacaoMock.mock.invocationCallOrder[0]).toBeGreaterThan(textLayerRenderMock.mock.invocationCallOrder[1]);
+  });
+
+  it("mudar a lista remarca a página que está na tela sem redesenhá-la; desmontar limpa o registro", async () => {
+    const doc = criarDocumentoFake(10);
+    resolverGetDocumentCom(doc);
+    const { rerender, unmount, ref, ...props } = renderizarLeitor({ termosMarcados: ["voraz"] });
+    await waitFor(() => expect(aplicarMarcacaoMock).toHaveBeenCalledWith(camadaDeTexto(), ["voraz"]));
+    aplicarMarcacaoMock.mockClear();
+
+    rerender(<LeitorPdf ref={ref} {...props} termosMarcados={[]} />);
+
+    expect(aplicarMarcacaoMock).toHaveBeenCalledWith(camadaDeTexto(), []);
+    expect(doc.getPage).toHaveBeenCalledTimes(1);
+    expect(textLayerRenderMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(limparMarcacaoMock).toHaveBeenCalledWith(document);
+  });
 });
 
 describe("abrir o documento", () => {

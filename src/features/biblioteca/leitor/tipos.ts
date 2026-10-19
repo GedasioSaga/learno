@@ -82,4 +82,11 @@ export interface PropsDoLeitorDeFormato {
   onSelecaoDeTexto: (selecao: SelecaoDeTexto | null) => void;
   /** Uma mensagem pronta para o usuário — nunca uma exceção crua nem tela branca. */
   onErro: (mensagem: string) => void;
+  /**
+   * As palavras do vocabulário deste livro com o marcador ligado, já
+   * filtradas pela casca: o formato só sublinha (`marcacao-de-vocabulario.ts`),
+   * nunca decide quais. A casca mantém a mesma referência enquanto a lista não
+   * muda — trocar de referência é o que faz o formato remarcar a página.
+   */
+  termosMarcados: readonly string[];
 }

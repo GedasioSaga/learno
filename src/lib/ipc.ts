@@ -1640,7 +1640,13 @@ export interface PalavraColetada {
   term: string;
   /** A frase de onde a palavra veio. É o que dá sentido a ela depois, e é o que vira a frente do cartão. */
   contextSnippet: string | null;
+  /** O que a interface chama de "Significado". A coluna continua `note` no banco (migration 0033). */
   note: string | null;
+  /** Já normalizada pelo Rust: sem vazio, sem duplicata ignorando caixa e acento. Linha anterior à 0045 vem `[]`. */
+  synonyms: string[];
+  antonyms: string[];
+  /** Liga o sublinhado da palavra em toda ocorrência dentro do livro. Palavra nova nasce `true`, e linha anterior à 0045 também. */
+  highlightInBook: boolean;
   locator: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1652,9 +1658,11 @@ export function coletarPalavra(
   termo: string,
   trechoDeContexto: string | null,
   nota: string | null,
+  sinonimos: string[],
+  antonimos: string[],
   locator: string | null,
 ): Promise<PalavraColetada> {
-  return call<PalavraColetada>("coletar_palavra", { livroId, termo, trechoDeContexto, nota, locator });
+  return call<PalavraColetada>("coletar_palavra", { livroId, termo, trechoDeContexto, nota, sinonimos, antonimos, locator });
 }
 
 export function listarPalavrasDoLivro(livroId: string): Promise<PalavraColetada[]> {
@@ -1666,8 +1674,18 @@ export function listarPalavras(termoBusca: string | null): Promise<PalavraColeta
   return call<PalavraColetada[]>("listar_palavras", { termoBusca });
 }
 
-export function atualizarNotaDaPalavra(id: string, nota: string | null): Promise<PalavraColetada> {
-  return call<PalavraColetada>("atualizar_nota_da_palavra", { id, nota });
+/** Troca os três campos de uma vez (significado, sinônimos, antônimos) — é o que o lápis do painel edita junto. */
+export function atualizarPalavra(
+  id: string,
+  nota: string | null,
+  sinonimos: string[],
+  antonimos: string[],
+): Promise<PalavraColetada> {
+  return call<PalavraColetada>("atualizar_palavra", { id, nota, sinonimos, antonimos });
+}
+
+export function definirMarcacaoDaPalavra(id: string, ativa: boolean): Promise<PalavraColetada> {
+  return call<PalavraColetada>("definir_marcacao_da_palavra", { id, ativa });
 }
 
 export function removerPalavra(id: string): Promise<void> {

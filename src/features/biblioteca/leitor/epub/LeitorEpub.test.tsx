@@ -1,7 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { aplicarMarcacao } from "../marcacao-de-vocabulario";
 import type { NavegacaoDoLeitor, SelecaoDeTexto } from "../tipos";
+
+// O jsdom não tem `CSS.highlights` (a marcação de verdade seria no-op aqui, e
+// `marcacao-de-vocabulario.test.ts` já cobre o que ela faz); o que este
+// arquivo prova é a FIAÇÃO — em qual documento e com qual lista ela é chamada.
+vi.mock("../marcacao-de-vocabulario", () => ({ aplicarMarcacao: vi.fn() }));
+const aplicarMarcacaoMock = vi.mocked(aplicarMarcacao);
 
 /**
  * `epubjs` de verdade não roda bem no jsdom (XHR real buscando um arquivo,
@@ -44,6 +51,9 @@ function criarRenditionFake({ aoChamarDisplay, percentualAtual }: RenditionFakeO
   let chamadasDeDisplay = 0;
   const registerMock = vi.fn();
   const rendition = {
+    // Uma LISTA por padrão, como o `lib/rendition.js` instalado devolve; o `.d.ts`
+    // diz um `Contents` só, e o componente aceita as duas formas — daí o `unknown`.
+    getContents: vi.fn((): unknown => []),
     on: emissor.on,
     off: emissor.off,
     emit: emissor.emit,
@@ -115,6 +125,7 @@ function renderizarLeitor(
     onVirarPagina: (info: { locator: string; fraction: number }) => void;
     onSelecaoDeTexto: (selecao: SelecaoDeTexto | null) => void;
     onErro: (mensagem: string) => void;
+    termosMarcados: readonly string[];
   }> = {},
 ) {
   const ref = createRef<NavegacaoDoLeitor>();
@@ -125,13 +136,15 @@ function renderizarLeitor(
     onVirarPagina: overrides.onVirarPagina ?? vi.fn(),
     onSelecaoDeTexto: overrides.onSelecaoDeTexto ?? vi.fn(),
     onErro: overrides.onErro ?? vi.fn(),
+    termosMarcados: overrides.termosMarcados ?? [],
   };
-  render(<LeitorEpub ref={ref} {...props} />);
-  return { ref, ...props };
+  const { rerender } = render(<LeitorEpub ref={ref} {...props} />);
+  return { ref, ...props, rerender };
 }
 
 beforeEach(() => {
   EpubFactoryMock.mockReset();
+  aplicarMarcacaoMock.mockReset();
   // Sucesso por padrão — os poucos testes que exercitam a falha do `fetch`
   // chamam `vi.stubGlobal("fetch", ...)` de novo com o próprio mock.
   mockarFetchComSucesso();
@@ -466,6 +479,86 @@ describe("limpar seleção", () => {
   });
 });
 
+describe("marcação do vocabulário no livro", () => {
+  function criarContentsComCorpo() {
+    const corpo = document.createElement("div");
+    const contents = { window: { getSelection: () => null }, document: { addEventListener: vi.fn(), body: corpo } };
+    return { corpo, contents };
+  }
+
+  it("cada seção que o epub.js desenha nasce marcada com a lista de agora; seção sem <body> não derruba o hook", async () => {
+    const rendition = criarRenditionFake();
+    EpubFactoryMock.mockReturnValue(criarBookFake({ rendition }));
+
+    renderizarLeitor({ termosMarcados: ["voraz"] });
+    await waitFor(() => expect(rendition.hooks.content.register).toHaveBeenCalled());
+
+    const registrarHook = rendition.hooks.content.register.mock.calls[0][0] as (c: unknown) => void; // `as`: `mock.calls` é `unknown`, e o único registrador neste teste é o componente sob teste
+    const { corpo, contents } = criarContentsComCorpo();
+    act(() => registrarHook(contents));
+    expect(aplicarMarcacaoMock).toHaveBeenCalledWith(corpo, ["voraz"]);
+
+    const semCorpo = { window: { getSelection: () => null }, document: { addEventListener: vi.fn() } };
+    expect(() => act(() => registrarHook(semCorpo))).not.toThrow();
+    expect(aplicarMarcacaoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("seção desenhada DEPOIS de a lista mudar nasce com a lista nova, não com a da montagem", async () => {
+    const rendition = criarRenditionFake();
+    EpubFactoryMock.mockReturnValue(criarBookFake({ rendition }));
+
+    const { rerender, ref, ...props } = renderizarLeitor({ termosMarcados: ["voraz"] });
+    await waitFor(() => expect(rendition.hooks.content.register).toHaveBeenCalled());
+    rerender(<LeitorEpub ref={ref} {...props} termosMarcados={["ao léu"]} />);
+
+    const registrarHook = rendition.hooks.content.register.mock.calls[0][0] as (c: unknown) => void; // `as`: `mock.calls` é `unknown`, e o único registrador neste teste é o componente sob teste
+    const { corpo, contents } = criarContentsComCorpo();
+    act(() => registrarHook(contents));
+
+    expect(aplicarMarcacaoMock).toHaveBeenCalledWith(corpo, ["ao léu"]);
+    expect(aplicarMarcacaoMock).not.toHaveBeenCalledWith(corpo, ["voraz"]);
+  });
+
+  it("mudar a lista remarca o que já está desenhado, sem esperar a próxima seção", async () => {
+    const rendition = criarRenditionFake();
+    const { corpo, contents } = criarContentsComCorpo();
+    rendition.getContents.mockReturnValue([contents]);
+    EpubFactoryMock.mockReturnValue(criarBookFake({ rendition }));
+    const props = {
+      fonte: "asset://localhost/livro.epub",
+      locatorInicial: null,
+      hasTextLayer: null,
+      onVirarPagina: vi.fn(),
+      onSelecaoDeTexto: vi.fn(),
+      onErro: vi.fn(),
+    };
+
+    const { rerender } = render(<LeitorEpub {...props} termosMarcados={["voraz"]} />);
+    await waitFor(() => expect(rendition.display).toHaveBeenCalled());
+    aplicarMarcacaoMock.mockClear();
+
+    rerender(<LeitorEpub {...props} termosMarcados={[]} />);
+
+    expect(aplicarMarcacaoMock).toHaveBeenCalledWith(corpo, []);
+  });
+
+  it("getContents devolvendo um Contents só (a forma que o .d.ts declara), sem lista, também remarca", async () => {
+    const rendition = criarRenditionFake();
+    const { corpo, contents } = criarContentsComCorpo();
+    rendition.getContents.mockReturnValue(contents);
+    EpubFactoryMock.mockReturnValue(criarBookFake({ rendition }));
+
+    const { rerender, ref, ...props } = renderizarLeitor({ termosMarcados: ["voraz"] });
+    await waitFor(() => expect(rendition.display).toHaveBeenCalled());
+    aplicarMarcacaoMock.mockClear();
+
+    rerender(<LeitorEpub ref={ref} {...props} termosMarcados={["ao léu"]} />);
+
+    expect(aplicarMarcacaoMock).toHaveBeenCalledTimes(1);
+    expect(aplicarMarcacaoMock).toHaveBeenCalledWith(corpo, ["ao léu"]);
+  });
+});
+
 describe("desmontar", () => {
   it("destrói a rendition e o book ao desmontar", async () => {
     const rendition = criarRenditionFake();
@@ -480,6 +573,7 @@ describe("desmontar", () => {
         onVirarPagina={vi.fn()}
         onSelecaoDeTexto={vi.fn()}
         onErro={vi.fn()}
+        termosMarcados={[]}
       />,
     );
     await waitFor(() => expect(rendition.display).toHaveBeenCalled());

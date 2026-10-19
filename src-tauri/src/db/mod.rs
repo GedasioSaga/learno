@@ -96,4 +96,4 @@ pub use trilha::{
     avaliar_desbloqueio, ConfiguracaoTrilha, Decisao, Desbloqueio, Etapa, Flecha, ImpactoDaTroca, MaterialDaEtapa,
     NivelTopologico, ProgressoDaEtapa, Raia, SituacaoNoCaminho, Trilha, TrilhaRepository, TrilhaResumo,
 };
-pub use vocabulario::{PalavraColetada, VocabularioRepository};
+pub use vocabulario::{NovaPalavra, PalavraColetada, VocabularioRepository};

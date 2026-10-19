@@ -1,0 +1,3 @@
+# Índice dos diagramas
+
+- [vocabulario-marcacao](vocabulario-marcacao.html) — fluxo da palavra colhida no painel de vocabulário até o sublinhado no livro: tabela, repositório, comandos IPC, casca do leitor e leitores de EPUB e PDF — fontes: src-tauri/migrations/0045_vocabulario_sinonimos_antonimos_marcacao.sql, src-tauri/src/db/vocabulario.rs, src-tauri/src/ipc/vocabulario_commands.rs, src/lib/ipc.ts, src/features/biblioteca/leitor/LeitorDeLivro.tsx, src/features/biblioteca/leitor/PainelDeVocabulario.tsx, src/features/biblioteca/leitor/marcacao-de-vocabulario.ts, src/features/biblioteca/leitor/epub/LeitorEpub.tsx, src/features/biblioteca/leitor/pdf/LeitorPdf.tsx

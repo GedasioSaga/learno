@@ -96,6 +96,7 @@ pub use prazos_commands::{atualizar_prazo, criar_prazo, listar_prazos, obter_pra
 pub use resumo_capitulo_commands::{listar_resumos_do_livro, remover_resumo_de_capitulo, salvar_resumo_de_capitulo};
 pub use study_commands::{answer_card, deck_counts, deck_forecast, deck_maturity, next_card};
 pub use vocabulario_commands::{
-    atualizar_nota_da_palavra, coletar_palavra, listar_palavras, listar_palavras_do_livro, remover_palavra,
+    atualizar_palavra, coletar_palavra, definir_marcacao_da_palavra, listar_palavras, listar_palavras_do_livro,
+    remover_palavra,
 };
 pub use state::AppState;

@@ -1,14 +1,16 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CriarCartaoDeOrigem, type OrigemDoCartao } from "../../cartoes/CriarCartaoDeOrigem";
 import {
   AppError,
   abrirLivro,
   criarAnotacao,
   listarAnotacoes,
+  listarPalavrasDoLivro,
   registrarProgresso,
   type Anotacao,
   type LivroAberto,
+  type PalavraColetada,
 } from "../../../lib/ipc";
 import { useBibliotecaStore } from "../store";
 import { LeitorEpub } from "./epub/LeitorEpub";
@@ -66,6 +68,14 @@ export function LeitorDeLivro({ livroId, onVoltar }: LeitorDeLivroProps) {
   const [anotacoes, setAnotacoes] = useState<Anotacao[]>([]);
   const [anotacoesCarregando, setAnotacoesCarregando] = useState(true);
   const [anotacoesErro, setAnotacoesErro] = useState<string | null>(null);
+
+  // A lista do vocabulário mora aqui, não no `PainelDeVocabulario`, pelo mesmo
+  // motivo das anotações: dois consumidores. O painel mostra e edita; o leitor
+  // de formato sublinha no livro as que têm o marcador ligado — e o sublinhado
+  // não pode depender de o painel estar montado nem de qual modo ele mostra.
+  const [palavras, setPalavras] = useState<PalavraColetada[]>([]);
+  const [palavrasCarregando, setPalavrasCarregando] = useState(true);
+  const [palavrasErro, setPalavrasErro] = useState<string | null>(null);
 
   const [selecaoPendente, setSelecaoPendente] = useState<SelecaoDeTexto | null>(null);
   const [notaRascunho, setNotaRascunho] = useState("");
@@ -129,6 +139,35 @@ export function LeitorDeLivro({ livroId, onVoltar }: LeitorDeLivroProps) {
       cancelado = true;
     };
   }, [livroId]);
+
+  useEffect(() => {
+    let cancelado = false;
+    setPalavrasCarregando(true);
+    setPalavrasErro(null);
+
+    listarPalavrasDoLivro(livroId)
+      .then((lista) => {
+        if (!cancelado) setPalavras(lista);
+      })
+      .catch((error: unknown) => {
+        if (!cancelado) setPalavrasErro(messageFor(error, "Não foi possível carregar as palavras colhidas."));
+      })
+      .finally(() => {
+        if (!cancelado) setPalavrasCarregando(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [livroId]);
+
+  // `useMemo` pela IDENTIDADE, não por custo: os leitores de formato remarcam
+  // o livro inteiro quando esta referência muda, e uma lista nova a cada
+  // render (virar página re-renderiza a casca) remarcaria a cada virada.
+  const termosMarcados = useMemo(
+    () => palavras.filter((palavra) => palavra.highlightInBook).map((palavra) => palavra.term),
+    [palavras],
+  );
 
   // Setas e PageUp/PageDown viram página — sempre que o leitor está aberto e
   // o foco não está num campo de texto (o número de página, a nota da
@@ -291,6 +330,7 @@ export function LeitorDeLivro({ livroId, onVoltar }: LeitorDeLivroProps) {
             onVirarPagina={(nova) => void aoVirarPagina(nova)}
             onSelecaoDeTexto={aoSelecionarTexto}
             onErro={setErroFormato}
+            termosMarcados={termosMarcados}
           />
         );
       case "epub":
@@ -303,6 +343,7 @@ export function LeitorDeLivro({ livroId, onVoltar }: LeitorDeLivroProps) {
             onVirarPagina={(nova) => void aoVirarPagina(nova)}
             onSelecaoDeTexto={aoSelecionarTexto}
             onErro={setErroFormato}
+            termosMarcados={termosMarcados}
           />
         );
     }
@@ -447,7 +488,14 @@ export function LeitorDeLivro({ livroId, onVoltar }: LeitorDeLivroProps) {
                 <PainelDePaginas livroId={livroId} />
               </div>
               <div className="border-t border-hairline">
-                <PainelDeVocabulario livroId={livroId} selecao={selecaoParaVocabulario} />
+                <PainelDeVocabulario
+                  livroId={livroId}
+                  selecao={selecaoParaVocabulario}
+                  palavras={palavras}
+                  carregando={palavrasCarregando}
+                  erro={palavrasErro}
+                  onMudarPalavras={setPalavras}
+                />
               </div>
             </div>
           </aside>

@@ -129,6 +129,7 @@ A ordem põe primeiro o que destrava o resto.
 - [ ] **Mapa mental: layouts árvore, organograma e espinha de peixe; forma e ícone no nó** — as colunas `shape`/`icon` existem sem interface (M) — `src/features/mapa-mental/CartaoNode.tsx:33`
 - [ ] **Biblioteca: metadados automáticos (ISBN/DOI) e citação ABNT/BibTeX** — trabalho acadêmico exige referência (M) — `src-tauri/src/db/biblioteca.rs:413`
 - [ ] **Biblioteca: tema de leitura (sépia/escuro) e sumário no PDF** — para leitura longa à noite e PDF de 400 páginas (P) — `src/features/biblioteca/leitor/epub/LeitorEpub.tsx:296`
+- [ ] **Biblioteca: balão ao clicar na palavra marcada** — hoje o sublinhado ondulado só marca a palavra no texto. Clicar nela deveria abrir um balão com o significado, os sinônimos e os antônimos. Adiado pelo usuário em 18/10/2026 (M) — `src/features/biblioteca/leitor/marcacao-de-vocabulario.ts:215`
 - [ ] **Trilha: domínio derivado da retenção do baralho ligado** — fecha a tese do produto: a trilha avança pelo que você sabe de fato (M) — `src-tauri/src/db/trilha.rs:48`
 - [ ] **Prazos: recorrência** — para entregas semanais e revisões fixas (P) — `src-tauri/src/db/prazos.rs:46`
 - [ ] **Prazos: prioridade e subtarefas** — para quebrar um TCC em etapas (P) — `src-tauri/src/db/prazos.rs`
@@ -167,6 +168,7 @@ A ordem põe primeiro o que destrava o resto.
 - [ ] **Botão "Abrir" do bloco de arquivo com o plugin `opener`** — hoje ele usa âncora crua, divergente do bookmark (P) — `docs/ACHADOS-FASE-2.md:137`
 - [ ] **Avisos de `act()` em `TrashDialog`, `Breadcrumb` e `VersionHistoryDialog`** — falso-verde esperando para acontecer (verificar) (P) — `docs/ACHADOS-FASE-1.md:70`
 - [ ] **Resíduos visuais da Fase 1** — ícone genérico, barra "Exportar como Markdown" com peso de ação principal, "Sem título" fantasma no breadcrumb, paleta e Configurações cobrindo a sidebar. Podem ter sido resolvidos na repaginada de 05/09 (verificar) (P) — `docs/ACHADOS-FASE-1.md:44`
+- [ ] **Biblioteca: palavra partida ou hifenizada não é marcada** — a busca roda nó de texto por nó de texto, então uma palavra com um `<em>` no meio, ou hifenizada na quebra de linha do PDF ("vo-" e "raz"), fica sem sublinhado. É limitação aceita (M) — `src/features/biblioteca/leitor/marcacao-de-vocabulario.ts:13`
 
 ### Features por seção
 

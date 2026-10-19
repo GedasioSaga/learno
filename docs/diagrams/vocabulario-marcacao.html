@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vocabulário e marcação no livro</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #f3ebdb;
+      --color-ink:    #1e150c;
+      --color-muted:  #5c4a35;
+      --color-accent: #b5771c;
+      --color-rule:   #d9cbae;
+      --color-card:   #fcf8ef;
+      --font-sans:  'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono:  'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 1rem;
+    }
+    .wrap { width: 100%; max-width: 1040px; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 { font-family: var(--font-serif); font-size: 1.75rem; font-weight: 400; line-height: 1.15; }
+    .sub { color: var(--color-muted); font-size: 0.875rem; margin-top: 0.5rem; max-width: 66ch; }
+    .diagrama { overflow-x: auto; }
+    svg { display: block; width: 100%; height: auto; min-width: 720px; margin-top: 1.75rem; }
+    code, .mono { font-family: var(--font-mono); font-size: 0.75rem; }
+    .cartao {
+      background: var(--color-card); border: 1px solid rgba(30, 21, 12, 0.12);
+      border-radius: 6px; padding: 1.25rem; margin-top: 1.5rem;
+    }
+    .cartao h2 {
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--color-muted); font-weight: 500; margin-bottom: 0.75rem;
+    }
+    .tabela { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
+    th {
+      text-align: left; font-weight: 500; color: var(--color-muted); font-size: 0.75rem;
+      padding: 0 1rem 0.5rem 0; border-bottom: 1px solid var(--color-rule); white-space: nowrap;
+    }
+    td { padding: 0.5rem 1rem 0.5rem 0; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
+    tr:last-child td { border-bottom: 0; padding-bottom: 0; }
+    td:first-child code, td:nth-child(2) code, td:nth-child(3) code { white-space: nowrap; }
+    ul { list-style: none; display: grid; gap: 0.625rem; font-size: 0.8125rem; line-height: 1.5; max-width: 84ch; }
+    li { padding-left: 1rem; position: relative; }
+    li::before {
+      content: ""; position: absolute; left: 0; top: 0.55em; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--color-muted);
+    }
+    li.limite::before { background: var(--color-accent); }
+    footer {
+      margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid var(--color-rule);
+      font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--color-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="eyebrow">Learno · Biblioteca · Leitor</p>
+    <h1>Da palavra colhida ao sublinhado no livro</h1>
+    <p class="sub">
+      Colher uma palavra no painel grava uma linha em <code>library_vocabulary</code>. A casca do
+      leitor guarda a lista, separa as palavras com o marcador ligado e entrega só os termos aos
+      leitores de EPUB e PDF. Eles sublinham o texto sem alterar os nós do texto do livro.
+    </p>
+
+    <div class="diagrama">
+    <svg viewBox="0 0 1000 588" role="img" aria-labelledby="vocmarc-title vocmarc-desc"
+         xmlns="http://www.w3.org/2000/svg">
+      <title id="vocmarc-title">Da palavra colhida ao sublinhado no livro</title>
+      <desc id="vocmarc-desc">O painel de vocabulário grava e edita palavras pelas chamadas de ipc.ts, que invocam os comandos IPC do Rust, que passam pelo repositório até a tabela library_vocabulary; a casca do leitor carrega a lista pelo mesmo caminho, mantém a lista junto com o painel, filtra as palavras com o marcador ligado e entrega os termos aos leitores de EPUB e PDF, que chamam o módulo de marcação para sublinhar o texto.</desc>
+
+      <defs>
+        <marker id="vocmarc-seta" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse">
+          <polygon points="0 0, 8 3, 0 6" fill="#5c4a35"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f3ebdb"/>
+
+      <!-- zonas primeiro; o rótulo de cada uma fica numa máscara sobre a borda -->
+      <rect x="24" y="48" width="952" height="280" rx="8" fill="rgba(30,21,12,0.025)"
+            stroke="rgba(30,21,12,0.12)" stroke-width="0.8"/>
+      <rect x="40" y="52" width="128" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="104" y="61" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.14em">TELA · REACT · SRC/</text>
+
+      <rect x="24" y="368" width="952" height="152" rx="8" fill="rgba(30,21,12,0.025)"
+            stroke="rgba(30,21,12,0.12)" stroke-width="0.8"/>
+      <rect x="40" y="372" width="116" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="98" y="381" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.14em">RUST · SRC-TAURI/</text>
+
+      <!-- conectores antes das caixas, para ficarem atrás delas -->
+      <!-- painel e casca (as duas pontas) -->
+      <line x1="208" y1="124" x2="272" y2="124" stroke="#5c4a35" stroke-width="1"
+            marker-start="url(#vocmarc-seta)" marker-end="url(#vocmarc-seta)"/>
+      <!-- painel e casca chamam ipc.ts -->
+      <line x1="128" y1="168" x2="128" y2="224" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <line x1="352" y1="168" x2="352" y2="224" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <!-- ipc.ts invoca o comando, atravessando a fronteira TS / Rust -->
+      <line x1="188" y1="296" x2="188" y2="400" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <!-- cadeia Rust -->
+      <line x1="328" y1="448" x2="400" y2="448" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <line x1="624" y1="448" x2="696" y2="448" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <!-- casca entrega os termos aos dois leitores -->
+      <line x1="432" y1="124" x2="544" y2="124" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <path d="M 432 148 H 480 Q 488 148 488 156 V 252 Q 488 260 496 260 H 544"
+            fill="none" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <!-- leitores chamam o módulo de marcação -->
+      <line x1="696" y1="124" x2="784" y2="124" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <line x1="696" y1="260" x2="784" y2="260" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+
+      <!-- rótulos de aresta, com folga de 8px do traço -->
+      <rect x="212" y="104" width="56" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="240" y="113" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">PALAVRAS</text>
+
+      <rect x="136" y="192" width="40" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="156" y="201" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">GRAVA</text>
+
+      <rect x="360" y="192" width="40" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="380" y="201" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">LISTA</text>
+
+      <rect x="196" y="340" width="44" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="218" y="349" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">INVOKE</text>
+
+      <rect x="340" y="428" width="48" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="364" y="437" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">DELEGA</text>
+
+      <rect x="648" y="428" width="24" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="660" y="437" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">SQL</text>
+
+      <rect x="464" y="104" width="48" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="488" y="113" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">TERMOS</text>
+
+      <rect x="496" y="196" width="44" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="518" y="205" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">TERMOS</text>
+
+      <rect x="712" y="104" width="56" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="740" y="113" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">SUBLINHA</text>
+
+      <rect x="712" y="240" width="56" height="12" rx="2" fill="#f3ebdb"/>
+      <text x="740" y="249" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.06em">SUBLINHA</text>
+
+      <!-- TELA: painel -->
+      <rect x="48" y="80" width="160" height="88" rx="6" fill="#f3ebdb"/>
+      <rect x="48" y="80" width="160" height="88" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="128" y="104" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Painel de vocabulário</text>
+      <text x="128" y="120" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">PainelDeVocabulario.tsx</text>
+      <text x="128" y="136" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">card expansível</text>
+      <text x="128" y="152" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">marcador por palavra</text>
+
+      <!-- TELA: casca, focal (decide quais palavras viram sublinhado) -->
+      <rect x="272" y="80" width="160" height="88" rx="6" fill="#f3ebdb"/>
+      <rect x="272" y="80" width="160" height="88" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="352" y="104" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Casca do leitor</text>
+      <text x="352" y="120" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">LeitorDeLivro.tsx</text>
+      <text x="352" y="136" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">dona da lista de palavras</text>
+      <text x="352" y="152" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">filtra → termosMarcados</text>
+
+      <!-- TELA: leitor EPUB -->
+      <rect x="544" y="80" width="152" height="88" rx="6" fill="#f3ebdb"/>
+      <rect x="544" y="80" width="152" height="88" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="620" y="104" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Leitor de EPUB</text>
+      <text x="620" y="120" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">epub/LeitorEpub.tsx</text>
+      <text x="620" y="136" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">marca cada seção nova</text>
+      <text x="620" y="152" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">remarca se a lista muda</text>
+
+      <!-- TELA: leitor PDF -->
+      <rect x="544" y="216" width="152" height="88" rx="6" fill="#f3ebdb"/>
+      <rect x="544" y="216" width="152" height="88" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="620" y="240" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Leitor de PDF</text>
+      <text x="620" y="256" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">pdf/LeitorPdf.tsx</text>
+      <text x="620" y="272" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">marca após cada página</text>
+      <text x="620" y="288" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">remarca se a lista muda</text>
+
+      <!-- TELA: ipc.ts, a única porta para o Rust -->
+      <rect x="48" y="224" width="384" height="72" rx="6" fill="#f3ebdb"/>
+      <rect x="48" y="224" width="384" height="72" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="240" y="248" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Chamadas ao Rust</text>
+      <text x="240" y="264" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">src/lib/ipc.ts</text>
+      <text x="240" y="280" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">um wrapper tipado por comando</text>
+
+      <!-- TELA: módulo de marcação, focal (desenha o sublinhado) -->
+      <rect x="784" y="108" width="168" height="168" rx="6" fill="#f3ebdb"/>
+      <rect x="784" y="108" width="168" height="168" rx="6" fill="#f7e9cf" stroke="#b5771c" stroke-width="1"/>
+      <text x="868" y="160" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Marcação no texto</text>
+      <text x="868" y="176" fill="#8a6a2a" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">marcacao-de-vocabulario.ts</text>
+      <text x="868" y="200" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">encontrarOcorrencias()</text>
+      <text x="868" y="216" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">aplicarMarcacao()</text>
+      <text x="868" y="240" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">via CSS Custom Highlight API</text>
+
+      <!-- RUST: comandos -->
+      <rect x="48" y="400" width="280" height="96" rx="6" fill="#f3ebdb"/>
+      <rect x="48" y="400" width="280" height="96" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="188" y="428" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Comandos IPC</text>
+      <text x="188" y="444" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">ipc/vocabulario_commands.rs</text>
+      <text x="188" y="460" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">coletar_palavra · listar_palavras_do_livro</text>
+      <text x="188" y="476" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">atualizar_palavra · definir_marcacao_da_palavra</text>
+
+      <!-- RUST: repositório -->
+      <rect x="400" y="400" width="224" height="96" rx="6" fill="#f3ebdb"/>
+      <rect x="400" y="400" width="224" height="96" rx="6" fill="#fcf8ef" stroke="#1e150c" stroke-width="1"/>
+      <text x="512" y="428" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Repositório</text>
+      <text x="512" y="444" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">db/vocabulario.rs</text>
+      <text x="512" y="460" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">único escritor da tabela</text>
+      <text x="512" y="476" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif"
+            text-anchor="middle">normaliza sinônimos e antônimos</text>
+
+      <!-- RUST: tabela (estado durável) -->
+      <rect x="696" y="400" width="224" height="96" rx="6" fill="#f3ebdb"/>
+      <rect x="696" y="400" width="224" height="96" rx="6" fill="#e7dcc3" stroke="#5c4a35" stroke-width="1"/>
+      <text x="808" y="428" fill="#1e150c" font-size="12" font-weight="600"
+            font-family="'Geist', sans-serif" text-anchor="middle">Tabela do vocabulário</text>
+      <text x="808" y="444" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">library_vocabulary</text>
+      <text x="808" y="460" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">0045: synonyms · antonyms</text>
+      <text x="808" y="476" fill="#5c4a35" font-size="9" font-family="'Geist Mono', monospace"
+            text-anchor="middle">0045: highlight_in_book</text>
+
+      <!-- legenda -->
+      <line x1="32" y1="548" x2="968" y2="548" stroke="#d9cbae" stroke-width="0.8"/>
+      <text x="32" y="566" fill="#5c4a35" font-size="8" font-family="'Geist Mono', monospace"
+            letter-spacing="0.14em">LEGENDA</text>
+      <rect x="128" y="556" width="10" height="10" rx="2" fill="#f7e9cf" stroke="#b5771c"/>
+      <text x="146" y="565" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">decide e desenha a marcação</text>
+      <rect x="320" y="556" width="10" height="10" rx="2" fill="#fcf8ef" stroke="#1e150c"/>
+      <text x="338" y="565" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">passo do fluxo</text>
+      <rect x="448" y="556" width="10" height="10" rx="2" fill="#e7dcc3" stroke="#5c4a35"/>
+      <text x="466" y="565" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">estado durável</text>
+      <line x1="584" y1="561" x2="608" y2="561" stroke="#5c4a35" stroke-width="1" marker-end="url(#vocmarc-seta)"/>
+      <text x="616" y="565" fill="#5c4a35" font-size="9" font-family="'Geist', sans-serif">de quem chama para quem atende; a resposta volta pelo mesmo caminho</text>
+    </svg>
+    </div>
+
+    <section class="cartao">
+      <h2>Nomes ao longo do caminho</h2>
+      <div class="tabela">
+        <table>
+          <thead>
+            <tr>
+              <th>Chamada em <code>ipc.ts</code></th>
+              <th>Comando Rust</th>
+              <th>Método do repositório</th>
+              <th>Quem chama</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>coletarPalavra</code></td>
+              <td><code>coletar_palavra</code></td>
+              <td><code>coletar</code></td>
+              <td>Painel, no formulário de colher</td>
+            </tr>
+            <tr>
+              <td><code>listarPalavrasDoLivro</code></td>
+              <td><code>listar_palavras_do_livro</code></td>
+              <td><code>listar_do_livro</code></td>
+              <td>Casca, ao abrir o livro</td>
+            </tr>
+            <tr>
+              <td><code>atualizarPalavra</code></td>
+              <td><code>atualizar_palavra</code></td>
+              <td><code>atualizar</code></td>
+              <td>Painel, ao salvar pelo lápis</td>
+            </tr>
+            <tr>
+              <td><code>definirMarcacaoDaPalavra</code></td>
+              <td><code>definir_marcacao_da_palavra</code></td>
+              <td><code>definir_marcacao</code></td>
+              <td>Painel, no botão marcador</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cartao">
+      <h2>Pegadinhas</h2>
+      <ul>
+        <li>
+          A lista mora na casca, não no painel. A barra lateral é desmontada quando escondida, e o
+          sublinhado no livro não pode sumir junto. O painel recebe <code>palavras</code> e avisa
+          mudanças por <code>onMudarPalavras</code>; por isso o sublinhado acompanha o marcador sem
+          recarregar.
+        </li>
+        <li>
+          <code>termosMarcados</code> só troca de referência quando a lista de palavras muda
+          (<code>useMemo</code> na casca). Os leitores tratam a troca como ordem de remarcar. Uma
+          lista nova a cada render remarcaria o livro inteiro a cada virada de página.
+        </li>
+        <li>
+          O marcador é otimista: botão e sublinhado mudam no clique, antes do IPC responder. Se o
+          IPC falhar, volta só o marcador, para não desfazer uma edição que o usuário salvou no meio
+          do caminho.
+        </li>
+        <li>
+          A marcação usa a CSS Custom Highlight API: nenhum <code>&lt;mark&gt;</code> nem
+          <code>&lt;span&gt;</code> entra no texto do livro (só um <code>&lt;style&gt;</code> por
+          documento). Por isso os CFIs de seleção e anotação do epub.js e a camada de texto do PDF
+          seguem intactos. Sem a API (jsdom nos testes, WebView antiga),
+          <code>aplicarMarcacao</code> não faz nada.
+        </li>
+        <li>
+          A cor do sublinhado é explícita (<code>#b5771c</code>), nunca <code>currentColor</code>:
+          o texto da camada do PDF é transparente, e um sublinhado que herdasse a cor sumiria junto.
+        </li>
+        <li>
+          A busca é por palavra inteira, ignorando caixa e acento. <code>voraz</code> marca
+          “Voraz,” mas não “vorazmente”. Palavra com vários termos (“ao léu”) casa com espaço ou
+          quebra de linha entre eles.
+        </li>
+        <li>
+          A migration 0045 deixa <code>highlight_in_book</code> em 1 por padrão. Toda palavra que já
+          estava colhida antes dela passa a ser sublinhada quando o livro abre.
+        </li>
+        <li class="limite">
+          Limite aceito: palavra partida entre dois nós de texto (um <code>&lt;em&gt;</code> no meio
+          dela, um trecho do PDF por pedaço) ou hifenizada na quebra de linha do PDF (“vo-” e “raz”)
+          não é marcada. Está em <code>docs/BACKLOG.md</code>.
+        </li>
+      </ul>
+    </section>
+
+    <footer>Learno · paleta do tema Papel · docs/diagrams/</footer>
+  </div>
+</body>
+</html>

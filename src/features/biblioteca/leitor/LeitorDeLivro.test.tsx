@@ -8,6 +8,7 @@ import {
   abrirLivro,
   coletarPalavra,
   criarAnotacao,
+  definirMarcacaoDaPalavra,
   listarAnotacoes,
   listarPalavrasDoLivro,
   listarPaginasDoLivro,
@@ -45,7 +46,8 @@ vi.mock("../../../lib/ipc", async (importOriginal) => {
     removerPaginaDeLivro: vi.fn(),
     listarPalavrasDoLivro: vi.fn(),
     coletarPalavra: vi.fn(),
-    atualizarNotaDaPalavra: vi.fn(),
+    atualizarPalavra: vi.fn(),
+    definirMarcacaoDaPalavra: vi.fn(),
     removerPalavra: vi.fn(),
   };
 });
@@ -73,6 +75,7 @@ function LeitorPdfStub({
   onVirarPagina,
   onSelecaoDeTexto,
   onErro,
+  termosMarcados,
 }: PropsDoLeitorDeFormato) {
   useImperativeHandle(
     ref,
@@ -92,6 +95,7 @@ function LeitorPdfStub({
   return (
     <div data-testid="leitor-pdf-stub">
       <span data-testid="fonte">{fonte}</span>
+      <span data-testid="termos-marcados">{termosMarcados.join("|")}</span>
       <span data-testid="locator-inicial">{locatorInicial ?? "nenhum"}</span>
       <span data-testid="has-text-layer">{String(hasTextLayer)}</span>
       <button type="button" onClick={() => onErro("o formato não conseguiu abrir a página")}>
@@ -126,6 +130,7 @@ function LeitorEpubStub({
   onVirarPagina,
   onSelecaoDeTexto,
   onErro,
+  termosMarcados,
 }: PropsDoLeitorDeFormato) {
   useImperativeHandle(
     ref,
@@ -142,6 +147,7 @@ function LeitorEpubStub({
   return (
     <div data-testid="leitor-epub-stub">
       <span data-testid="fonte">{fonte}</span>
+      <span data-testid="termos-marcados">{termosMarcados.join("|")}</span>
       <span data-testid="locator-inicial">{locatorInicial ?? "nenhum"}</span>
       <span data-testid="has-text-layer">{String(hasTextLayer)}</span>
       <button type="button" onClick={() => onErro("o formato não conseguiu abrir o epub")}>
@@ -171,6 +177,7 @@ const criarNotaComOrigemMock = vi.mocked(criarNotaComOrigem);
 const listarPaginasDoLivroMock = vi.mocked(listarPaginasDoLivro);
 const listarPalavrasDoLivroMock = vi.mocked(listarPalavrasDoLivro);
 const coletarPalavraMock = vi.mocked(coletarPalavra);
+const definirMarcacaoDaPalavraMock = vi.mocked(definirMarcacaoDaPalavra);
 
 /** Mesmo baralho/tipo de nota mínimo usado por `CriarCartaoDeOrigem.test.tsx` — o formulário exige os dois para não cair no aviso "crie um baralho". */
 function deckFixture(overrides: Partial<DeckRow> & Pick<DeckRow, "id">): DeckRow {
@@ -255,6 +262,9 @@ function palavraFixture(overrides: Partial<PalavraColetada> = {}): PalavraColeta
     term: "trecho selecionado",
     contextSnippet: "trecho selecionado",
     note: null,
+    synonyms: [],
+    antonyms: [],
+    highlightInBook: true,
     locator: "3",
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
@@ -782,7 +792,7 @@ describe("seleção de texto chega em PainelDeVocabulario", () => {
     fireEvent.click(botaoColher);
 
     await waitFor(() =>
-      expect(coletarPalavraMock).toHaveBeenCalledWith("livro-1", "trecho selecionado", "trecho selecionado", null, "3"),
+      expect(coletarPalavraMock).toHaveBeenCalledWith("livro-1", "trecho selecionado", "trecho selecionado", null, [], [], "3"),
     );
   });
 
@@ -793,7 +803,92 @@ describe("seleção de texto chega em PainelDeVocabulario", () => {
     render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
     await screen.findByTestId("leitor-pdf-stub");
 
-    expect(await screen.findByText("palavra antiga")).toBeInTheDocument();
+    // Dentro da lista: o stub do leitor também escreve "palavra antiga" (é um termo marcado).
+    const lista = await screen.findByRole("list", { name: "Palavras colhidas" });
+    expect(within(lista).getByText("palavra antiga")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Colher palavra" })).not.toBeInTheDocument();
+  });
+});
+
+// A lista do vocabulário subiu para a casca: o leitor de formato precisa dela
+// para sublinhar as palavras no livro, e isso não pode depender do que o
+// painel está mostrando. Este bloco prova a fiação nos dois sentidos.
+describe("palavras marcadas chegam ao leitor do formato", () => {
+  const PALAVRAS = [
+    palavraFixture({ id: "p-voraz", term: "voraz", highlightInBook: true }),
+    palavraFixture({ id: "p-austera", term: "austera", highlightInBook: false }),
+    palavraFixture({ id: "p-leu", term: "ao léu", highlightInBook: true }),
+  ];
+
+  it("o leitor recebe só os termos com o marcador ligado — PDF e EPUB", async () => {
+    listarPalavrasDoLivroMock.mockResolvedValue(PALAVRAS);
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture());
+
+    const { unmount } = render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-pdf-stub");
+    await waitFor(() => expect(screen.getByTestId("termos-marcados")).toHaveTextContent("voraz|ao léu"));
+    unmount();
+
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture({ livro: livroFixture({ format: "epub" }) }));
+    render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-epub-stub");
+    await waitFor(() => expect(screen.getByTestId("termos-marcados")).toHaveTextContent("voraz|ao léu"));
+  });
+
+  it("com uma seleção ativa o painel troca a lista pelo formulário de colher, e os termos marcados continuam no leitor", async () => {
+    listarPalavrasDoLivroMock.mockResolvedValue(PALAVRAS);
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture());
+
+    render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-pdf-stub");
+    await waitFor(() => expect(screen.getByTestId("termos-marcados")).toHaveTextContent("voraz|ao léu"));
+
+    fireEvent.click(screen.getByText("simular-selecao"));
+
+    expect(await screen.findByRole("button", { name: "Colher palavra" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Palavras colhidas" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("termos-marcados")).toHaveTextContent("voraz|ao léu");
+  });
+
+  it("desligar o marcador no painel tira a palavra do leitor na hora, sem recarregar a lista", async () => {
+    listarPalavrasDoLivroMock.mockResolvedValue(PALAVRAS);
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture());
+    definirMarcacaoDaPalavraMock.mockResolvedValue(palavraFixture({ id: "p-voraz", term: "voraz", highlightInBook: false }));
+
+    render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-pdf-stub");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Marcar voraz no livro" }));
+
+    expect(definirMarcacaoDaPalavraMock).toHaveBeenCalledWith("p-voraz", false);
+    expect(screen.getByTestId("termos-marcados")).toHaveTextContent(/^ao léu$/);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Marcar voraz no livro" })).toHaveAttribute("aria-pressed", "false"));
+    expect(listarPalavrasDoLivroMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("palavra colhida agora nasce marcada e já chega ao leitor", async () => {
+    listarPalavrasDoLivroMock.mockResolvedValue([]);
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture());
+    coletarPalavraMock.mockResolvedValue(palavraFixture({ id: "p-nova", term: "trecho selecionado", highlightInBook: true }));
+
+    render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-pdf-stub");
+    expect(screen.getByTestId("termos-marcados")).toHaveTextContent(/^$/);
+
+    fireEvent.click(screen.getByText("simular-selecao"));
+    fireEvent.click(await screen.findByRole("button", { name: "Colher palavra" }));
+
+    await waitFor(() => expect(screen.getByTestId("termos-marcados")).toHaveTextContent("trecho selecionado"));
+  });
+
+  it("falha ao carregar as palavras: o leitor abre mesmo assim, sem nada marcado, e o painel mostra o erro", async () => {
+    listarPalavrasDoLivroMock.mockRejectedValue(new Error("banco ocupado"));
+    abrirLivroMock.mockResolvedValue(livroAbertoFixture());
+
+    render(<LeitorDeLivro livroId="livro-1" onVoltar={vi.fn()} />);
+    await screen.findByTestId("leitor-pdf-stub");
+
+    expect(await screen.findByText("Não foi possível carregar as palavras colhidas.")).toBeInTheDocument();
+    expect(screen.getByTestId("termos-marcados")).toHaveTextContent(/^$/);
   });
 });

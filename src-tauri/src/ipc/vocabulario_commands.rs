@@ -18,7 +18,7 @@
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::{PalavraColetada, VocabularioRepository};
+use crate::db::{NovaPalavra, PalavraColetada, VocabularioRepository};
 use crate::error::Result;
 use crate::ipc::state::AppState;
 
@@ -28,6 +28,12 @@ fn vocabulario_repository(state: &AppState) -> Result<VocabularioRepository> {
 
 /// `coletar_palavra`. Termo duplicado no mesmo livro (ignorando caixa/acento)
 /// é recusado — ver o comentário de `VocabularioRepository` para o porquê.
+/// `sinonimos`/`antonimos` chegam como lista e são normalizados no
+/// repositório (trim, sem vazio, sem duplicata, tetos).
+// Cada argumento é uma chave do objeto que o `invoke` do TypeScript manda —
+// a lista é o contrato IPC, então não dá para agrupar num struct sem mudar
+// o formato da chamada do outro lado.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn coletar_palavra(
     state: State<'_, AppState>,
@@ -35,20 +41,23 @@ pub async fn coletar_palavra(
     termo: String,
     trecho_de_contexto: Option<String>,
     nota: Option<String>,
+    sinonimos: Vec<String>,
+    antonimos: Vec<String>,
     locator: Option<String>,
 ) -> Result<PalavraColetada> {
-    coletar_palavra_inner(&state, livro_id, &termo, trecho_de_contexto.as_deref(), nota.as_deref(), locator.as_deref()).await
+    let nova = NovaPalavra {
+        term: &termo,
+        context_snippet: trecho_de_contexto.as_deref(),
+        note: nota.as_deref(),
+        synonyms: &sinonimos,
+        antonyms: &antonimos,
+        locator: locator.as_deref(),
+    };
+    coletar_palavra_inner(&state, livro_id, nova).await
 }
 
-async fn coletar_palavra_inner(
-    state: &AppState,
-    livro_id: Uuid,
-    termo: &str,
-    trecho_de_contexto: Option<&str>,
-    nota: Option<&str>,
-    locator: Option<&str>,
-) -> Result<PalavraColetada> {
-    vocabulario_repository(state)?.coletar(livro_id, termo, trecho_de_contexto, nota, locator).await
+async fn coletar_palavra_inner(state: &AppState, livro_id: Uuid, nova: NovaPalavra<'_>) -> Result<PalavraColetada> {
+    vocabulario_repository(state)?.coletar(livro_id, nova).await
 }
 
 /// `listar_palavras_do_livro`.
@@ -72,14 +81,38 @@ async fn listar_palavras_inner(state: &AppState, termo_busca: Option<&str>) -> R
     vocabulario_repository(state)?.listar(termo_busca).await
 }
 
-/// `atualizar_nota_da_palavra`.
+/// `atualizar_palavra` (antes `atualizar_nota_da_palavra`): troca nota,
+/// sinônimos e antônimos de uma vez — a lista que chega é a lista inteira.
 #[tauri::command]
-pub async fn atualizar_nota_da_palavra(state: State<'_, AppState>, id: Uuid, nota: Option<String>) -> Result<PalavraColetada> {
-    atualizar_nota_da_palavra_inner(&state, id, nota.as_deref()).await
+pub async fn atualizar_palavra(
+    state: State<'_, AppState>,
+    id: Uuid,
+    nota: Option<String>,
+    sinonimos: Vec<String>,
+    antonimos: Vec<String>,
+) -> Result<PalavraColetada> {
+    atualizar_palavra_inner(&state, id, nota.as_deref(), &sinonimos, &antonimos).await
 }
 
-async fn atualizar_nota_da_palavra_inner(state: &AppState, id: Uuid, nota: Option<&str>) -> Result<PalavraColetada> {
-    vocabulario_repository(state)?.atualizar_nota(id, nota).await
+async fn atualizar_palavra_inner(
+    state: &AppState,
+    id: Uuid,
+    nota: Option<&str>,
+    sinonimos: &[String],
+    antonimos: &[String],
+) -> Result<PalavraColetada> {
+    vocabulario_repository(state)?.atualizar(id, nota, sinonimos, antonimos).await
+}
+
+/// `definir_marcacao_da_palavra`: liga/desliga a marcação da palavra no
+/// texto do livro. Devolve a palavra atualizada, como `atualizar_palavra`.
+#[tauri::command]
+pub async fn definir_marcacao_da_palavra(state: State<'_, AppState>, id: Uuid, ativa: bool) -> Result<PalavraColetada> {
+    definir_marcacao_da_palavra_inner(&state, id, ativa).await
+}
+
+async fn definir_marcacao_da_palavra_inner(state: &AppState, id: Uuid, ativa: bool) -> Result<PalavraColetada> {
+    vocabulario_repository(state)?.definir_marcacao(id, ativa).await
 }
 
 /// `remover_palavra`.
@@ -101,13 +134,21 @@ mod tests {
     use super::*;
     use crate::error::Error;
 
+    fn so_termo(term: &str) -> NovaPalavra<'_> {
+        NovaPalavra { term, ..NovaPalavra::default() }
+    }
+
+    fn lista(itens: &[&str]) -> Vec<String> {
+        itens.iter().map(|item| (*item).to_string()).collect()
+    }
+
     mod without_a_pool {
         use super::*;
 
         #[tokio::test]
         async fn coletar_palavra_reports_not_connected() {
             let state = AppState::new();
-            let result = coletar_palavra_inner(&state, Uuid::now_v7(), "termo", None, None, None).await;
+            let result = coletar_palavra_inner(&state, Uuid::now_v7(), so_termo("termo")).await;
             assert!(matches!(result, Err(Error::Config(_))));
         }
 
@@ -124,9 +165,15 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn atualizar_nota_da_palavra_reports_not_connected() {
+        async fn atualizar_palavra_reports_not_connected() {
             let state = AppState::new();
-            assert!(matches!(atualizar_nota_da_palavra_inner(&state, Uuid::now_v7(), None).await, Err(Error::Config(_))));
+            assert!(matches!(atualizar_palavra_inner(&state, Uuid::now_v7(), None, &[], &[]).await, Err(Error::Config(_))));
+        }
+
+        #[tokio::test]
+        async fn definir_marcacao_da_palavra_reports_not_connected() {
+            let state = AppState::new();
+            assert!(matches!(definir_marcacao_da_palavra_inner(&state, Uuid::now_v7(), false).await, Err(Error::Config(_))));
         }
 
         #[tokio::test]
@@ -173,18 +220,32 @@ mod tests {
             biblioteca.import(&media_dir, &origem.to_string_lossy()).await.unwrap().livro.id
         }
 
-        /// Fiação de ponta a ponta pela camada de comando: coletar, listar por
-        /// livro, listar geral com filtro, atualizar nota, remover.
+        /// Fiação de ponta a ponta pela camada de comando: coletar (com
+        /// sinônimos e antônimos), listar por livro, listar geral com filtro,
+        /// atualizar a palavra, desligar a marcação, remover.
         #[tokio::test]
         async fn the_whole_command_layer_wiring_round_trips_through_a_collected_word() {
             let (state, data_dir) = estado_com_banco("fiacao-completa").await;
             let livro_id = livro_de_teste(&state, &data_dir, "Livro.pdf").await;
 
-            let coletada =
-                coletar_palavra_inner(&state, livro_id, "mitocôndria", Some("a usina da célula"), None, Some("42"))
-                    .await
-                    .unwrap();
+            let sinonimos = lista(&[" organela ", "Organela"]);
+            let coletada = coletar_palavra_inner(
+                &state,
+                livro_id,
+                NovaPalavra {
+                    term: "mitocôndria",
+                    context_snippet: Some("a usina da célula"),
+                    synonyms: &sinonimos,
+                    locator: Some("42"),
+                    ..NovaPalavra::default()
+                },
+            )
+            .await
+            .unwrap();
             assert_eq!(coletada.term, "mitocôndria");
+            assert_eq!(coletada.synonyms, lista(&["organela"]));
+            assert!(coletada.antonyms.is_empty());
+            assert!(coletada.highlight_in_book, "palavra nova nasce marcada");
 
             let do_livro = listar_palavras_do_livro_inner(&state, livro_id).await.unwrap();
             assert_eq!(do_livro.len(), 1);
@@ -196,8 +257,23 @@ mod tests {
             let sem_resultado = listar_palavras_inner(&state, Some("inexistente")).await.unwrap();
             assert!(sem_resultado.is_empty());
 
-            let atualizada = atualizar_nota_da_palavra_inner(&state, coletada.id, Some("revisar depois")).await.unwrap();
+            let atualizada = atualizar_palavra_inner(
+                &state,
+                coletada.id,
+                Some("revisar depois"),
+                &lista(&["organela", "usina"]),
+                &lista(&["núcleo"]),
+            )
+            .await
+            .unwrap();
             assert_eq!(atualizada.note.as_deref(), Some("revisar depois"));
+            assert_eq!(atualizada.synonyms, lista(&["organela", "usina"]));
+            assert_eq!(atualizada.antonyms, lista(&["núcleo"]));
+
+            let desligada = definir_marcacao_da_palavra_inner(&state, coletada.id, false).await.unwrap();
+            assert!(!desligada.highlight_in_book);
+            let do_livro = listar_palavras_do_livro_inner(&state, livro_id).await.unwrap();
+            assert!(!do_livro[0].highlight_in_book, "a marcação desligada precisa voltar na listagem");
 
             remover_palavra_inner(&state, coletada.id).await.unwrap();
             let apos_remover = listar_palavras_do_livro_inner(&state, livro_id).await.unwrap();
@@ -211,7 +287,7 @@ mod tests {
             let (state, data_dir) = estado_com_banco("termo-vazio").await;
             let livro_id = livro_de_teste(&state, &data_dir, "Livro.pdf").await;
 
-            let result = coletar_palavra_inner(&state, livro_id, "   ", None, None, None).await;
+            let result = coletar_palavra_inner(&state, livro_id, so_termo("   ")).await;
             assert!(matches!(result, Err(Error::Invalid(_))), "esperava Error::Invalid, obtido {result:?}");
 
             encerra(state, data_dir).await;
@@ -221,7 +297,7 @@ mod tests {
         async fn coletar_palavra_rejects_an_unknown_book() {
             let (state, data_dir) = estado_com_banco("livro-inexistente").await;
 
-            let result = coletar_palavra_inner(&state, Uuid::now_v7(), "termo", None, None, None).await;
+            let result = coletar_palavra_inner(&state, Uuid::now_v7(), so_termo("termo")).await;
             assert!(matches!(result, Err(Error::Database(_))), "esperava Error::Database (violação de FK), obtido {result:?}");
 
             encerra(state, data_dir).await;
@@ -235,8 +311,8 @@ mod tests {
             let (state, data_dir) = estado_com_banco("duplicado-caixa").await;
             let livro_id = livro_de_teste(&state, &data_dir, "Livro.pdf").await;
 
-            coletar_palavra_inner(&state, livro_id, "mitocôndria", None, None, None).await.unwrap();
-            let segunda = coletar_palavra_inner(&state, livro_id, "Mitocôndria", None, None, None).await;
+            coletar_palavra_inner(&state, livro_id, so_termo("mitocôndria")).await.unwrap();
+            let segunda = coletar_palavra_inner(&state, livro_id, so_termo("Mitocôndria")).await;
 
             assert!(matches!(segunda, Err(Error::Database(_))), "esperava Error::Database (gatilho de duplicata), obtido {segunda:?}");
 
@@ -244,10 +320,33 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn atualizar_nota_da_palavra_reports_not_found_for_an_unknown_id() {
+        async fn atualizar_palavra_reports_not_found_for_an_unknown_id() {
             let (state, data_dir) = estado_com_banco("atualizar-inexistente").await;
 
-            let result = atualizar_nota_da_palavra_inner(&state, Uuid::now_v7(), Some("nota")).await;
+            let result = atualizar_palavra_inner(&state, Uuid::now_v7(), Some("nota"), &[], &[]).await;
+            assert!(matches!(result, Err(Error::NotFound(_))));
+
+            encerra(state, data_dir).await;
+        }
+
+        #[tokio::test]
+        async fn atualizar_palavra_rejects_an_oversized_list() {
+            let (state, data_dir) = estado_com_banco("atualizar-teto").await;
+            let livro_id = livro_de_teste(&state, &data_dir, "Livro.pdf").await;
+            let coletada = coletar_palavra_inner(&state, livro_id, so_termo("voraz")).await.unwrap();
+
+            let demais: Vec<String> = (0..=50).map(|n| format!("item{n}")).collect();
+            let result = atualizar_palavra_inner(&state, coletada.id, None, &[], &demais).await;
+            assert!(matches!(result, Err(Error::Invalid(_))), "esperava Error::Invalid, obtido {result:?}");
+
+            encerra(state, data_dir).await;
+        }
+
+        #[tokio::test]
+        async fn definir_marcacao_da_palavra_reports_not_found_for_an_unknown_id() {
+            let (state, data_dir) = estado_com_banco("marcacao-inexistente").await;
+
+            let result = definir_marcacao_da_palavra_inner(&state, Uuid::now_v7(), true).await;
             assert!(matches!(result, Err(Error::NotFound(_))));
 
             encerra(state, data_dir).await;

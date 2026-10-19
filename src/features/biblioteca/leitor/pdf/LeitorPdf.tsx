@@ -15,6 +15,7 @@ import {
 // de qualquer jeito. `rtk proxy npx vite build` precisa confirmar que este
 // asset aparece no bundle — é o achado mais importante desta peça se faltar.
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import { aplicarMarcacao, limparMarcacao } from "../marcacao-de-vocabulario";
 import type { NavegacaoDoLeitor, PropsDoLeitorDeFormato } from "../tipos";
 import "./text-layer.css";
 
@@ -64,6 +65,7 @@ export function LeitorPdf({
   onVirarPagina,
   onSelecaoDeTexto,
   onErro,
+  termosMarcados,
 }: PropsDoLeitorDeFormato) {
   const [documento, setDocumento] = useState<PDFDocumentProxy | null>(null);
   const [carregandoDocumento, setCarregandoDocumento] = useState(true);
@@ -88,6 +90,10 @@ export function LeitorPdf({
   onVirarPaginaRef.current = onVirarPagina;
   const onSelecaoDeTextoRef = useRef(onSelecaoDeTexto);
   onSelecaoDeTextoRef.current = onSelecaoDeTexto;
+  // Mesma razão: o render da página não deve se repetir porque o marcador de
+  // uma palavra mudou — só a marcação muda (efeito próprio, mais abaixo).
+  const termosMarcadosRef = useRef(termosMarcados);
+  termosMarcadosRef.current = termosMarcados;
 
   const permiteSelecao = hasTextLayer !== false;
 
@@ -181,6 +187,10 @@ export function LeitorPdf({
           const textContent = await pagina.getTextContent();
           if (cancelado) return;
           await new TextLayer({ textContentSource: textContent, container: containerTexto, viewport }).render();
+          if (cancelado) return;
+          // Os spans da página nova acabaram de nascer; os `Range`s da página
+          // anterior apontavam para spans que o `replaceChildren` já tirou.
+          aplicarMarcacao(containerTexto, termosMarcadosRef.current);
         }
       }
 
@@ -201,6 +211,19 @@ export function LeitorPdf({
       renderTaskRef.current?.cancel();
     };
   }, [documento, paginaAtual, zoom, permiteSelecao]);
+
+  // Marcador ligado/desligado ou palavra colhida: remarca a página que já
+  // está na tela. Se a camada de texto ainda está sendo desenhada, o render
+  // acima marca de novo ao terminar, com a lista do ref — nenhuma corrida perde.
+  useEffect(() => {
+    const containerTexto = textLayerRef.current;
+    if (containerTexto) aplicarMarcacao(containerTexto, termosMarcados);
+  }, [termosMarcados]);
+
+  // O registro de destaques do PDF é o da janela do app, não de um iframe
+  // descartável como no EPUB: sem isto, a marcação seguraria os spans da
+  // última página depois de fechar o livro.
+  useEffect(() => () => limparMarcacao(document), []);
 
   // A seleção de texto do usuário vira candidata a destaque — só quando cai
   // dentro da camada de texto DESTA página (um clique/arrasto em qualquer

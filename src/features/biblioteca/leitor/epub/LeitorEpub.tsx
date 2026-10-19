@@ -1,5 +1,6 @@
 import Epub, { type Book, type Contents, type Location as EpubLocation, type NavItem, type Rendition } from "epubjs";
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { aplicarMarcacao } from "../marcacao-de-vocabulario";
 import type { NavegacaoDoLeitor, PropsDoLeitorDeFormato } from "../tipos";
 
 const ZOOM_MIN = 70;
@@ -22,6 +23,28 @@ const MENSAGEM_DE_FALHA_AO_ABRIR =
 // geração mais rápida, que é o que importa: o livro já está de fato aberto
 // e navegável muito antes disso terminar (ver comentário em `iniciar`).
 const CARACTERES_POR_LOCAL = 1000;
+
+/**
+ * Os documentos que estão desenhados agora. O `.d.ts` do epub.js declara
+ * `getContents(): Contents`, mas `lib/rendition.js` devolve
+ * `this.manager.getContents()`, que é uma LISTA (`lib/managers/default/index.js`,
+ * um `Contents` por view montada) — conferido no `node_modules` instalado.
+ * O tipo alargado aceita as duas formas sem cast.
+ */
+function conteudosDesenhados(rendition: Rendition): Contents[] {
+  const retorno: Contents | Contents[] = rendition.getContents();
+  return Array.isArray(retorno) ? retorno : [retorno];
+}
+
+/**
+ * `document.body` pode ser `null` pela especificação, embora o lib.dom o
+ * declare `HTMLElement`: um XHTML de EPUB sem `<body>` não pode derrubar o
+ * hook de conteúdo do epub.js — uma exceção ali rejeita o `display()` da seção.
+ */
+function marcarConteudo(contents: Contents, termos: readonly string[]): void {
+  const corpo: HTMLElement | null = contents.document.body;
+  if (corpo) aplicarMarcacao(corpo, termos);
+}
 
 /** Um item do sumário e seus filhos, recursivo — a forma de `NavItem.subitems`. */
 function ListaDoSumario({ itens, aoClicarItem }: { itens: NavItem[]; aoClicarItem: (href: string) => void }) {
@@ -115,6 +138,7 @@ export function LeitorEpub({
   onVirarPagina,
   onSelecaoDeTexto,
   onErro,
+  termosMarcados,
 }: PropsDoLeitorDeFormato) {
   const [carregando, setCarregando] = useState(true);
   const [sumario, setSumario] = useState<NavItem[]>([]);
@@ -140,6 +164,11 @@ export function LeitorEpub({
   onSelecaoDeTextoRef.current = onSelecaoDeTexto;
   const locatorInicialRef = useRef(locatorInicial);
   locatorInicialRef.current = locatorInicial;
+  // Lido pelo `hooks.content`, que é registrado UMA vez por livro: cada seção
+  // nova que o epub.js desenha precisa nascer com a lista de agora, não com a
+  // de quando o livro abriu.
+  const termosMarcadosRef = useRef(termosMarcados);
+  termosMarcadosRef.current = termosMarcados;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -223,6 +252,9 @@ export function LeitorEpub({
           }
         }
         contents.document.addEventListener("selectionchange", aoMudarSelecao);
+        // Seção nova = documento novo, com registro de destaques próprio (o
+        // `window` do iframe): o que foi marcado na seção anterior não vem junto.
+        marcarConteudo(contents, termosMarcadosRef.current);
       });
 
       // O epub.js só emite "selected" quando a seleção já não está vazia
@@ -286,6 +318,15 @@ export function LeitorEpub({
   useEffect(() => {
     renditionRef.current?.themes.fontSize(`${zoomPercent}%`);
   }, [zoomPercent]);
+
+  // Marcador ligado/desligado ou palavra colhida: remarca o que já está na
+  // tela, sem esperar a próxima seção. Antes da rendition existir não há o que
+  // remarcar — a primeira seção já nasce marcada pelo `hooks.content`.
+  useEffect(() => {
+    const rendition = renditionRef.current;
+    if (!rendition) return;
+    for (const contents of conteudosDesenhados(rendition)) marcarConteudo(contents, termosMarcados);
+  }, [termosMarcados]);
 
   useImperativeHandle(
     ref,
